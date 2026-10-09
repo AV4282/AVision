@@ -1,0 +1,12 @@
+# Versions tested together on Python 3.13. The extra index gives the small CPU-only PyTorch build.
+--extra-index-url https://download.pytorch.org/whl/cpu
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+pillow==12.3.0
+requests==2.34.2
+transformers==5.19.0
+torch==2.14.1
+torchvision==0.29.1
+timm==1.0.30
+opencv-python-headless==4.14.0.94

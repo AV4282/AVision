@@ -2,27 +2,30 @@
 
 One endpoint. Send an image, get back the same image with faces and license plates blurred, plus the text found in it.
 
+Faces and plates are found on the server itself. Only the already blurred image goes to Google Gemini, which reads the text.
+
 ## Run it
 
 ```
 pip install -r requirements.txt
-cp .env.example .env        # then fill in your keys
-uvicorn app:app --host 0.0.0.0 --port 8000 --env-file .env
+cp .env.example .env        # then paste in your Gemini key
+uvicorn photo-cleanse:app --host 0.0.0.0 --port 8000 --env-file .env
 ```
 
 Open http://localhost:8000/docs to upload a test image in the browser.
-Tested on Python 3.13. Needs about 2 GB of RAM (it used about 900 MB in testing).
+Tested on Python 3.13. Give it about 2 GB of RAM. The first start downloads two detection models (about 320 MB).
 
 ## Settings (.env)
 
 | Setting | What it does | If blank |
 |---|---|---|
-| FACE_ENDPOINT, FACE_KEY | Azure Face resource for face detection | Uses a weaker local detector |
-| AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_DEPLOYMENT | Vision model deployment for image to text | Blurs only, text comes back null |
+| GEMINI_API_KEY | Key from Google AI Studio, used for image to text | Blurs only, text comes back null |
+| GEMINI_MODEL | Which Gemini model reads the text | gemini-3.8-flash |
 | ALLOWED_ORIGINS | Your site's address | Any site can call it |
+| FACE_THRESHOLD | Face detector confidence, default 0.4 | Lower it if faces get missed |
 | PLATE_THRESHOLD | Plate detector confidence, default 0.5 | Lower it if plates get missed |
 
-Plate detection runs inside the app and needs no Azure resource.
+Never commit `.env`. It is already listed in `.gitignore`.
 
 ## Call it from your site
 
@@ -47,19 +50,28 @@ async function processImage(file) {
 
 Response fields: `image_base64`, `mime`, `faces_blurred`, `plates_blurred`, `text`, `description`.
 If detection fails, the API returns an error and never the unblurred image.
+If only the Gemini step fails, you still get the blurred image, with `text_error` explaining why.
 
-## Put it online (Azure Container Apps)
+## How well it blurs
 
-These commands were not run during testing, so check the flags against `az containerapp up --help`.
+Checked against 40 random photos from the WIDER FACE benchmark (606 labelled faces):
+
+| Face width in the photo | Blurred |
+|---|---|
+| 50 px and up | 66 of 66 |
+| 20 to 50 px | 191 of 197 |
+| under 20 px | 202 of 343 |
+
+Very small background faces are the weak spot. It sometimes blurs things that are not faces or plates.
+
+## Put it online (Google Cloud Run)
+
+This command was not run during testing, so check the flags against `gcloud run deploy --help`.
 
 ```
-az containerapp up --name image-privacy-api --resource-group YOUR_RG --location eastus \
-  --source . --ingress external --target-port 8000 \
-  --env-vars FACE_ENDPOINT=... FACE_KEY=... AZURE_OPENAI_ENDPOINT=... \
-             AZURE_OPENAI_KEY=... AZURE_OPENAI_DEPLOYMENT=... ALLOWED_ORIGINS=https://yoursite.com
-
-az containerapp update --name image-privacy-api --resource-group YOUR_RG \
-  --cpu 1 --memory 2Gi --min-replicas 1
+gcloud run deploy photo-cleanse --source . --region us-east1 --allow-unauthenticated \
+  --memory 2Gi --cpu 1 --min-instances 1 \
+  --set-env-vars GEMINI_API_KEY=...,ALLOWED_ORIGINS=https://yoursite.com
 ```
 
-The second command matters: the default size (1 GB) is too small for the plate model.
+The Dockerfile works on any host that runs containers.

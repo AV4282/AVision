@@ -1,0 +1,11 @@
+# Secrets: never commit your API keys
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Downloaded model cache
+.hf/

@@ -5,7 +5,10 @@ POST /process   multipart form field "file" (jpg/png/webp)
 Returns JSON:   image_base64 (blurred JPEG), faces_blurred, plates_blurred,
                 text (visible text), description (one-line summary)
 
-Run locally:    uvicorn app:app --host 0.0.0.0 --port 8000
+Faces and plates are detected on this server. Only the already blurred image
+is sent to Gemini for the text step.
+
+Run locally:    uvicorn photo-cleanse:app --host 0.0.0.0 --port 8000 --env-file .env
 """
 
 import base64
@@ -21,20 +24,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageFilter, ImageOps
 
 # ---------- config (set these as environment variables) ----------
-FACE_ENDPOINT = os.getenv("FACE_ENDPOINT", "").rstrip("/")   # https://<name>.cognitiveservices.azure.com
-FACE_KEY = os.getenv("FACE_KEY", "")
-AOAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")       # https://<name>.openai.azure.com
-AOAI_KEY = os.getenv("AZURE_OPENAI_KEY", "")
-AOAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")   # your vision model deployment name
-AOAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")                 # from Google AI Studio
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
+FACE_MODEL_REPO = os.getenv("FACE_MODEL_REPO", "opencv/face_detection_yunet")
+FACE_MODEL_FILE = os.getenv("FACE_MODEL_FILE", "face_detection_yunet_2023mar.onnx")
+FACE_THRESHOLD = float(os.getenv("FACE_THRESHOLD", "0.4"))    # lower = catches more faces, blurs more
 PLATE_MODEL = os.getenv("PLATE_MODEL", "nickmuchi/detr-resnet50-finetuned-license-plate-detection")
 PLATE_THRESHOLD = float(os.getenv("PLATE_THRESHOLD", "0.5"))
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")]
 MAX_UPLOAD_MB = 15
 
+# The face model only finds faces between roughly 10 and 300 pixels wide, so each
+# image is scanned at several sizes: enlarged to catch small background faces,
+# and shrunk to catch close-ups.
+FACE_SCALES = (2560, 960, 480, 240)
+FACE_MAX_UPSCALE = float(os.getenv("FACE_MAX_UPSCALE", "2.0"))
+FACE_LARGE_PX = 64            # faces at least this wide (in the original image) need the higher score
+FACE_LARGE_THRESHOLD = float(os.getenv("FACE_LARGE_THRESHOLD", "0.6"))
+
+
 @asynccontextmanager
 async def lifespan(_app):
-    plate_detector()  # load the plate model at startup so the first request is not slow
+    # Load both models at startup so the first request is not slow.
+    face_model_path()
+    plate_detector()
     yield
 
 
@@ -59,55 +73,59 @@ def to_jpeg_bytes(img, max_side=None, quality=90):
     return buf.getvalue(), scale
 
 
-# ---------- face detection ----------
+def _iou(a, b):
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    inter = w * h
+    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+
+
+# ---------- face detection (local, YuNet) ----------
+@lru_cache(maxsize=1)
+def face_model_path():
+    from huggingface_hub import hf_hub_download  # installed with transformers
+
+    return hf_hub_download(FACE_MODEL_REPO, FACE_MODEL_FILE)
+
+
 def detect_faces(img):
     """Returns a list of (left, top, right, bottom) boxes."""
-    if FACE_ENDPOINT and FACE_KEY:
-        return _detect_faces_azure(img)
-    return _detect_faces_opencv(img)  # local fallback when Azure Face is not configured
-
-
-def _detect_faces_azure(img):
-    # Face API caps uploads at 6 MB, so send a downscaled copy and scale boxes back up.
-    data, scale = to_jpeg_bytes(img, max_side=1920)
-    resp = requests.post(
-        f"{FACE_ENDPOINT}/face/v1.0/detect",
-        params={
-            "detectionModel": "detection_03",
-            "returnFaceId": "false",        # rectangles only, no Limited Access needed
-            "returnFaceLandmarks": "false",
-        },
-        headers={
-            "Ocp-Apim-Subscription-Key": FACE_KEY,
-            "Content-Type": "application/octet-stream",
-        },
-        data=data,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    boxes = []
-    for face in resp.json():
-        r = face["faceRectangle"]
-        boxes.append((
-            r["left"] / scale,
-            r["top"] / scale,
-            (r["left"] + r["width"]) / scale,
-            (r["top"] + r["height"]) / scale,
-        ))
-    return boxes
-
-
-def _detect_faces_opencv(img):
     import cv2
     import numpy as np
 
-    gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    found = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-    return [(x, y, x + w, y + h) for (x, y, w, h) in found]
+    model = face_model_path()
+    scored, seen = [], set()
+    for max_side in FACE_SCALES:
+        scale = min(FACE_MAX_UPSCALE, max_side / max(img.size))
+        size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+        if size in seen:
+            continue  # small images collapse to the same size at several scales
+        seen.add(size)
+        small = img if size == img.size else img.resize(size)
+        bgr = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2BGR)
+        detector = cv2.FaceDetectorYN.create(model, "", size, FACE_THRESHOLD, 0.3, 5000)
+        _, faces = detector.detect(bgr)
+        if faces is None:
+            continue
+        for row in faces:
+            x, y, w, h = (float(v) / scale for v in row[:4])
+            scored.append((float(row[-1]), (x, y, x + w, y + h)))
+
+    # The same face is usually found at more than one scale; keep the best box for each.
+    # Small faces are allowed a low score. Bigger ones must score well in at least one
+    # pass, which removes large false boxes on things that are not faces.
+    boxes = []
+    for score, box in sorted(scored, reverse=True):
+        if box[2] - box[0] >= FACE_LARGE_PX and score < FACE_LARGE_THRESHOLD:
+            continue
+        if all(_iou(box, kept) < 0.4 for kept in boxes):
+            boxes.append(box)
+    return boxes
 
 
-# ---------- license plate detection ----------
+# ---------- license plate detection (local) ----------
 @lru_cache(maxsize=1)
 def plate_detector():
     from transformers import pipeline  # heavy import, loaded once
@@ -145,37 +163,46 @@ def blur_regions(img, boxes, pad=0.15):
     return out
 
 
-# ---------- image to text ----------
-def extract_text(img):
-    """Runs on the already blurred image, so plate numbers and faces never reach the model."""
-    if not (AOAI_ENDPOINT and AOAI_KEY and AOAI_DEPLOYMENT):
-        return {"text": None, "description": None}
-    from openai import AzureOpenAI
+# ---------- image to text (Gemini) ----------
+TEXT_PROMPT = (
+    "You convert images to text. Reply with a JSON object with two keys: "
+    '"text" (every piece of visible text, transcribed exactly, lines separated '
+    'by newlines, empty string if none) and "description" (one plain sentence '
+    "describing the image). Ignore blurred areas."
+)
 
-    client = AzureOpenAI(azure_endpoint=AOAI_ENDPOINT, api_key=AOAI_KEY, api_version=AOAI_API_VERSION)
+
+def extract_text(img):
+    """Runs on the already blurred image, so plate numbers and faces never reach Gemini."""
+    if not GEMINI_KEY:
+        return {"text": None, "description": None}
     data, _ = to_jpeg_bytes(img, max_side=2048)
-    url = "data:image/jpeg;base64," + base64.b64encode(data).decode()
-    resp = client.chat.completions.create(
-        model=AOAI_DEPLOYMENT,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You convert images to text. Reply with a JSON object with two keys: "
-                    '"text" (every piece of visible text, transcribed exactly, lines separated '
-                    'by newlines, empty string if none) and "description" (one plain sentence '
-                    "describing the image). Ignore blurred areas."
-                ),
-            },
-            {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]},
-        ],
+    resp = requests.post(
+        f"{GEMINI_BASE_URL}/v1beta/models/{GEMINI_MODEL}:generateContent",
+        headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
+        json={
+            "system_instruction": {"parts": [{"text": TEXT_PROMPT}]},
+            "contents": [{
+                "parts": [{"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(data).decode()}}]
+            }],
+            "generationConfig": {"response_mime_type": "application/json"},
+        },
+        timeout=60,
     )
-    content = resp.choices[0].message.content or ""
+    if not resp.ok:
+        raise RuntimeError(f"Gemini returned {resp.status_code}: {resp.text[:300]}")
+    body = resp.json()
+    candidates = body.get("candidates") or []
+    if not candidates:
+        raise RuntimeError(f"Gemini returned no answer: {body.get('promptFeedback')}")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    content = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+    if not content:
+        raise RuntimeError(f"Gemini returned no text (finish reason: {candidates[0].get('finishReason')})")
     try:
         parsed = json.loads(content)
         return {"text": parsed.get("text", ""), "description": parsed.get("description", "")}
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, AttributeError):
         return {"text": content, "description": None}
 
 
@@ -184,8 +211,10 @@ def extract_text(img):
 def health():
     return {
         "ok": True,
-        "face_detector": "azure" if (FACE_ENDPOINT and FACE_KEY) else "opencv-fallback",
-        "text_extraction": bool(AOAI_ENDPOINT and AOAI_KEY and AOAI_DEPLOYMENT),
+        "face_detector": "local",
+        "plate_detector": "local",
+        "text_extraction": bool(GEMINI_KEY),
+        "text_model": GEMINI_MODEL if GEMINI_KEY else None,
     }
 
 
@@ -206,7 +235,9 @@ def process(file: UploadFile = File(...)):
     except Exception as exc:
         raise HTTPException(502, f"Detection failed: {exc}")
 
-    blurred = blur_regions(img, faces + plates)
+    # Face boxes are tight (brow to chin), so pad them more than plates.
+    blurred = blur_regions(img, faces, pad=0.3)
+    blurred = blur_regions(blurred, plates, pad=0.15)
 
     try:
         extracted = extract_text(blurred)
