@@ -2691,3 +2691,19 @@ input:focus-visible {
     align-items: stretch;
   }
 }
+
+/* Signed in with Auth0, but the ticket API couldn't confirm it */
+.account-notice {
+  margin: 8px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.account-notice .text-button {
+  padding: 0;
+  font-size: 12px;
+}

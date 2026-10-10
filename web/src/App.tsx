@@ -966,8 +966,14 @@ function ProfileView({
   onWelcome: () => void
   onOpen: (id: string) => void
 }) {
-  const { account, signOut } = useAccount()
+  const { account, member, memberError, signIn, signOut } = useAccount()
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
+  const joined = member
+    ? new Date(member.joinedAt).toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      })
+    : null
   // Placeholder: the name is real, but the tickets, votes and counts below are
   // samples until the ticket API knows which account made them.
   const myTickets = tickets.slice(0, 3)
@@ -984,13 +990,25 @@ function ProfileView({
             <h2>{account?.name ?? "Guest"}</h2>
             <span className="member-badge">
               <ShieldCheck size={14} />{" "}
-              {account ? "Community member" : "Not signed in"}
+              {!account
+                ? "Not signed in"
+                : member?.role === "facilities_staff"
+                  ? "Facilities staff"
+                  : "Community member"}
             </span>
           </div>
           <p>
             <MapPin size={15} /> Downtown Atlanta
-            <span>Joined October 2026</span>
+            {joined && <span>Joined {joined}</span>}
           </p>
+          {account && memberError && (
+            <p className="account-notice" role="alert">
+              {memberError}{" "}
+              <button className="text-button" onClick={signIn}>
+                Sign in again
+              </button>
+            </p>
+          )}
         </div>
         <button className="edit-profile-button">Edit profile</button>
       </div>

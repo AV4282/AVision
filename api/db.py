@@ -44,6 +44,25 @@ def ping():
         return conn.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
 
 
+def upsert_user(auth0_sub, display_name=None, avatar_url=None):
+    """Find or create the user for a verified Auth0 ID, and record this sign-in.
+
+    The first sign-in creates the row; every later one returns the same id.
+    A missing name or picture keeps the stored one rather than erasing it.
+    """
+    with pool.connection() as conn:
+        return conn.execute(
+            """INSERT INTO users (auth0_sub, display_name, avatar_url)
+               VALUES (%(sub)s, %(name)s, %(avatar)s)
+               ON CONFLICT (auth0_sub) DO UPDATE
+                   SET last_login_at = now(),
+                       display_name  = coalesce(EXCLUDED.display_name, users.display_name),
+                       avatar_url    = coalesce(EXCLUDED.avatar_url, users.avatar_url)
+               RETURNING id, display_name, avatar_url, role, created_at""",
+            {"sub": auth0_sub, "name": display_name, "avatar": avatar_url},
+        ).fetchone()
+
+
 def create_guest():
     """Make a user row for someone who hasn't signed in. Replaced by the Auth0 upsert later."""
     with pool.connection() as conn:

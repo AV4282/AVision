@@ -255,6 +255,57 @@ export async function createTicket(ticket: NewTicket): Promise<Ticket> {
   return toTicket(await request<ApiTicket>("POST", "/tickets", { body }))
 }
 
+// ---------- signed-in account ----------
+
+/** The AVision user behind a signed-in Auth0 account. */
+export type Member = {
+  id: string // AVision user ID (not the Auth0 ID)
+  displayName: string | null
+  avatarUrl: string | null
+  role: "user" | "facilities_staff"
+  joinedAt: string // ISO timestamp
+}
+
+/**
+ * Tells the API someone signed in, proving who with their Auth0 access token.
+ * The API creates their user the first time and returns the same one after.
+ */
+export async function recordSignIn(
+  accessToken: string,
+  profile: { displayName?: string; avatarUrl?: string },
+): Promise<Member> {
+  const res = await fetch(API_URL + "/me", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      display_name: profile.displayName || null,
+      // The API only stores https picture links; anything else is left out.
+      avatar_url: profile.avatarUrl?.startsWith("https://") ? profile.avatarUrl : null,
+    }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new ApiError(res.status, errorMessage(data?.detail) || `Sign-in failed (${res.status})`)
+  }
+  const me = (await res.json()) as {
+    id: string
+    display_name: string | null
+    avatar_url: string | null
+    role: Member["role"]
+    created_at: string
+  }
+  return {
+    id: me.id,
+    displayName: me.display_name,
+    avatarUrl: me.avatar_url,
+    role: me.role,
+    joinedAt: me.created_at,
+  }
+}
+
 // ---------- photos ----------
 // A ticket stores a link to its photo (photo_url). uploadPhoto() sends the picture
 // to the API, which keeps the file, and returns the link to put on the ticket.

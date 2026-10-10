@@ -10,3 +10,8 @@
 
 export const AUTH0_DOMAIN = "dev-6hygidjjfzbshz7n.us.auth0.com"
 export const AUTH0_CLIENT_ID = "9QIZKKwPizY2dQT1jgGJ5vYDnKndEYnm"
+
+// The ticket API's identifier, from Auth0 > Applications > APIs. Sign-in asks for
+// an access token for this API, which the ticket API checks (api/auth.py).
+// Also a public value. Override with VITE_AUTH0_AUDIENCE in web/.env.local.
+export const AUTH0_AUDIENCE = "https://api.avision"
