@@ -1,7 +1,14 @@
 import type { FeatureCollection, MultiPolygon, Point, Polygon } from 'geojson'
 
 export type MapCoordinates = { latitude: number; longitude: number }
-export type AvisionMapMarker = MapCoordinates & { id: string; label: string }
+export type AvisionMapOwner = 'gsu' | 'city' | 'marta' | 'gdot' | 'unknown'
+export type AvisionMapStatus = 'open' | 'likely_fixed' | 'fixed' | 'merged'
+export type AvisionMapMarker = MapCoordinates & {
+  id: string
+  label: string
+  owner?: AvisionMapOwner
+  status?: AvisionMapStatus
+}
 export type AvisionMapProps = {
   height?: number | string
   dataUrl?: string

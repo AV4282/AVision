@@ -1,4 +1,24 @@
 import type { Feature, MultiPolygon, Polygon, Position } from "geojson";
+import type { AvisionMapOwner, AvisionMapStatus } from "./types";
+
+export const ISSUE_OWNERS: readonly {
+  id: AvisionMapOwner;
+  label: string;
+  color: string;
+}[] = [
+  { id: "gsu", label: "GSU Facilities", color: "#2463a6" },
+  { id: "city", label: "City of Atlanta", color: "#0b7162" },
+  { id: "marta", label: "MARTA", color: "#854ca3" },
+  { id: "gdot", label: "GDOT", color: "#995315" },
+  { id: "unknown", label: "Owner unknown", color: "#59616b" },
+];
+
+export const ISSUE_STATUS_LABELS: Record<AvisionMapStatus, string> = {
+  open: "Open",
+  likely_fixed: "Likely fixed",
+  fixed: "Fixed",
+  merged: "Merged",
+};
 
 export type MapBounds = [[number, number], [number, number]];
 export const ATLANTA_VIEW: MapBounds = [

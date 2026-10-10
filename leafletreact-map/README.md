@@ -69,7 +69,20 @@ Hidden `data-avision-placeholder` labels give each control and location a named 
 
 Pass a `markers` array with `{ id, label, latitude, longitude }` for each marker. Map our API fields to that format in the parent screen.
 
+Markers can also include optional `owner` and `status` fields:
+
+```tsx
+{ id: 'ticket-1', label: 'Blocked curb ramp', latitude: 33.7537, longitude: -84.3859,
+  owner: 'gsu', status: 'open' }
+```
+
+Owner values are `gsu`, `city`, `marta`, `gdot`, or `unknown`. The parent screen maps backend ownership to these values; the map does not determine responsibility. Missing or unrecognized owners use neutral gray. A compact owner legend appears when valid issue markers are supplied. Station markers keep their existing appearance.
+
+Status values are `open`, `likely_fixed`, `fixed`, or `merged`. Supplied status appears in the tooltip and marker's accessible name. Only `fixed` markers fade and show a check mark; the map does not calculate or change ticket status. Existing markers without these optional fields still work.
+
 `onMarkerSelect` returns the clicked marker. `onMapClick` returns `{ latitude, longitude }` without saving or checking eligibility. Both are optional, so the map works on its own for now.
+
+Issue markers also activate with Enter or Space when focused using the keyboard.
 
 ## Checks
 
