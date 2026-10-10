@@ -1,0 +1,7 @@
+{
+  "retrievedDate": "2026-10-09",
+  "source": "https://gis.atlantaga.gov/dpcd/rest/services/OpenDataService1/MapServer",
+  "layers": { "neighborhoods": 3, "stations": 28 },
+  "features": { "neighborhoods": 248, "stations": 38 },
+  "note": "Retrieval date does not mean every feature was updated that day. Displayed stations are the five configured corridor stations."
+}
