@@ -1,0 +1,26 @@
+# Web server settings for the live site. deploy.sh copies this file to
+# /etc/caddy/Caddyfile on the server. Caddy gets and renews the HTTPS
+# certificate on its own.
+
+atlantamamdani.photo {
+	encode zstd gzip
+
+	# Ticket API (api/ folder, uvicorn on port 8000).
+	# /api/tickets on the site becomes /tickets on the API, same as in dev.
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# The web app: the built files in web/dist.
+	handle {
+		root * /opt/avision/web/dist
+
+		# Built files have a fingerprint in their name, so browsers can keep them.
+		@fingerprinted path /assets/*
+		header @fingerprinted Cache-Control "public, max-age=31536000, immutable"
+
+		# Any other address shows the app, which is a single page.
+		try_files {path} /index.html
+		file_server
+	}
+}

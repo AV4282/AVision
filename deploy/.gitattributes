@@ -1,0 +1,3 @@
+# These files run on a Linux server, which needs Unix line endings even when
+# they are edited on Windows.
+* text eol=lf

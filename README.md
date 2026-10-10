@@ -19,11 +19,13 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 | Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live, with demo data |
 | Photo privacy service (blurs faces and plates) | ✅ Works on its own; not yet connected to the app |
 | Map | 🟡 Placeholder artwork; pins are placed by ticket ID, not real coordinates. A real Leaflet map is ready in `leafletreact-map/` |
-| Sign-in | 🟡 Each browser gets a guest ID instead. Auth0 sign-in works in `web-next/`, not yet in the main app |
+| Sign-in | 🟡 Google sign-in through Auth0 works: your name shows on the sidebar and profile, and signing in is optional. Tickets and votes are still saved under the browser's guest ID, not the account |
 | Profile page | 🟡 Placeholder content |
 | Photo upload, AI analysis, automatic routing, report drafting | ⏳ Planned (see below) |
 
-Also not wired up yet: the map's search box and Filters button, "View full ticket," and the Google button on the welcome screen (it just continues as a guest).
+Also not wired up yet: the map's search box and Filters button, and "View full ticket."
+
+**Live site:** https://atlantamamdani.photo. Once the first-time setup in [deploy/README.md](deploy/README.md) is done, it updates by itself after a push to `main`.
 
 ## What's in this repo
 
@@ -33,10 +35,11 @@ web/               Main web app (React, Vite, Tailwind)                    ← m
 photo-privacy/     Photo privacy API: blurs faces and plates, reads text
 leafletreact-map/  React Leaflet map component, ready to drop into web/
 web-next/          Earlier Next.js app with landing page, onboarding and Auth0 sign-in
+deploy/            What the live server runs, and how pushes to main update it
 docs/              Design doc and photo privacy API docs
 ```
 
-`web/` and `web-next/` are separate apps. `web/` is the one connected to the ticket API; `web-next/` is kept so its Auth0 sign-in and onboarding can be moved into `web/`.
+`web/` and `web-next/` are separate apps. `web/` is the one connected to the ticket API and the one that is live. Sign-in has been moved into it; `web-next/` is kept for its onboarding questions (student, school, MARTA), which have not been moved yet.
 
 ## Run it locally
 
@@ -78,6 +81,8 @@ npm run dev
 ```
 
 Open http://localhost:8443. Requests to `/api/...` are forwarded to the ticket API on port 8000, so start the API first. (`npm run dev` from the repo root does the same thing.)
+
+**Sign-in** uses the Auth0 Domain and Client ID in `web/src/auth0-config.ts`. Both are public values, so they are committed and there is nothing to set up per machine. In the Auth0 dashboard, the application must be a **Single Page Application**, with `http://localhost:8443` and `https://atlantamamdani.photo` in Allowed Callback URLs, Allowed Logout URLs and Allowed Web Origins.
 
 ### 3. Optional: photo privacy API
 
@@ -154,8 +159,8 @@ From the design doc. The map, the visible routing explanation and the generated 
 | Duplicate grouping | Should | New reports of the same issue within ~30 m join the existing ticket |
 | Hotspots layer | Should | "Reported 6 times in 3 weeks," from `hotspots_weekly` |
 | Read-aloud reports | Should | ElevenLabs reads findings aloud for low-vision users |
-| Sign-in + my reports | Should | Optional Auth0 Google sign-in (port from `web-next/`); anonymous reporting stays available |
-| Custom domain + hosting | Should | GoDaddy domain pointed at a Vultr deploy |
+| Sign-in + my reports | Should | Google sign-in is in. Still to do: link the account to its row in `users`, so tickets and votes follow the person; anonymous reporting stays available |
+| Custom domain + hosting | Should | atlantamamdani.photo (Porkbun) points at a Vultr server. Setup and auto-deploy are in [deploy/README.md](deploy/README.md) |
 | Facilities staff view | Stretch | GSU staff see GSU tickets as a work queue |
 | Voice input | Stretch | Describe the issue by speaking |
 | MARTA outage check | Stretch | Marks a station elevator report "already reported" if MARTA lists it |
@@ -171,7 +176,9 @@ From the design doc. The map, the visible routing explanation and the generated 
 | Database | Tiger Data (TimescaleDB on Tiger Cloud) |
 | Map | Leaflet + react-leaflet + OpenStreetMap tiles |
 | Photo privacy | Local face and plate detection + Pillow blurring; Gemini reads text |
-| Planned | Gemini (analysis and drafting), Microsoft Foundry (agent orchestration), ElevenLabs (voice), Auth0 (sign-in), Vultr + GoDaddy (hosting) |
+| Sign-in | Auth0 (`@auth0/auth0-react`), Google accounts |
+| Hosting | Vultr server with Caddy, domain from Porkbun, auto-deploy with GitHub Actions |
+| Planned | Gemini (analysis and drafting), Microsoft Foundry (agent orchestration), ElevenLabs (voice) |
 
 ## Notes for contributors
 

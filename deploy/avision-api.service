@@ -1,0 +1,26 @@
+# Keeps the ticket API (api/ folder) running on the server, and restarts it if
+# it crashes or the server reboots. deploy.sh copies this file to
+# /etc/systemd/system/ and restarts the service after every update.
+#
+# Logs:    journalctl -u avision-api -n 50
+# Status:  systemctl status avision-api
+
+[Unit]
+Description=AVision ticket API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# A separate user with no login and no rights beyond reading the code.
+User=avision
+Group=avision
+WorkingDirectory=/opt/avision/api
+# Only reachable from this server; Caddy forwards /api/* to it.
+ExecStart=/opt/avision/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

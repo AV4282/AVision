@@ -13,6 +13,7 @@ import {
   Layers3,
   List,
   LocateFixed,
+  LogIn,
   LogOut,
   Map,
   MapPin,
@@ -36,6 +37,7 @@ import {
   type Ticket,
   type VoteChoice,
 } from "./api"
+import { useAccount } from "./auth"
 import ReportForm from "./ReportForm"
 
 type View = "onboarding" | "map" | "issues" | "profile"
@@ -169,6 +171,7 @@ function StatusPill({ status }: { status: Status }) {
 }
 
 function Onboarding({ onContinue }: { onContinue: () => void }) {
+  const auth = useAccount()
   const [step, setStep] = useState(0)
 
   const panels = [
@@ -255,11 +258,25 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
               Sign in to post tickets, vote on reported issues, and track
               progress in your neighborhood.
             </p>
-            <button className="google-button" onClick={onContinue}>
+            <button
+              className="google-button"
+              onClick={auth.signIn}
+              disabled={!auth.configured || auth.signingIn}
+            >
               <span className="google-g">G</span>
-              Continue with Google
+              {auth.signingIn ? "Opening Google…" : "Continue with Google"}
               <ArrowRight size={17} />
             </button>
+            {auth.error && (
+              <p className="auth-message auth-error" role="alert">
+                {auth.error}
+              </p>
+            )}
+            {!auth.configured && (
+              <p className="auth-message">
+                Sign-in isn’t set up yet. You can continue without an account.
+              </p>
+            )}
             <p className="privacy-note">
               <ShieldCheck size={14} />
               Secure sign-in powered by Auth0. We never store your password.
@@ -301,6 +318,7 @@ function Sidebar({
   openCount: number
   onReport: () => void
 }) {
+  const { account } = useAccount()
   const navigate = (next: View) => {
     setView(next)
     onClose()
@@ -371,10 +389,10 @@ function Sidebar({
           </button>
         </nav>
         <div className="sidebar-user">
-          <div className="avatar">AJ</div>
+          <div className="avatar">{account?.initials ?? "G"}</div>
           <div>
-            <strong>Alex Johnson</strong>
-            <span>Community member</span>
+            <strong>{account?.name ?? "Guest"}</strong>
+            <span>{account ? "Community member" : "Not signed in"}</span>
           </div>
           <ChevronDown size={16} />
         </div>
@@ -394,6 +412,7 @@ function AppHeader({
   onMenu: () => void
   setView: (view: View) => void
 }) {
+  const { account } = useAccount()
   return (
     <header className="app-header">
       <div className="header-title">
@@ -410,8 +429,12 @@ function AppHeader({
           <Bell size={19} />
           <span className="notification-dot" />
         </button>
-        <button className="header-avatar" onClick={() => setView("profile")}>
-          AJ
+        <button
+          className="header-avatar"
+          onClick={() => setView("profile")}
+          aria-label="My profile"
+        >
+          {account?.initials ?? "G"}
         </button>
       </div>
     </header>
@@ -865,13 +888,16 @@ function IssuesView({
 
 function ProfileView({
   tickets,
-  onSignOut,
+  onWelcome,
 }: {
   tickets: Ticket[]
-  onSignOut: () => void
+  /** Guests have nothing to sign out of; this takes them back to the sign-in screen. */
+  onWelcome: () => void
 }) {
+  const { account, signOut } = useAccount()
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
-  // Placeholder until sign-in: the profile shows sample tickets, not the user's own.
+  // Placeholder: the name is real, but the tickets, votes and counts below are
+  // samples until the ticket API knows which account made them.
   const myTickets = tickets.slice(0, 3)
 
   return (
@@ -880,12 +906,13 @@ function ProfileView({
         <div className="cover-pattern" />
       </div>
       <div className="profile-summary">
-        <div className="large-avatar">AJ</div>
+        <div className="large-avatar">{account?.initials ?? "G"}</div>
         <div className="profile-identity">
           <div>
-            <h2>Alex Johnson</h2>
+            <h2>{account?.name ?? "Guest"}</h2>
             <span className="member-badge">
-              <ShieldCheck size={14} /> Community member
+              <ShieldCheck size={14} />{" "}
+              {account ? "Community member" : "Not signed in"}
             </span>
           </div>
           <p>
@@ -991,9 +1018,15 @@ function ProfileView({
               <ShieldCheck size={17} /> Privacy & security{" "}
               <ArrowRight size={16} />
             </button>
-            <button className="sign-out" onClick={onSignOut}>
-              <LogOut size={17} /> Sign out
-            </button>
+            {account ? (
+              <button className="sign-out" onClick={signOut}>
+                <LogOut size={17} /> Sign out
+              </button>
+            ) : (
+              <button className="sign-in" onClick={onWelcome}>
+                <LogIn size={17} /> Sign in
+              </button>
+            )}
           </div>
         </aside>
       </div>
@@ -1045,6 +1078,7 @@ function MobileNav({
 }
 
 export default function App() {
+  const auth = useAccount()
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
@@ -1053,21 +1087,34 @@ export default function App() {
   const openReport = useCallback(() => setReportOpen(true), [])
   const closeReport = useCallback(() => setReportOpen(false), [])
 
-  if (view === "onboarding") {
+  // Wait until we know whether this browser is signed in, so a returning
+  // person never sees the welcome screen flash by.
+  if (!auth.ready) {
+    return (
+      <main className="auth-loading" role="status" aria-label="Loading AVision">
+        <Brand />
+      </main>
+    )
+  }
+
+  // The welcome screen is for people who haven't chosen yet. Anyone signed in
+  // goes straight to the map.
+  if (view === "onboarding" && !auth.account) {
     return <Onboarding onContinue={() => setView("map")} />
   }
+  const page = view === "onboarding" ? "map" : view
 
   const titles = {
     map: ["Issue map", "Explore reported barriers around Atlanta"],
     issues: ["Community tickets", "See what your neighbors are reporting"],
     profile: ["My profile", "Manage your tickets and community activity"],
   } as const
-  const [title, subtitle] = titles[view]
+  const [title, subtitle] = titles[page]
 
   return (
     <div className="app-shell">
       <Sidebar
-        view={view}
+        view={page}
         setView={setView}
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
@@ -1084,24 +1131,24 @@ export default function App() {
           onMenu={() => setMenuOpen(true)}
           setView={setView}
         />
-        {view === "map" && (
+        {page === "map" && (
           <MapView
             state={ticketsState}
             selectedId={selectedId}
             onSelect={setSelectedId}
           />
         )}
-        {view === "issues" && (
+        {page === "issues" && (
           <IssuesView state={ticketsState} onReport={openReport} />
         )}
-        {view === "profile" && (
+        {page === "profile" && (
           <ProfileView
             tickets={ticketsState.tickets}
-            onSignOut={() => setView("onboarding")}
+            onWelcome={() => setView("onboarding")}
           />
         )}
       </main>
-      <MobileNav view={view} setView={setView} onReport={openReport} />
+      <MobileNav view={page} setView={setView} onReport={openReport} />
       {reportOpen && (
         <ReportForm
           onClose={closeReport}

@@ -396,6 +396,31 @@ input:focus-visible {
   font-weight: 800;
 }
 
+.google-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+/* Sign-in problems, shown under the Google button. */
+.auth-message {
+  margin: 10px 0 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.auth-error {
+  color: #b42318;
+}
+
+/* Shown for a moment while we check whether this browser is signed in. */
+.auth-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
 .privacy-note {
   margin: 12px 0 0;
   display: flex;
@@ -617,7 +642,9 @@ input:focus-visible {
 .sidebar-user strong,
 .sidebar-user span {
   display: block;
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-user strong {
@@ -1997,8 +2024,12 @@ input:focus-visible {
   margin-left: auto;
 }
 
+.account-card button.sign-in,
 .account-card button.sign-out {
   border-bottom: 0;
+}
+
+.account-card button.sign-out {
   color: #a33b36;
 }
 

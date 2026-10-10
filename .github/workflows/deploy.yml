@@ -1,0 +1,51 @@
+# Updates the live site (https://atlantamamdani.photo) after a push to main.
+#
+# It logs in to the Vultr server with a key that can do one thing only: start
+# deploy/deploy.sh, which pulls the latest code, rebuilds the web app, restarts
+# the ticket API and checks that the site answers. The log of that script shows
+# up here, so a red run tells you which step failed.
+#
+# The key is the repo secret DEPLOY_SSH_KEY. Setup is in deploy/README.md.
+# To run a deploy by hand: Actions tab > Deploy website > Run workflow.
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "api/**"
+      - "deploy/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+# One deploy at a time. A second push waits for the first to finish.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+# This job never touches the repo itself, so it gets no repo access.
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Update the server
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::error::The DEPLOY_SSH_KEY secret is not set. See deploy/README.md."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # The server's public identity, so we only ever talk to our own server.
+          # If the server is rebuilt, replace this line with the output of:
+          #   ssh-keyscan -t ed25519 64.177.49.129
+          echo "64.177.49.129 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILM2tKrnYQbZU0U+auNL4Gt/famgFkq9hY7kzII37XRy" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o ServerAliveInterval=30 root@64.177.49.129

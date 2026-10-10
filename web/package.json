@@ -12,7 +12,8 @@
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^1.54.0"
+    "lucide-react": "^1.54.0",
+    "@auth0/auth0-react": "^2.28.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
