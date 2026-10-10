@@ -1,5 +1,7 @@
-# Secrets: never commit your API keys
+# Secrets: never commit keys or database URLs (.env.example files are fine)
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -7,5 +9,9 @@ __pycache__/
 .venv/
 venv/
 
-# Downloaded model cache
+# Downloaded model cache (photo-privacy)
 .hf/
+
+# Node
+node_modules/
+dist/
