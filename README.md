@@ -8,21 +8,23 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 
 ## Current state
 
-**Working now: the base ticket flow.** People can report an issue, browse tickets on the map and in a list, and vote on them, all stored in Tiger Data.
+**Working now:** people can report an issue with a photo, see it on a real map, vote on whether it's still there, and sign in with Google so their tickets and votes follow them. Everything is stored in Tiger Data and live at https://atlantamamdani.photo. **The main gap: photos are published without faces and plates blurred** (the photo privacy service isn't connected yet).
 
 | Area | Status |
 |---|---|
-| Create a ticket (form with issue type, owner, location, details, photo) | ✅ Working |
-| Photo upload | ✅ Working. The photo is shrunk, stripped of location data and stored by the ticket API. Faces and plates are not blurred yet (see photo privacy service below) |
+| Create a ticket (form with issue type, owner, location, details, photo) | ✅ Working. Location comes from the device ("Use my location") or a picked address suggestion; without either, the ticket goes on the GSU campus default |
+| Photo upload | ✅ Working. The photo is shrunk, stripped of location data and stored by the ticket API. 🔴 Faces and plates are **not** blurred yet |
 | View tickets (issues list with status tabs, search, sort, live counts) | ✅ Working |
+| Map | ✅ React Leaflet map in `web/`, plotting tickets at their real coordinates with selection, search, GDOT roads, the official city boundary, GSU building references and OpenStreetMap attribution. [Geographic provenance](docs/map-geography.md) |
 | Ticket details and "Still there / Fixed" voting | ✅ Working from the map, the issues list and the profile; votes set the status (2 fixed votes → likely fixed) |
+| Delete your own ticket | ✅ "Delete my ticket" in the ticket details, with a confirmation. Only the poster can; its votes and photo go with it |
+| Sign-in | ✅ Optional Google sign-in through Auth0. The API checks the sign-in token, and tickets and votes are saved under the account. Anything you did as a guest in that browser moves to your account when you sign in |
+| Onboarding questions | ✅ Asked once after a first sign-in (student? which school? take MARTA?), all optional and skippable; saved to the account and editable from **Edit profile** |
+| Profile page | ✅ Your tickets and votes, impact counts with a milestone bar, your role badge (Community member or Facilities staff), your answers and when you joined |
 | 911 banner on the report form | ✅ Working |
-| Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live, with demo data |
-| Photo privacy service (blurs faces and plates) | ✅ Works on its own; not yet connected to the app |
-| Map | 🟢 React Leaflet map in `web/`, plotting ticket coordinates with selection, search, GDOT roads, an official city boundary, GSU building references, and OpenStreetMap attribution. [Geographic provenance](docs/map-geography.md) |
-| Sign-in | 🟡 Google sign-in through Auth0 works: your name shows on the sidebar and profile, and signing in is optional. Tickets and votes are still saved under the browser's guest ID, not the account |
-| Profile page | 🟡 Placeholder content |
 | Report agent: photo analysis, owner routing, report drafting | ✅ Built. "Fill in the form from this photo" appears once `GEMINI_API_KEY` is set on the server; see [Report agent](#report-agent) |
+| Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live |
+| Photo privacy service (blurs faces and plates) | 🟡 Works on its own in `photo-privacy/`; not connected to the app yet |
 
 In the issues list, click a row or its title to open the ticket, or use its arrow button to view the location on the map.
 
@@ -35,12 +37,13 @@ api/               Ticket API (Python, FastAPI) and database migrations   ← ma
 web/               Main web app (React, Vite, Tailwind)                    ← main frontend
 photo-privacy/     Photo privacy API: blurs faces and plates, reads text
 leafletreact-map/  Map integration documentation (implementation lives in web/src/components/avision-map/)
-web-next/          Earlier Next.js app with landing page, onboarding and Auth0 sign-in
+web-next/          Earlier Next.js app (landing page, onboarding, Auth0); kept for reference only
 deploy/            What the live server runs, and how pushes to main update it
-docs/              Design doc and photo privacy API docs
+docs/              Design doc, map geography sources, photo privacy API docs
+Avision_Pedestrian_Perspective/  Example street-level photos (with source credits) for demos
 ```
 
-`web/` and `web-next/` are separate apps. `web/` is the one connected to the ticket API and the one that is live. Sign-in has been moved into it; `web-next/` is kept for its onboarding questions (student, school, MARTA), which have not been moved yet.
+`web/` and `web-next/` are separate apps. `web/` is the one connected to the ticket API and the one that is live. Its sign-in and onboarding questions have both been moved into `web/`, so `web-next/` isn't used any more.
 
 ## Run it locally
 
@@ -85,7 +88,12 @@ Open http://localhost:8443. Requests to `/api/...` are forwarded to the ticket A
 
 **Photos go to the live server, even in local dev.** Local and live share one database, so `/api/uploads` is forwarded to https://atlantamamdani.photo, and every ticket's photo lives in one place. Photos you attach while testing are therefore stored on the live server. To keep them on your own API instead, start Vite with `PHOTO_PROXY_TARGET=local`, but those photos will show as broken for everyone else. Tickets store only the photo's path (`/uploads/<name>.jpg`), and the API deletes photos that no ticket uses once they're an hour old.
 
-**Sign-in** uses the Auth0 Domain and Client ID in `web/src/auth0-config.ts`. Both are public values, so they are committed and there is nothing to set up per machine. In the Auth0 dashboard, the application must be a **Single Page Application**, with `http://localhost:8443` and `https://atlantamamdani.photo` in Allowed Callback URLs, Allowed Logout URLs and Allowed Web Origins.
+**Sign-in** uses the Auth0 Domain, Client ID and API identifier (audience) in `web/src/auth0-config.ts`. All three are public values, so they are committed and there is nothing to set up per machine. The Auth0 tenant needs:
+
+- An **Application** of type **Single Page Application**, with `http://localhost:8443` and `https://atlantamamdani.photo` in Allowed Callback URLs, Allowed Logout URLs and Allowed Web Origins.
+- An **API** with identifier `https://api.avision` (RS256). On its **Application Access** tab, user access must be allowed for the application above, or sign-in fails with "Client … is not authorized to access resource server".
+
+On `localhost`, Auth0 shows a one-time "Authorize App" screen; the live site doesn't. The ticket API reads `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` (defaults match the values above).
 
 ### 3. Optional: photo privacy API
 
@@ -99,25 +107,33 @@ uvicorn photo-cleanse:app --port 8001 --env-file .env
 
 See [docs/Image-Privacy-API.md](docs/Image-Privacy-API.md) for its settings.
 
-### 4. Optional: the Next.js app with sign-in
+### 4. Optional: the old Next.js app
 
 ```powershell
 npm run dev:next                    # from the repo root, or: cd web-next; npm install; npm run dev
 ```
 
-Opens on http://localhost:3000. See [web-next/README.md](web-next/README.md) for the Auth0 setup.
+Opens on http://localhost:3000. Reference only; everything it did is now in `web/`.
+
+### After pulling
+
+Teammates add Python packages often. If the API fails to start with `ModuleNotFoundError`, run `pip install -r requirements.txt` in `api/` (with the venv active) and restart it. For `web/`, run `npm install`.
 
 ## Database
 
 A free Tiger Cloud service (TimescaleDB on PostgreSQL), database `tsdb`. The connection string lives only in `.env` files, which are gitignored.
 
+⚠️ **Local dev and the live site use the same database.** Anything you create, vote on or delete while testing locally shows up on https://atlantamamdani.photo too.
+
 | Table | What it holds |
 |---|---|
 | `reports` | One row per photo submission (time-series hypertable). Linked to a ticket by `ticket_id` |
 | `hotspots_weekly` | Weekly report counts per ~110 m grid cell (continuous aggregate) |
-| `users` | One row per person: signed-in people by their Auth0 ID, guests as `auth0_sub = 'guest|…'`. Also holds the onboarding answers (`is_student`, `school`, `takes_marta`, `onboarded_at`) |
-| `tickets` | One row per public issue; duplicate reports are grouped onto one ticket |
+| `users` | One row per person: signed-in people by their Auth0 ID (`google-oauth2|…`), guests as `guest|…`, demo voters as `seed|…`. Also holds `role` (`user` or `facilities_staff`) and the onboarding answers (`is_student`, `school`, `takes_marta`, `onboarded_at`). No emails or passwords |
+| `tickets` | One row per public issue, with its poster in `created_by`; duplicate reports are grouped onto one ticket |
 | `ticket_votes` | Each user's current vote ("still there" or "fixed") per ticket |
+
+To make someone Facilities staff: `UPDATE users SET role = 'facilities_staff' WHERE display_name = '<their name>';` in the Tiger console.
 
 **Migrations** are in `api/sql/`, run in order. The service is already set up, so you only need these for a fresh database:
 
@@ -130,6 +146,17 @@ A free Tiger Cloud service (TimescaleDB on PostgreSQL), database `tsdb`. The con
 | `003_onboarding.sql` | `python migrate.py sql/003_onboarding.sql` | Onboarding answer columns on `users`. Safe to re-run |
 
 All demo rows are marked "(seed)", and `002_seed_tickets.sql` has the SQL to remove them at the top.
+
+**Resetting for testing** (`api/reset_db.py`, dev only). It deletes all tickets, votes and guests and unlinks reports, keeping signed-in accounts and the seed reports. Because the database is shared, **this also clears the live site**, so it shows what it will delete, asks you to type `reset`, and saves every deleted row to `api/backups/` (gitignored) first.
+
+```powershell
+cd api
+.venv\Scripts\python reset_db.py --dry-run     # see what would be deleted; changes nothing
+.venv\Scripts\python reset_db.py               # reset (asks to confirm)
+.venv\Scripts\python reset_db.py --seed        # reset, then add the 6 demo tickets
+```
+
+Also `--accounts` (delete signed-in accounts too), `--reports` (delete reports too) and `--yes` (no prompt).
 
 ## Ticket API
 
@@ -151,7 +178,7 @@ All demo rows are marked "(seed)", and `002_seed_tickets.sql` has the SQL to rem
 
 **Who is asking:** signed-in callers send `Authorization: Bearer <Auth0 access token>`, and their tickets and votes are saved under their account. Everyone else sends `X-User-Id` with a guest ID from `POST /guests`; only guest IDs are accepted that way. When someone signs in, the web app sends its guest ID to `POST /me` once, and that guest's tickets and votes move to the account. The web app handles all of this automatically.
 
-**Photos:** a ticket stores a link to its photo (`photo_url`). The web app uploads the picture to `/uploads` first, then creates the ticket with the link it gets back. The API re-saves every photo as a JPEG of at most 1600 px, which removes the GPS position and other hidden details, and refuses files that are not images. Photos are saved in `api/uploads/` locally (ignored by git) and in `/var/lib/avision/uploads` on the server. Because everyone shares one database, a photo uploaded while running locally only shows on that machine; upload on the live site for photos everyone can see.
+**Photos:** the web app shrinks the picture, uploads it to `/uploads`, then creates the ticket with the path it gets back (`/uploads/<name>.jpg`); `photo_url` stores only that path, and the app builds the full link when it shows the photo. The API re-saves every photo as a JPEG of at most 1600 px, which removes the GPS position and other hidden details, and refuses files that are not images. Photos live in `/var/lib/avision/uploads` on the server (and `api/uploads/`, gitignored, for an API run locally). In local dev, Vite sends `/api/uploads` to the live server, so every ticket's photo is in one place (see [Web app](#2-web-app-port-8443)). A photo is deleted with its ticket, and the API also removes any photo no ticket uses once it's an hour old (at startup and every 6 hours). **Faces and plates are not blurred yet.**
 
 <a id="report-agent"></a>
 **Report agent** (`api/agent.py`): in the report form, "Fill in the form from this photo" sends the photo and position to `/analyze`. Four tools run in order:
@@ -177,16 +204,17 @@ From the design doc. The map, the visible routing explanation and the generated 
 
 | Feature | Priority | What it does |
 |---|---|---|
-| Photo analysis | Must | Built, except the privacy part: Gemini tags the issue type, possible barriers, severity and confidence. Still to do: find faces and plates and blur them before anything is stored |
-| Location capture | Must | Reads GPS from the photo, then falls back to browser location or a dropped pin |
-| Owner routing + explanation | Must | Point-in-polygon picks GSU, City, MARTA or GDOT and shows why |
-| Report drafting | Must | Email, phone script and ATL311 text, using only contacts from `contacts.json` |
-| Issue map | Must | Real Leaflet map with pins colored by owner (component ready in `leafletreact-map/`) |
-| Confirm before saving | Must | The user reviews the AI result before anything is posted |
+| Photo analysis | Must | Built, except the privacy part: Gemini tags the issue type, possible barriers, severity and confidence. **Still to do:** find faces and plates and blur them before anything is stored (`photo-privacy/` does this on its own; it needs connecting) |
+| Location capture | Must | Partly built: browser location and address suggestions. Still to do: read GPS from the photo before the API strips it, and drop a pin on the map |
+| Owner routing + explanation | Must | Built (`api/routing.py`): MARTA station, GSU campus, state route or City, with the reason shown |
+| Report drafting | Must | Built: message and phone script, using only contacts from `api/data/contacts.json` |
+| Issue map | Must | Built: Leaflet map in `web/` with pins colored by owner |
+| Confirm before saving | Must | Built: the agent only fills in the form; the person reviews it and posts |
 | Duplicate grouping | Should | New reports of the same issue within ~30 m join the existing ticket |
 | Hotspots layer | Should | "Reported 6 times in 3 weeks," from `hotspots_weekly` |
 | Read-aloud reports | Should | ElevenLabs reads findings aloud for low-vision users |
-| Sign-in + my reports | Should | Google sign-in is in. Still to do: link the account to its row in `users`, so tickets and votes follow the person; anonymous reporting stays available |
+| Sign-in + my reports | Should | Built: Google sign-in, tickets and votes saved to the account, guest activity claimed on sign-in, profile with your tickets and votes, onboarding questions. Anonymous reporting stays available |
+| Delete your own ticket | Should | Built: the poster can delete a ticket, with its votes and photo |
 | Custom domain + hosting | Should | atlantamamdani.photo (Porkbun) points at a Vultr server. Setup and auto-deploy are in [deploy/README.md](deploy/README.md) |
 | Facilities staff view | Stretch | GSU staff see GSU tickets as a work queue |
 | Voice input | Stretch | Describe the issue by speaking |
@@ -211,5 +239,8 @@ From the design doc. The map, the visible routing explanation and the generated 
 ## Notes for contributors
 
 - **Never commit `.env` files.** The root `.gitignore` covers them; commit `.env.example` templates instead.
+- **The database is shared with the live site.** Test data you create is public; clean up with `api/reset_db.py` (it also clears the live site). A separate dev database would remove this risk.
+- **Use the AVision user ID, never the Auth0 ID, to link data.** The API turns a verified sign-in into a `users.id`; store that in `created_by`, `user_id` and similar columns.
+- **Check merges in `api/main.py`.** A merge once dropped `import auth`, which broke sign-in. If the API won't start after a merge, look at its imports first.
 - **Tailwind class names:** Tailwind v4 is loaded, so a custom class that matches a Tailwind utility gets restyled. For example, a class named `fixed` becomes `position: fixed`. Prefix custom classes (`vote-fixed`, `status-fixed`).
 - **Connection resets on Windows:** on some Windows machines, scripts that open a new connection per request occasionally fail with "connection reset." Browsers aren't affected; in scripts, reuse one connection (keep-alive).
