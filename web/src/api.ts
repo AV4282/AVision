@@ -255,6 +255,66 @@ export type Member = {
   avatarUrl: string | null
   role: "user" | "facilities_staff"
   joinedAt: string // ISO timestamp
+  // Onboarding answers; null = not answered.
+  isStudent: boolean | null
+  school: string | null
+  takesMarta: boolean | null
+  onboardedAt: string | null // null = never saved, so the app asks
+}
+
+/** Answers to the onboarding questions. */
+export type OnboardingAnswers = {
+  isStudent: boolean | null
+  school: string | null
+  takesMarta: boolean | null
+}
+
+type ApiMember = {
+  id: string
+  display_name: string | null
+  avatar_url: string | null
+  role: Member["role"]
+  created_at: string
+  is_student: boolean | null
+  school: string | null
+  takes_marta: boolean | null
+  onboarded_at: string | null
+}
+
+function toMember(me: ApiMember): Member {
+  return {
+    id: me.id,
+    displayName: me.display_name,
+    avatarUrl: me.avatar_url,
+    role: me.role,
+    joinedAt: me.created_at,
+    isStudent: me.is_student,
+    school: me.school,
+    takesMarta: me.takes_marta,
+    onboardedAt: me.onboarded_at,
+  }
+}
+
+/** POST to an /me route as the signed-in person, and return their updated user. */
+async function postAsMember(
+  path: string,
+  accessToken: string,
+  body: unknown,
+  failure: string,
+): Promise<Member> {
+  const res = await fetch(API_URL + path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new ApiError(res.status, errorMessage(data?.detail) || `${failure} (${res.status})`)
+  }
+  return toMember((await res.json()) as ApiMember)
 }
 
 /**
@@ -265,36 +325,33 @@ export async function recordSignIn(
   accessToken: string,
   profile: { displayName?: string; avatarUrl?: string },
 ): Promise<Member> {
-  const res = await fetch(API_URL + "/me", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  return postAsMember(
+    "/me",
+    accessToken,
+    {
       display_name: profile.displayName || null,
       // The API only stores https picture links; anything else is left out.
       avatar_url: profile.avatarUrl?.startsWith("https://") ? profile.avatarUrl : null,
-    }),
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    throw new ApiError(res.status, errorMessage(data?.detail) || `Sign-in failed (${res.status})`)
-  }
-  const me = (await res.json()) as {
-    id: string
-    display_name: string | null
-    avatar_url: string | null
-    role: Member["role"]
-    created_at: string
-  }
-  return {
-    id: me.id,
-    displayName: me.display_name,
-    avatarUrl: me.avatar_url,
-    role: me.role,
-    joinedAt: me.created_at,
-  }
+    },
+    "Sign-in failed",
+  )
+}
+
+/** Saves the signed-in person's onboarding answers. A school is kept only for students. */
+export async function saveOnboarding(
+  accessToken: string,
+  answers: OnboardingAnswers,
+): Promise<Member> {
+  return postAsMember(
+    "/me/onboarding",
+    accessToken,
+    {
+      is_student: answers.isStudent,
+      school: answers.isStudent ? answers.school?.trim() || null : null,
+      takes_marta: answers.takesMarta,
+    },
+    "Couldn’t save your answers",
+  )
 }
 
 // ---------- photos ----------

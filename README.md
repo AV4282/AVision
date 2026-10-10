@@ -115,7 +115,7 @@ A free Tiger Cloud service (TimescaleDB on PostgreSQL), database `tsdb`. The con
 |---|---|
 | `reports` | One row per photo submission (time-series hypertable). Linked to a ticket by `ticket_id` |
 | `hotspots_weekly` | Weekly report counts per ~110 m grid cell (continuous aggregate) |
-| `users` | One row per person. Guests use `auth0_sub = 'guest|…'` until Auth0 is added |
+| `users` | One row per person: signed-in people by their Auth0 ID, guests as `auth0_sub = 'guest|…'`. Also holds the onboarding answers (`is_student`, `school`, `takes_marta`, `onboarded_at`) |
 | `tickets` | One row per public issue; duplicate reports are grouped onto one ticket |
 | `ticket_votes` | Each user's current vote ("still there" or "fixed") per ticket |
 
@@ -127,6 +127,7 @@ A free Tiger Cloud service (TimescaleDB on PostgreSQL), database `tsdb`. The con
 | `000_seed.sql` | Tiger console SQL editor | 11 demo reports. Check you get 11 rows; running it twice duplicates them |
 | `001_tickets.sql` | `python migrate.py sql/001_tickets.sql` | Users, tickets and votes. Safe to re-run |
 | `002_seed_tickets.sql` | `python migrate.py sql/002_seed_tickets.sql` | 6 demo tickets built from the seed reports. Safe to re-run |
+| `003_onboarding.sql` | `python migrate.py sql/003_onboarding.sql` | Onboarding answer columns on `users`. Safe to re-run |
 
 All demo rows are marked "(seed)", and `002_seed_tickets.sql` has the SQL to remove them at the top.
 
@@ -136,6 +137,8 @@ All demo rows are marked "(seed)", and `002_seed_tickets.sql` has the SQL to rem
 |---|---|---|
 | GET | `/health` | Checks the database connection |
 | POST | `/guests` | Creates a guest user and returns its ID |
+| POST | `/me` | Records a sign-in (needs `Authorization: Bearer <Auth0 access token>`) and returns the person's user, including onboarding answers |
+| POST | `/me/onboarding` | Saves the signed-in person's answers: `{"is_student": true, "school": "...", "takes_marta": false}`; each may be `null` |
 | GET | `/tickets?status=&owner=` | Lists tickets, newest first, with vote counts |
 | GET | `/tickets/{id}` | One ticket |
 | POST | `/tickets` | Creates a ticket |

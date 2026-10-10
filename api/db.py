@@ -44,6 +44,11 @@ def ping():
         return conn.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
 
 
+# What the app gets back about a signed-in person (POST /me and /me/onboarding).
+MEMBER_COLUMNS = """id, display_name, avatar_url, role, created_at,
+                    is_student, school, takes_marta, onboarded_at"""
+
+
 def upsert_user(auth0_sub, display_name=None, avatar_url=None):
     """Find or create the user for a verified Auth0 ID, and record this sign-in.
 
@@ -58,8 +63,23 @@ def upsert_user(auth0_sub, display_name=None, avatar_url=None):
                    SET last_login_at = now(),
                        display_name  = coalesce(EXCLUDED.display_name, users.display_name),
                        avatar_url    = coalesce(EXCLUDED.avatar_url, users.avatar_url)
-               RETURNING id, display_name, avatar_url, role, created_at""",
+               RETURNING """ + MEMBER_COLUMNS,
             {"sub": auth0_sub, "name": display_name, "avatar": avatar_url},
+        ).fetchone()
+
+
+def save_onboarding(auth0_sub, is_student, school, takes_marta):
+    """Store a signed-in person's onboarding answers. Returns their user, or None if unknown."""
+    with pool.connection() as conn:
+        return conn.execute(
+            """UPDATE users
+               SET is_student = %(student)s,
+                   school = CASE WHEN %(student)s THEN %(school)s END,
+                   takes_marta = %(marta)s,
+                   onboarded_at = now()
+               WHERE auth0_sub = %(sub)s
+               RETURNING """ + MEMBER_COLUMNS,
+            {"sub": auth0_sub, "student": is_student, "school": school, "marta": takes_marta},
         ).fetchone()
 
 

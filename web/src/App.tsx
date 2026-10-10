@@ -39,6 +39,7 @@ import {
   listTickets,
   PLACEHOLDER_PHOTO,
   vote,
+  type Member,
   type Status,
   type Ticket,
   type VoteChoice,
@@ -46,6 +47,7 @@ import {
 import { useAccount } from "./auth"
 import PhotoViewer from "./PhotoViewer"
 import ReportForm from "./ReportForm"
+import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 
 import { ticketMarker } from "./ticket-map"
@@ -959,15 +961,31 @@ function IssuesView({
 // Action counts the profile's progress bar works toward, one after another.
 const MILESTONES = [5, 10, 20, 50, 100, 250, 500]
 
+/** One line about the person from their onboarding answers, e.g. "Student at GSU · Rides MARTA". */
+function answersSummary(member: Member): string {
+  const parts: string[] = []
+  if (member.isStudent === true) {
+    parts.push(member.school ? `Student at ${member.school}` : "Student")
+  } else if (member.isStudent === false) {
+    parts.push("Not a student")
+  }
+  if (member.takesMarta === true) parts.push("Rides MARTA")
+  else if (member.takesMarta === false) parts.push("Doesn’t ride MARTA")
+  return parts.join(" · ") || "No answers shared"
+}
+
 function ProfileView({
   tickets,
   onWelcome,
   onOpen,
+  onEditAnswers,
 }: {
   tickets: Ticket[]
   /** Guests have nothing to sign out of; this takes them back to the sign-in screen. */
   onWelcome: () => void
   onOpen: (id: string) => void
+  /** Reopens the onboarding questions (signed-in people only). */
+  onEditAnswers: () => void
 }) {
   const { account, member, memberError, signIn, signOut } = useAccount()
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
@@ -1013,6 +1031,9 @@ function ProfileView({
             Your tickets and votes from this browser
             {joined && <span>Joined {joined}</span>}
           </p>
+          {member?.onboardedAt && (
+            <p className="profile-answers">{answersSummary(member)}</p>
+          )}
           {account && memberError && (
             <p className="account-notice" role="alert">
               {memberError}{" "}
@@ -1022,7 +1043,11 @@ function ProfileView({
             </p>
           )}
         </div>
-        <button className="edit-profile-button">Edit profile</button>
+        {member && (
+          <button className="edit-profile-button" onClick={onEditAnswers}>
+            Edit profile
+          </button>
+        )}
       </div>
 
       <div className="profile-layout">
@@ -1224,6 +1249,17 @@ export default function App() {
   const closeToSend = useCallback(() => setToSend(null), [])
   const openReport = useCallback(() => setReportOpen(true), [])
   const closeReport = useCallback(() => setReportOpen(false), [])
+  // Onboarding questions: shown once after a first sign-in (until answered or
+  // skipped for this visit), and again from "Edit profile".
+  const [questionsOpen, setQuestionsOpen] = useState(false)
+  const [questionsSkipped, setQuestionsSkipped] = useState(false)
+  const closeQuestions = useCallback(() => {
+    setQuestionsOpen(false)
+    setQuestionsSkipped(true)
+  }, [])
+  const showQuestions =
+    !!auth.member &&
+    (questionsOpen || (auth.member.onboardedAt === null && !questionsSkipped))
 
   // Wait until we know whether this browser is signed in, so a returning
   // person never sees the welcome screen flash by.
@@ -1293,6 +1329,7 @@ export default function App() {
             tickets={ticketsState.tickets}
             onWelcome={() => setView("onboarding")}
             onOpen={setOpenId}
+            onEditAnswers={() => setQuestionsOpen(true)}
           />
         )}
       </main>
@@ -1304,6 +1341,9 @@ export default function App() {
           onClose={closeTicket}
           onTicketChange={ticketsState.replaceTicket}
         />
+      )}
+      {showQuestions && auth.member && (
+        <OnboardingQuestions member={auth.member} onClose={closeQuestions} />
       )}
       {reportOpen && (
         <ReportForm

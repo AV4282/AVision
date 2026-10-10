@@ -166,6 +166,26 @@ class Me(BaseModel):
     avatar_url: str | None
     role: Literal["user", "facilities_staff"]
     created_at: datetime
+    # Onboarding answers; None = not answered. onboarded_at None = never saved, so ask.
+    is_student: bool | None
+    school: str | None
+    takes_marta: bool | None
+    onboarded_at: datetime | None
+
+
+class OnboardingIn(BaseModel):
+    """Answers to the onboarding questions. Any of them may be left unanswered (null)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    is_student: bool | None = Field(default=None, examples=[True])
+    school: str | None = Field(default=None, max_length=120, examples=["Georgia State University"])
+    takes_marta: bool | None = Field(default=None, examples=[True])
+
+    @field_validator("school", mode="before")
+    @classmethod
+    def blank_to_none(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 class Photo(BaseModel):
@@ -215,6 +235,22 @@ def sign_in(authorization: AuthorizationHeader = None, body: MeIn | None = None)
     sub = verified_sub(authorization)
     details = body or MeIn()
     return db.upsert_user(sub, details.display_name, details.avatar_url)
+
+
+@app.post("/me/onboarding", response_model=Me)
+def save_onboarding(body: OnboardingIn, authorization: AuthorizationHeader = None):
+    """Save the signed-in person's onboarding answers (asked once, editable later).
+
+    A school is kept only for students.
+    """
+    sub = verified_sub(authorization)
+    school = body.school if body.is_student else None
+    member = db.save_onboarding(sub, body.is_student, school, body.takes_marta)
+    if member is None:
+        # Signed in with Auth0, but POST /me never ran for them. Create them, then save.
+        db.upsert_user(sub)
+        member = db.save_onboarding(sub, body.is_student, school, body.takes_marta)
+    return member
 
 
 @app.post("/guests", response_model=Guest, status_code=201)
