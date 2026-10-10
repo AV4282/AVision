@@ -16,6 +16,7 @@ import {
   LogIn,
   LogOut,
   Map,
+  Maximize2,
   MapPin,
   Menu,
   Navigation,
@@ -38,7 +39,9 @@ import {
   type VoteChoice,
 } from "./api"
 import { useAccount } from "./auth"
+import PhotoViewer from "./PhotoViewer"
 import ReportForm from "./ReportForm"
+import ReportReady, { type ReportToSend } from "./ReportReady"
 
 type View = "onboarding" | "map" | "issues" | "profile"
 
@@ -529,6 +532,10 @@ function TicketDetail({
 }) {
   const [pending, setPending] = useState<VoteChoice | null>(null)
   const [voteError, setVoteError] = useState<string | null>(null)
+  const [viewingPhoto, setViewingPhoto] = useState(false)
+  // Tickets without a photo show a stock picture, which isn't worth enlarging.
+  const hasPhoto = ticket.image !== PLACEHOLDER_PHOTO
+  const photoAlt = hasPhoto ? `Photo of: ${ticket.title}` : "City sidewalk beside a street"
 
   // Counts and status come back from the server, so the UI never guesses them.
   async function castVote(choice: VoteChoice) {
@@ -557,12 +564,31 @@ function TicketDetail({
         <X size={18} />
       </button>
       <div className="detail-photo">
-        <img src={ticket.image} alt="Reported sidewalk accessibility issue" />
+        <img src={ticket.image} alt={photoAlt} />
         <div className="photo-count">
           <Camera size={14} /> {ticket.reports}{" "}
           {ticket.reports === 1 ? "report" : "reports"}
         </div>
+        {/* Covers the whole photo, so a click or tap anywhere on it opens it. */}
+        {hasPhoto && (
+          <button
+            type="button"
+            className="photo-open"
+            onClick={() => setViewingPhoto(true)}
+          >
+            <span>
+              <Maximize2 size={13} /> View photo
+            </span>
+          </button>
+        )}
       </div>
+      {viewingPhoto && (
+        <PhotoViewer
+          src={ticket.image}
+          alt={photoAlt}
+          onClose={() => setViewingPhoto(false)}
+        />
+      )}
       <div className="detail-body">
         <div className="detail-meta">
           <StatusPill status={ticket.status} />
@@ -1165,6 +1191,9 @@ export default function App() {
   const openTicket =
     ticketsState.tickets.find((ticket) => ticket.id === openId) ?? null
   const closeTicket = useCallback(() => setOpenId(null), [])
+  // The agent's drafted report for a ticket that was just posted, until dismissed.
+  const [toSend, setToSend] = useState<ReportToSend | null>(null)
+  const closeToSend = useCallback(() => setToSend(null), [])
   const openReport = useCallback(() => setReportOpen(true), [])
   const closeReport = useCallback(() => setReportOpen(false), [])
 
@@ -1247,14 +1276,16 @@ export default function App() {
       {reportOpen && (
         <ReportForm
           onClose={closeReport}
-          onCreated={(ticket) => {
+          onCreated={(ticket, drafted) => {
             ticketsState.addTicket(ticket)
             setSelectedId(ticket.id)
             setReportOpen(false)
             setView("map")
+            setToSend(drafted)
           }}
         />
       )}
+      {toSend && <ReportReady {...toSend} onClose={closeToSend} />}
     </div>
   )
 }

@@ -1,0 +1,53 @@
+{
+  "about": "The only contact details AVision may show or put in a drafted report. The AI never writes contact details; Python takes them from this file. Every entry was copied from the owner's own website on the date shown. Check them again before relying on them, and fix this file (never the code) when one changes.",
+  "owners": {
+    "gsu_facilities": {
+      "name": "GSU Facilities Management Services",
+      "short_name": "GSU Facilities",
+      "phone": "404-413-0700",
+      "phone_note": "Main number. After business hours, messages are forwarded to staff.",
+      "email": null,
+      "web": "https://facilities.gsu.edu/our-services/#work-order",
+      "web_label": "GSU work order system",
+      "hours": "Monday to Friday, 7 a.m. to 5:15 p.m.",
+      "source": "https://facilities.gsu.edu/",
+      "checked": "2026-10-10"
+    },
+    "city_of_atlanta": {
+      "name": "ATL311 (City of Atlanta)",
+      "short_name": "City of Atlanta",
+      "phone": "404-546-0311",
+      "phone_note": "Or dial 3-1-1 inside the city.",
+      "email": "atl311@atlantaga.gov",
+      "web": "https://www.atl311.com/",
+      "web_label": "ATL311: Submit a Case",
+      "hours": "Monday to Friday, 7 a.m. to midnight",
+      "source": "https://www.atl311.com/",
+      "checked": "2026-10-10"
+    },
+    "marta": {
+      "name": "MARTA Customer Service",
+      "short_name": "MARTA",
+      "phone": "404-848-5000",
+      "phone_note": "Customer Service.",
+      "email": null,
+      "web": "https://itsmarta.com/tplecrmcontact-v2.aspx",
+      "web_label": "MARTA comments form",
+      "hours": null,
+      "source": "https://www.itsmarta.com/contact-us.aspx",
+      "checked": "2026-10-10"
+    },
+    "gdot": {
+      "name": "Georgia Department of Transportation (GDOT)",
+      "short_name": "GDOT",
+      "phone": "511",
+      "phone_note": "Georgia 511.",
+      "email": null,
+      "web": "https://gadot.service-now.com/gsp",
+      "web_label": "GDOT customer service portal",
+      "hours": null,
+      "source": "https://www.dot.ga.gov/",
+      "checked": "2026-10-10"
+    }
+  }
+}

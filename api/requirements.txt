@@ -7,3 +7,8 @@ python-dotenv==1.2.4
 # Photo uploads: reading the upload form, and checking and cleaning the image.
 python-multipart==0.0.32
 pillow==12.3.0
+# Report agent: Gemini (photo analysis, report writing), Microsoft Foundry (orchestration), map math (routing).
+google-genai==2.29.0
+azure-ai-projects==2.8.0
+azure-identity==1.26.0
+shapely==2.2.0

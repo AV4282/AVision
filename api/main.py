@@ -1,5 +1,6 @@
 """
-AVision ticket API: create tickets, list them, vote on them, and store their photos.
+AVision ticket API: create tickets, list them, vote on them, store their photos,
+and run the report agent that fills in a ticket from a photo.
 
 Run locally:    uvicorn main:app --reload --port 8000     (from the api/ folder)
 Try it at:      http://localhost:8000/docs
@@ -10,6 +11,9 @@ instead, and nothing else here changes.
 """
 
 import os
+import threading
+import time
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated, Literal
@@ -20,7 +24,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-import db
+import db  # first: it loads api/.env, which the modules below read their settings from
+import agent
+import gemini
 import photos
 
 ALLOWED_ORIGINS = [
@@ -107,6 +113,14 @@ class Guest(BaseModel):
 class Photo(BaseModel):
     name: str  # file name, e.g. "3f2a....jpg"
     path: str  # where this API serves it, e.g. "/uploads/3f2a....jpg"
+
+
+class AnalyzeIn(BaseModel):
+    photo: str = Field(pattern=r"^[0-9a-f]{32}\.jpg$", examples=["3f2a9c0e5b7d4e1f8a6b2c4d6e8f0a1b.jpg"])
+    lat: float = Field(ge=-90, le=90, examples=[33.7531])
+    lng: float = Field(ge=-180, le=180, examples=[-84.3853])
+    # The photo's public link, to put in the drafted report. Optional.
+    photo_url: str | None = Field(default=None, max_length=1000, pattern=r"^https?://\S+$")
 
 
 # ---------- routes ----------
@@ -202,3 +216,55 @@ def get_photo(name: str):
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+# ---------- report agent ----------
+# Each analysis costs money (Gemini and Foundry calls) and anyone can ask for one,
+# so they are capped. The counts live in memory, which is fine for one server.
+ANALYZE_PER_MINUTE = int(os.getenv("ANALYZE_PER_MINUTE", "20"))
+ANALYZE_PER_DAY = int(os.getenv("ANALYZE_PER_DAY", "500"))
+_recent_analyses: deque[float] = deque()
+_analyses_lock = threading.Lock()
+
+
+def _take_analysis_slot():
+    """Count one analysis, or refuse it when the per-minute or per-day cap is reached."""
+    now = time.time()
+    with _analyses_lock:
+        while _recent_analyses and now - _recent_analyses[0] > 86_400:
+            _recent_analyses.popleft()
+        last_minute = sum(1 for at in _recent_analyses if now - at < 60)
+        if last_minute >= ANALYZE_PER_MINUTE:
+            raise HTTPException(429, "Lots of photos are being analyzed right now. Try again in a minute.")
+        if len(_recent_analyses) >= ANALYZE_PER_DAY:
+            raise HTTPException(429, "Photo analysis has reached today's limit. Fill in the form yourself for now.")
+        _recent_analyses.append(now)
+
+
+@app.get("/analyze/status")
+def analyze_status():
+    """Whether photo analysis is set up, so the web app knows to offer it."""
+    return {"available": gemini.is_configured(), "orchestrator": agent.foundry_mode() or "direct"}
+
+
+@app.post("/analyze")
+def analyze(body: AnalyzeIn):
+    """Run the report agent on an uploaded photo (see agent.py).
+
+    Send the `name` that POST /uploads returned, plus the position. Returns the
+    findings, the owner with the reason it was picked, the owner's contact
+    details, the address and a drafted report. Nothing is saved: the person
+    reviews the result, then the web app creates the ticket as usual.
+    """
+    path = photos.find(body.photo)
+    if path is None:
+        raise HTTPException(404, "Photo not found. Upload it first with POST /uploads.")
+    if not gemini.is_configured():
+        raise HTTPException(503, "Photo analysis isn't set up on this server yet.")
+    _take_analysis_slot()
+    try:
+        return agent.run(
+            agent.Job(photo=path.read_bytes(), lat=body.lat, lng=body.lng, photo_url=body.photo_url)
+        )
+    except gemini.GeminiFailed as problem:
+        raise HTTPException(502, str(problem))

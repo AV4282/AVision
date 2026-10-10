@@ -1119,6 +1119,76 @@ input:focus-visible {
   font-weight: 700;
 }
 
+/* Invisible button over the ticket photo, with a visible "View photo" label. */
+.photo-open {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  padding: 12px 13px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.photo-open span {
+  padding: 6px 9px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 6px;
+  color: white;
+  background: rgba(17, 27, 38, 0.72);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.photo-open:hover span,
+.photo-open:focus-visible span {
+  background: var(--blue);
+}
+
+.photo-open:focus-visible {
+  outline-offset: -4px;
+}
+
+/* ---------- Photo opened full size ---------- */
+.photo-viewer {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  padding: 16px;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 18, 28, 0.9);
+  cursor: zoom-out;
+}
+
+.photo-viewer img {
+  max-width: 100%;
+  max-height: calc(100dvh - 32px);
+  border-radius: 8px;
+  object-fit: contain;
+  cursor: default;
+}
+
+.photo-viewer-close {
+  width: 40px;
+  height: 40px;
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--ink);
+  background: white;
+  cursor: pointer;
+}
+
 .detail-body {
   padding: 18px 20px 20px;
 }
@@ -2575,6 +2645,63 @@ input:focus-visible {
   border-color: var(--blue);
 }
 
+/* Address box with a list of suggestions that drops down under it. */
+.address-field {
+  position: relative;
+}
+
+.address-suggestions {
+  max-height: 260px;
+  margin: 0;
+  padding: 4px;
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--white);
+  box-shadow: var(--shadow);
+}
+
+.address-suggestions li {
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.address-suggestions li[aria-selected="true"] {
+  background: var(--blue-soft);
+}
+
+.address-suggestions svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.address-suggestions span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.address-suggestions strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.address-suggestions small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .location-row {
   padding: 8px 8px 8px 12px;
   display: flex;
@@ -2594,6 +2721,133 @@ input:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* ---------- Report agent: "fill in from photo" and what it found ---------- */
+.ai-button {
+  min-height: 40px;
+  margin-top: 4px;
+  padding: 0 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--blue);
+  border-radius: 9px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ai-findings {
+  margin-top: 4px;
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid #c9d8f5;
+  border-radius: 10px;
+  color: var(--slate);
+  background: #f5f8ff;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-findings p,
+.ai-findings ul {
+  margin: 0;
+}
+
+.ai-findings ul {
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.ai-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.ai-title svg {
+  color: var(--blue);
+}
+
+.ai-tag {
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: var(--slate);
+  background: #e6ebf3;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ai-tag.severity-high {
+  color: #8f1d14;
+  background: #fde4e1;
+}
+
+.ai-tag.severity-medium {
+  color: #7a3b06;
+  background: var(--orange-soft);
+}
+
+.ai-check {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------- "Now tell the owner": the drafted report after posting ---------- */
+.ready-intro {
+  margin: 0 0 14px;
+  color: var(--slate);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ready-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ready-actions a {
+  text-decoration: none;
+}
+
+.ready-call {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--slate);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ready-call p {
+  margin: 0;
+}
+
+.ready-call svg {
+  display: inline;
+  vertical-align: -2px;
+}
+
+.ready-call a {
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.ready-call .ready-script {
+  margin-top: 6px;
+  color: var(--ink);
+  font-style: italic;
+}
+
 /* Photo picker: same box as the location row, with a thumbnail once a photo is chosen. */
 .photo-row {
   padding: 8px 8px 8px 12px;
@@ -2605,11 +2859,21 @@ input:focus-visible {
   background: var(--canvas);
 }
 
-.photo-row img {
+.photo-thumb {
   width: 44px;
   height: 44px;
+  padding: 0;
   flex: none;
+  overflow: hidden;
+  border: 0;
   border-radius: 6px;
+  cursor: zoom-in;
+}
+
+.photo-row img {
+  width: 100%;
+  height: 100%;
+  display: block;
   object-fit: cover;
 }
 
