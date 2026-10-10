@@ -190,6 +190,18 @@ export class ApiError extends Error {
   }
 }
 
+// FastAPI sends a string for our own errors, and a list for invalid fields
+// (e.g. [{ loc: ["body", "photo_url"], msg: "String should match pattern ..." }]).
+function errorMessage(detail: unknown): string | null {
+  if (typeof detail === "string") return detail
+  if (Array.isArray(detail) && detail.length > 0) {
+    const { loc, msg } = detail[0] as { loc?: unknown[]; msg?: string }
+    const field = loc?.[loc.length - 1]
+    return typeof field === "string" ? `${field.replace(/_/g, " ")}: ${msg}` : (msg ?? null)
+  }
+  return null
+}
+
 async function request<T>(
   method: "GET" | "POST",
   path: string,
@@ -212,8 +224,7 @@ async function request<T>(
   }
   if (!res.ok) {
     const data = await res.json().catch(() => null)
-    const detail = typeof data?.detail === "string" ? data.detail : res.statusText
-    throw new ApiError(res.status, detail || `Request failed (${res.status})`)
+    throw new ApiError(res.status, errorMessage(data?.detail) || `Request failed (${res.status})`)
   }
   return res.json() as Promise<T>
 }

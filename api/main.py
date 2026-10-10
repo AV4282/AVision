@@ -17,7 +17,7 @@ from uuid import UUID
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import db
 
@@ -50,14 +50,27 @@ app.add_middleware(
 
 # ---------- models ----------
 class TicketIn(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
+    # Trim whitespace, so "   " counts as an empty title. Examples fill /docs "Try it out".
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=120, examples=["Blocked curb ramp"])
     issue_type: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$", examples=["blocked_curb_ramp"])
-    owner: Owner
-    lat: float = Field(ge=-90, le=90)
-    lng: float = Field(ge=-180, le=180)
-    address: str | None = Field(default=None, max_length=200)
-    description: str | None = Field(default=None, max_length=2000)
-    photo_url: str | None = Field(default=None, max_length=1000)
+    owner: Owner = Field(examples=["city_of_atlanta"])
+    lat: float = Field(ge=-90, le=90, examples=[33.7531])
+    lng: float = Field(ge=-180, le=180, examples=[-84.3853])
+    address: str | None = Field(default=None, max_length=200, examples=["Courtland St SE & Gilmer St SE"])
+    description: str | None = Field(
+        default=None, max_length=2000, examples=["Scooter parked across the curb ramp"]
+    )
+    # Only real web links, so a bad value can't render as a broken image.
+    photo_url: str | None = Field(
+        default=None, max_length=1000, pattern=r"^https?://\S+$", examples=[None]
+    )
+
+    @field_validator("address", "description", "photo_url", mode="before")
+    @classmethod
+    def blank_to_none(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 class Ticket(BaseModel):

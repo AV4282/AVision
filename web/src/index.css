@@ -1120,12 +1120,12 @@ input:focus-visible {
   font-weight: 800;
 }
 
-.status-pill.likely-fixed {
+.status-pill.status-likely-fixed {
   color: #936022;
   background: var(--orange-soft);
 }
 
-.status-pill.fixed {
+.status-pill.status-fixed {
   color: var(--green);
   background: var(--green-soft);
 }
@@ -1248,7 +1248,8 @@ input:focus-visible {
   background: var(--blue-soft);
 }
 
-.vote-buttons button.selected.fixed {
+/* Not .fixed: that is Tailwind's position: fixed utility */
+.vote-buttons button.selected.vote-fixed {
   border-color: var(--green);
   color: var(--green);
   background: var(--green-soft);
@@ -2373,5 +2374,225 @@ input:focus-visible {
 
   .impact-grid {
     gap: 4px;
+  }
+}
+
+/* ---------- Report form (new ticket) ---------- */
+.modal-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  padding: 24px 16px;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgba(23, 35, 54, 0.45);
+}
+
+.report-dialog {
+  width: min(560px, 100%);
+  padding: 22px;
+  border-radius: 14px;
+  background: var(--white);
+  box-shadow: var(--shadow);
+}
+
+.report-header {
+  margin-bottom: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.report-header .eyebrow {
+  margin-bottom: 4px;
+}
+
+.report-header h2 {
+  margin: 0;
+  font: 800 24px/1.25 "Manrope", sans-serif;
+  letter-spacing: -0.6px;
+}
+
+.dialog-close {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--slate);
+  background: var(--white);
+  cursor: pointer;
+}
+
+.emergency-banner {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #f3c99f;
+  border-radius: 10px;
+  color: #7a3b06;
+  background: var(--orange-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.emergency-banner svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.emergency-banner p {
+  margin: 0;
+}
+
+.emergency-banner a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: inherit;
+  font-weight: 800;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.form-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-field.full {
+  grid-column: 1 / -1;
+}
+
+.form-field > span {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.form-field em {
+  margin-left: 4px;
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--white);
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-field textarea {
+  resize: vertical;
+}
+
+.form-field input:focus-visible,
+.form-field select:focus-visible,
+.form-field textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+  border-color: var(--blue);
+}
+
+.location-row {
+  padding: 8px 8px 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--canvas);
+}
+
+.location-row p {
+  margin: 0;
+  min-width: 0;
+  color: var(--slate);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.secondary-button {
+  min-height: 34px;
+  padding: 0 12px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--blue);
+  background: var(--white);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.field-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.form-error {
+  margin: 14px 0 0;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.report-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+}
+
+.report-dialog button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+@media (max-width: 520px) {
+  .modal-backdrop {
+    padding: 0;
+    align-items: end;
+  }
+
+  .report-dialog {
+    padding: 18px 16px;
+    border-radius: 14px 14px 0 0;
+    max-height: 100dvh;
+    overflow-y: auto;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .location-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

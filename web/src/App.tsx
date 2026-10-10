@@ -36,6 +36,7 @@ import {
   type Ticket,
   type VoteChoice,
 } from "./api"
+import ReportForm from "./ReportForm"
 
 type View = "onboarding" | "map" | "issues" | "profile"
 
@@ -46,6 +47,8 @@ type TicketsState = {
   reload: () => void
   /** Swap in a fresh copy of one ticket, e.g. after a vote. */
   replaceTicket: (ticket: Ticket) => void
+  /** Put a just-created ticket at the top, matching the API's newest-first order. */
+  addTicket: (ticket: Ticket) => void
 }
 
 /** Loads tickets from the API once, with a reload for retries and later refreshes. */
@@ -82,7 +85,13 @@ function useTickets(): TicketsState {
       current.map((ticket) => (ticket.id === updated.id ? updated : ticket)),
     )
   }, [])
-  return { tickets, loading, error, reload, replaceTicket }
+  const addTicket = useCallback((created: Ticket) => {
+    setTickets((current) => [
+      created,
+      ...current.filter((ticket) => ticket.id !== created.id),
+    ])
+  }, [])
+  return { tickets, loading, error, reload, replaceTicket, addTicket }
 }
 
 /** Loading, error, and empty states shared by the map and the issues list. */
@@ -149,7 +158,10 @@ function Brand({ compact = false }: { compact?: boolean }) {
 
 function StatusPill({ status }: { status: Status }) {
   return (
-    <span className={`status-pill ${status.toLowerCase().replace(" ", "-")}`}>
+    // Prefixed so a status never becomes a Tailwind utility class ("fixed" = position: fixed).
+    <span
+      className={`status-pill status-${status.toLowerCase().replace(" ", "-")}`}
+    >
       <span className="status-dot" />
       {status}
     </span>
@@ -280,12 +292,14 @@ function Sidebar({
   open,
   onClose,
   openCount,
+  onReport,
 }: {
   view: View
   setView: (view: View) => void
   open: boolean
   onClose: () => void
   openCount: number
+  onReport: () => void
 }) {
   const navigate = (next: View) => {
     setView(next)
@@ -339,7 +353,12 @@ function Sidebar({
           </div>
           <strong>Spot a barrier?</strong>
           <p>Upload a photo and we’ll help route it.</p>
-          <button onClick={() => navigate("issues")}>
+          <button
+            onClick={() => {
+              onClose()
+              onReport()
+            }}
+          >
             <Plus size={16} /> Report an issue
           </button>
         </div>
@@ -557,7 +576,7 @@ function TicketDetail({
               <span>{ticket.stillThere}</span>
             </button>
             <button
-              className={ticket.myVote === "fixed" ? "selected fixed" : ""}
+              className={ticket.myVote === "fixed" ? "selected vote-fixed" : ""}
               aria-pressed={ticket.myVote === "fixed"}
               disabled={pending !== null}
               onClick={() => castVote("fixed")}
@@ -584,14 +603,26 @@ function TicketDetail({
   )
 }
 
-function MapView({ state }: { state: TicketsState }) {
+function MapView({
+  state,
+  selectedId,
+  onSelect,
+}: {
+  state: TicketsState
+  selectedId: string | null
+  onSelect: (id: string) => void
+}) {
   const { tickets } = state
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showDetail, setShowDetail] = useState(true)
   const [query, setQuery] = useState("")
   // Default to the newest ticket; selectedId keeps pointing at fresh data after a reload.
   const selected =
     tickets.find((ticket) => ticket.id === selectedId) ?? tickets[0] ?? null
+
+  // A newly selected ticket (e.g. one just reported) always opens its details.
+  useEffect(() => {
+    if (selectedId) setShowDetail(true)
+  }, [selectedId])
 
   return (
     <section className="map-page">
@@ -627,7 +658,7 @@ function MapView({ state }: { state: TicketsState }) {
         tickets={tickets}
         selectedId={selected?.id ?? null}
         onSelect={(ticket) => {
-          setSelectedId(ticket.id)
+          onSelect(ticket.id)
           setShowDetail(true)
         }}
       />
@@ -657,7 +688,13 @@ function MapView({ state }: { state: TicketsState }) {
   )
 }
 
-function IssuesView({ state }: { state: TicketsState }) {
+function IssuesView({
+  state,
+  onReport,
+}: {
+  state: TicketsState
+  onReport: () => void
+}) {
   const { tickets } = state
   const [status, setStatus] = useState<"All" | Status>("All")
   const [query, setQuery] = useState("")
@@ -704,7 +741,7 @@ function IssuesView({ state }: { state: TicketsState }) {
           <h2>Current issues</h2>
           <p>Track accessibility issues reported around downtown Atlanta.</p>
         </div>
-        <button className="primary-button">
+        <button className="primary-button" onClick={onReport}>
           <Plus size={17} /> Report an issue
         </button>
       </div>
@@ -967,9 +1004,11 @@ function ProfileView({
 function MobileNav({
   view,
   setView,
+  onReport,
 }: {
   view: View
   setView: (view: View) => void
+  onReport: () => void
 }) {
   return (
     <nav className="mobile-nav">
@@ -985,7 +1024,11 @@ function MobileNav({
       >
         <List size={19} /> Issues
       </button>
-      <button className="mobile-report">
+      <button
+        className="mobile-report"
+        onClick={onReport}
+        aria-label="Report an issue"
+      >
         <Plus size={21} />
       </button>
       <button
@@ -1004,7 +1047,11 @@ function MobileNav({
 export default function App() {
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const ticketsState = useTickets()
+  const openReport = useCallback(() => setReportOpen(true), [])
+  const closeReport = useCallback(() => setReportOpen(false), [])
 
   if (view === "onboarding") {
     return <Onboarding onContinue={() => setView("map")} />
@@ -1028,6 +1075,7 @@ export default function App() {
           ticketsState.tickets.filter((ticket) => ticket.status === "Open")
             .length
         }
+        onReport={openReport}
       />
       <main className="app-main">
         <AppHeader
@@ -1036,8 +1084,16 @@ export default function App() {
           onMenu={() => setMenuOpen(true)}
           setView={setView}
         />
-        {view === "map" && <MapView state={ticketsState} />}
-        {view === "issues" && <IssuesView state={ticketsState} />}
+        {view === "map" && (
+          <MapView
+            state={ticketsState}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+        )}
+        {view === "issues" && (
+          <IssuesView state={ticketsState} onReport={openReport} />
+        )}
         {view === "profile" && (
           <ProfileView
             tickets={ticketsState.tickets}
@@ -1045,7 +1101,18 @@ export default function App() {
           />
         )}
       </main>
-      <MobileNav view={view} setView={setView} />
+      <MobileNav view={view} setView={setView} onReport={openReport} />
+      {reportOpen && (
+        <ReportForm
+          onClose={closeReport}
+          onCreated={(ticket) => {
+            ticketsState.addTicket(ticket)
+            setSelectedId(ticket.id)
+            setReportOpen(false)
+            setView("map")
+          }}
+        />
+      )}
     </div>
   )
 }
