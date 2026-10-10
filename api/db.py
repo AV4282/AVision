@@ -75,6 +75,7 @@ def create_guest():
 
 # Every ticket read goes through this, so list and detail return the same shape.
 # my_vote is the caller's own vote, or NULL when there is no caller or no vote.
+# created_by_me is true when the caller made the ticket (for the profile page).
 TICKET_SELECT = """
 SELECT t.id, t.created_at, t.updated_at, t.issue_type, t.owner, t.lat, t.lng,
        t.address, t.title, t.description, t.photo_url, t.status, t.report_count,
@@ -82,7 +83,8 @@ SELECT t.id, t.created_at, t.updated_at, t.issue_type, t.owner, t.lat, t.lng,
        count(v.vote) FILTER (WHERE v.vote = 'still_there') AS still_there,
        count(v.vote) FILTER (WHERE v.vote = 'fixed')       AS fixed,
        (SELECT mv.vote FROM ticket_votes mv
-         WHERE mv.ticket_id = t.id AND mv.user_id = %(user_id)s::uuid) AS my_vote
+         WHERE mv.ticket_id = t.id AND mv.user_id = %(user_id)s::uuid) AS my_vote,
+       coalesce(t.created_by = %(user_id)s::uuid, false) AS created_by_me
 FROM tickets t
 LEFT JOIN ticket_votes v ON v.ticket_id = t.id
 """

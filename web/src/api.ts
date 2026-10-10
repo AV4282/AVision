@@ -25,6 +25,8 @@ export type Ticket = {
   stillThere: number
   fixed: number
   myVote: VoteChoice | null
+  /** True when this browser's user reported the ticket. */
+  mine: boolean
   image: string
   lat: number
   lng: number
@@ -65,6 +67,7 @@ type ApiTicket = {
   still_there: number
   fixed: number
   my_vote: VoteChoice | null
+  created_by_me?: boolean // missing from an API that hasn't been updated yet
 }
 
 const OWNER_FROM_API: Record<ApiOwner, Owner> = {
@@ -119,6 +122,7 @@ function toTicket(t: ApiTicket): Ticket {
     stillThere: t.still_there,
     fixed: t.fixed,
     myVote: t.my_vote,
+    mine: t.created_by_me === true,
     image: t.photo_url || PLACEHOLDER_PHOTO,
     lat: t.lat,
     lng: t.lng,

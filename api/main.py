@@ -26,7 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-import db
+import db  # first: it loads api/.env, which the modules below read their settings from
+import agent
+import auth
+import gemini
 import photos
 
 ALLOWED_ORIGINS = [
@@ -101,6 +104,7 @@ class Ticket(BaseModel):
     still_there: int
     fixed: int
     my_vote: Vote | None
+    created_by_me: bool  # the caller (X-User-Id) reported this ticket
 
 
 class VoteIn(BaseModel):
