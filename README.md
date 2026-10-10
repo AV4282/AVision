@@ -83,6 +83,8 @@ npm run dev
 
 Open http://localhost:8443. Requests to `/api/...` are forwarded to the ticket API on port 8000, so start the API first. (`npm run dev` from the repo root does the same thing.)
 
+**Photos go to the live server, even in local dev.** Local and live share one database, so `/api/uploads` is forwarded to https://atlantamamdani.photo, and every ticket's photo lives in one place. Photos you attach while testing are therefore stored on the live server. To keep them on your own API instead, start Vite with `PHOTO_PROXY_TARGET=local`, but those photos will show as broken for everyone else. Tickets store only the photo's path (`/uploads/<name>.jpg`), and the API deletes photos that no ticket uses once they're an hour old.
+
 **Sign-in** uses the Auth0 Domain and Client ID in `web/src/auth0-config.ts`. Both are public values, so they are committed and there is nothing to set up per machine. In the Auth0 dashboard, the application must be a **Single Page Application**, with `http://localhost:8443` and `https://atlantamamdani.photo` in Allowed Callback URLs, Allowed Logout URLs and Allowed Web Origins.
 
 ### 3. Optional: photo privacy API

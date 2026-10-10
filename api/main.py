@@ -11,7 +11,9 @@ Callers identify themselves in one of two ways:
 Tickets and votes still use X-User-Id; moving them to the signed-in user is next.
 """
 
+import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated, Literal
@@ -26,6 +28,8 @@ import db  # loads .env first, so auth below sees AUTH0_* settings
 import auth
 import photos
 
+log = logging.getLogger("uvicorn.error")  # shows up in uvicorn's (and journalctl's) log
+
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:8443").split(",")
 ]
@@ -38,11 +42,38 @@ UserIdHeader = Annotated[UUID | None, Header(alias="X-User-Id")]
 AuthorizationHeader = Annotated[str | None, Header(alias="Authorization")]
 
 
+PHOTO_CLEANUP_EVERY = 6 * 60 * 60  # seconds
+
+
+def clean_up_photos():
+    """Delete stored photos that no ticket uses (see photos.remove_unused)."""
+    try:
+        removed = photos.remove_unused(db.photo_names_in_use())
+        if removed:
+            log.info("Removed %d unused photo(s)", removed)
+    except Exception:
+        # Never let cleanup take the API down; it tries again next round.
+        log.exception("Photo cleanup failed")
+
+
+def photo_cleanup_loop(stop: threading.Event):
+    while not stop.wait(PHOTO_CLEANUP_EVERY):
+        clean_up_photos()
+
+
 @asynccontextmanager
 async def lifespan(_app):
     db.pool.open(wait=True, timeout=15)  # fail at startup, not on the first request
     photos.prepare()  # same for the photo folder
+    stop = threading.Event()
+    # Once at startup (so each deploy tidies up), then every few hours.
+    cleanup = threading.Thread(
+        target=lambda: (clean_up_photos(), photo_cleanup_loop(stop)), daemon=True
+    )
+    cleanup.start()
     yield
+    stop.set()
+    cleanup.join(timeout=5)
     db.pool.close()
 
 
@@ -69,9 +100,10 @@ class TicketIn(BaseModel):
     description: str | None = Field(
         default=None, max_length=2000, examples=["Scooter parked across the curb ramp"]
     )
-    # Only real web links, so a bad value can't render as a broken image.
+    # Only a path from POST /uploads, e.g. "/uploads/3f2a....jpg". Storing the path, not
+    # a full link, keeps it working on every site; outside links aren't accepted.
     photo_url: str | None = Field(
-        default=None, max_length=1000, pattern=r"^https?://\S+$", examples=[None]
+        default=None, pattern=photos.PATH_PATTERN.pattern, examples=[None]
     )
 
     @field_validator("address", "description", "photo_url", mode="before")
@@ -221,8 +253,8 @@ def vote(ticket_id: UUID, body: VoteIn, user_id: UserIdHeader = None):
 def upload_photo(file: UploadFile):
     """Store a ticket photo (form field "file"; JPEG, PNG or WebP).
 
-    Returns where the photo is served. The web app turns `path` into a full link
-    and sends it as `photo_url` when it creates the ticket.
+    Returns where the photo is served. The web app sends `path` as the ticket's
+    `photo_url`. A photo no ticket uses is deleted after an hour.
     """
     data = file.file.read(photos.MAX_BYTES + 1)
     if len(data) > photos.MAX_BYTES:

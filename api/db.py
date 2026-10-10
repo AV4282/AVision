@@ -63,6 +63,17 @@ def upsert_user(auth0_sub, display_name=None, avatar_url=None):
         ).fetchone()
 
 
+def photo_names_in_use():
+    """File names of every photo a ticket points at (see photos.remove_unused)."""
+    import photos  # local import: photos has no reason to load for every db use
+
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT photo_url FROM tickets WHERE photo_url IS NOT NULL"
+        ).fetchall()
+    return {name for row in rows if (name := photos.name_in(row["photo_url"]))}
+
+
 def create_guest():
     """Make a user row for someone who hasn't signed in. Replaced by the Auth0 upsert later."""
     with pool.connection() as conn:
