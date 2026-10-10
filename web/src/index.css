@@ -1254,6 +1254,17 @@ input:focus-visible {
   background: var(--green-soft);
 }
 
+.vote-buttons button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.vote-error {
+  margin-top: 8px;
+  color: #b42318;
+  font-size: 11px;
+}
+
 .view-ticket-button {
   width: 100%;
   min-height: 38px;

@@ -31,8 +31,10 @@ import {
 import {
   listTickets,
   PLACEHOLDER_PHOTO,
+  vote,
   type Status,
   type Ticket,
+  type VoteChoice,
 } from "./api"
 
 type View = "onboarding" | "map" | "issues" | "profile"
@@ -42,6 +44,8 @@ type TicketsState = {
   loading: boolean
   error: string | null
   reload: () => void
+  /** Swap in a fresh copy of one ticket, e.g. after a vote. */
+  replaceTicket: (ticket: Ticket) => void
 }
 
 /** Loads tickets from the API once, with a reload for retries and later refreshes. */
@@ -73,7 +77,12 @@ function useTickets(): TicketsState {
   }, [version])
 
   const reload = useCallback(() => setVersion((v) => v + 1), [])
-  return { tickets, loading, error, reload }
+  const replaceTicket = useCallback((updated: Ticket) => {
+    setTickets((current) =>
+      current.map((ticket) => (ticket.id === updated.id ? updated : ticket)),
+    )
+  }, [])
+  return { tickets, loading, error, reload, replaceTicket }
 }
 
 /** Loading, error, and empty states shared by the map and the issues list. */
@@ -467,11 +476,30 @@ function MapArtwork({
 function TicketDetail({
   ticket,
   onClose,
+  onTicketChange,
 }: {
   ticket: Ticket
   onClose: () => void
+  onTicketChange: (ticket: Ticket) => void
 }) {
-  const [vote, setVote] = useState<"still" | "fixed" | null>(null)
+  const [pending, setPending] = useState<VoteChoice | null>(null)
+  const [voteError, setVoteError] = useState<string | null>(null)
+
+  // Counts and status come back from the server, so the UI never guesses them.
+  async function castVote(choice: VoteChoice) {
+    if (pending || ticket.myVote === choice) return
+    setPending(choice)
+    setVoteError(null)
+    try {
+      onTicketChange(await vote(ticket.id, choice))
+    } catch (err) {
+      setVoteError(
+        err instanceof Error ? err.message : "Your vote didn’t go through",
+      )
+    } finally {
+      setPending(null)
+    }
+  }
 
   return (
     <aside className="ticket-detail">
@@ -517,22 +545,32 @@ function TicketDetail({
             <h3>Is this issue still here?</h3>
             <p>Your vote helps keep this ticket accurate.</p>
           </div>
-          <div className="vote-buttons">
+          <div className="vote-buttons" aria-busy={pending !== null}>
             <button
-              className={vote === "still" ? "selected" : ""}
-              onClick={() => setVote("still")}
+              className={ticket.myVote === "still_there" ? "selected" : ""}
+              aria-pressed={ticket.myVote === "still_there"}
+              disabled={pending !== null}
+              onClick={() => castVote("still_there")}
             >
-              <Eye size={17} /> Still there
-              <span>{ticket.stillThere + (vote === "still" ? 1 : 0)}</span>
+              <Eye size={17} />{" "}
+              {pending === "still_there" ? "Saving…" : "Still there"}
+              <span>{ticket.stillThere}</span>
             </button>
             <button
-              className={vote === "fixed" ? "selected fixed" : ""}
-              onClick={() => setVote("fixed")}
+              className={ticket.myVote === "fixed" ? "selected fixed" : ""}
+              aria-pressed={ticket.myVote === "fixed"}
+              disabled={pending !== null}
+              onClick={() => castVote("fixed")}
             >
-              <Check size={17} /> Fixed
-              <span>{ticket.fixed + (vote === "fixed" ? 1 : 0)}</span>
+              <Check size={17} /> {pending === "fixed" ? "Saving…" : "Fixed"}
+              <span>{ticket.fixed}</span>
             </button>
           </div>
+          {voteError && (
+            <p className="vote-error" role="alert">
+              {voteError}
+            </p>
+          )}
         </div>
         <button className="view-ticket-button">
           View full ticket <ArrowRight size={16} />
@@ -612,6 +650,7 @@ function MapView({ state }: { state: TicketsState }) {
           key={selected.id}
           ticket={selected}
           onClose={() => setShowDetail(false)}
+          onTicketChange={state.replaceTicket}
         />
       )}
     </section>
