@@ -123,7 +123,7 @@ function toTicket(t: ApiTicket): Ticket {
     fixed: t.fixed,
     myVote: t.my_vote,
     mine: t.created_by_me === true,
-    image: t.photo_url || PLACEHOLDER_PHOTO,
+    image: photoLink(t.photo_url) || PLACEHOLDER_PHOTO,
     lat: t.lat,
     lng: t.lng,
   }
@@ -494,7 +494,8 @@ export async function analyzePhoto(photoUrl: string, lat: number, lng: number): 
     photo: photoUrl.slice(photoUrl.lastIndexOf("/") + 1),
     lat: Number(lat.toFixed(6)),
     lng: Number(lng.toFixed(6)),
-    photo_url: photoUrl,
+    // The drafted report mentions the photo, so this has to be a full link.
+    photo_url: new URL(photoLink(photoUrl) ?? photoUrl, window.location.origin).href,
   }
   const found = await request<ApiAnalysis>("POST", "/analyze", { body, auth: false })
   return {
