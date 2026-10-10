@@ -19,7 +19,7 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 | 911 banner on the report form | ✅ Working |
 | Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live, with demo data |
 | Photo privacy service (blurs faces and plates) | ✅ Works on its own; not yet connected to the app |
-| Map | 🟢 React Leaflet map in `web/`, plotting ticket coordinates with selection, search, layers, and OpenStreetMap attribution |
+| Map | 🟢 React Leaflet map in `web/`, plotting ticket coordinates with selection, search, GDOT roads, an official city boundary, GSU building references, and OpenStreetMap attribution. [Geographic provenance](docs/map-geography.md) |
 | Sign-in | 🟡 Google sign-in through Auth0 works: your name shows on the sidebar and profile, and signing in is optional. Tickets and votes are still saved under the browser's guest ID, not the account |
 | Profile page | 🟡 Placeholder content |
 | AI analysis, automatic routing, report drafting | ⏳ Planned (see below) |

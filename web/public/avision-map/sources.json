@@ -1,7 +1,166 @@
 {
   "retrievedDate": "2026-10-09",
   "source": "https://gis.atlantaga.gov/dpcd/rest/services/OpenDataService1/MapServer",
-  "layers": { "neighborhoods": 3, "stations": 28 },
-  "features": { "neighborhoods": 248, "stations": 38 },
-  "note": "Retrieval date does not mean every feature was updated that day. Displayed stations are the five configured corridor stations."
+  "layers": {
+    "neighborhoods": 3,
+    "stations": 28
+  },
+  "features": {
+    "neighborhoods": 248,
+    "stations": 38
+  },
+  "note": "Retrieval date does not mean every feature was updated that day. Displayed stations are the five configured corridor stations.",
+  "datasets": [
+    {
+      "id": "gdot-roads",
+      "label": "GDOT highways and selected state routes",
+      "url": "https://rnhp.dot.ga.gov/hosting/rest/services/GDOT_Network_LRSN_SR/MapServer/0",
+      "retrievedAt": "2026-10-10T20:17:33.226Z",
+      "datasetUpdatedAt": null,
+      "dateNote": "Dataset update date is not published. LRS establishment dates are not geometry update dates.",
+      "description": "Active increasing-direction state-highway mainlines, clipped to a rectangular display extent around I-285. Shared numbered routes use one stroke. Roads do not determine ticket responsibility.",
+      "sourceCRS": "ESRI:102604",
+      "outputCRS": "EPSG:4326",
+      "displayExtent": [
+        -84.59,
+        33.6,
+        -84.2,
+        33.96
+      ],
+      "sourceFeatures": 9,
+      "displayFeatures": 11,
+      "duplicateSegmentsRemoved": 657,
+      "coordinatePrecision": 6,
+      "query": {
+        "where": "SYSTEM_CODE = '1' AND FUNCTION_TYPE = '1' AND DIRECTION = 'INC' AND LRS_RETIRE_DATE IS NULL AND ROUTE_CODE IN ('00040100','00040200','00040300','00040700','00040000','00000300','00001000','00001400','00015400')",
+        "geometry": "-84.59,33.60,-84.20,33.96",
+        "geometryType": "esriGeometryEnvelope",
+        "spatialRel": "esriSpatialRelIntersects",
+        "inSR": 4326,
+        "outSR": 4326,
+        "outFields": "OBJECTID,ROUTE_ID,ROUTE_CODE,LRS_ESTABLISH_DATE",
+        "f": "geojson"
+      },
+      "routeCodeSource": "https://www.dot.ga.gov/DriveSmart/MapsData/Documents/Statewide/InterstateSRNumbers.pdf",
+      "lrsEstablishmentDates": [
+        {
+          "routeCode": "00040000",
+          "date": "2015-05-23T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00040700",
+          "date": "2022-12-06T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00040200",
+          "date": "2015-05-23T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00001000",
+          "date": "2022-08-19T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00040300",
+          "date": "2020-07-24T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00015400",
+          "date": "2021-07-15T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00001400",
+          "date": "2015-05-23T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00000300",
+          "date": "2023-08-07T00:00:00.000Z"
+        },
+        {
+          "routeCode": "00040100",
+          "date": "2015-05-23T00:00:00.000Z"
+        }
+      ],
+      "unavailableCandidates": [
+        "https://egisp.dot.ga.gov/arcgis/rest/services/ARCWEBSVCMAP/MapServer/1",
+        "https://egisp.dot.ga.gov/arcgis/rest/services/ARCWEBSVCMAP/MapServer/3"
+      ]
+    },
+    {
+      "id": "atlanta-city-limits",
+      "label": "Atlanta municipal boundary",
+      "url": "https://gis.atlantaga.gov/dpcd/rest/services/OpenDataService1/FeatureServer/1",
+      "retrievedAt": "2026-10-10T20:17:33.226Z",
+      "featureLastEditedAt": "2026-07-21T15:21:29.000Z",
+      "dateNote": "Published feature last edited July 21, 2026. Retrieval does not establish current legal jurisdiction.",
+      "description": "Official City of Atlanta polygon, including its separate component. Minimal display fill; no simplification. A municipal boundary does not assign every issue to ATL311.",
+      "sourceCRS": "EPSG:6447",
+      "outputCRS": "EPSG:4326",
+      "sourceObjectId": 1281,
+      "query": {
+        "where": "1=1",
+        "outFields": "OBJECTID,NAME,LAST_EDITED_DATE",
+        "outSR": 4326,
+        "f": "geojson"
+      }
+    },
+    {
+      "id": "gsu-references",
+      "label": "GSU building reference points",
+      "url": "https://gis.atlantaga.gov/dpcd/rest/services/OpenDataService1/FeatureServer/0",
+      "buildingList": "https://facilities.gsu.edu/building-list/",
+      "retrievedAt": "2026-10-10T20:17:33.226Z",
+      "featureLastEditedAt": "2026-02-03T03:10:47.000Z",
+      "dateNote": "The six address features were last edited February 3, 2026. GSU building-list update date is not published.",
+      "description": "Six GSU-listed buildings matched to unique current base-address records, excluding suite records. These are address points, not property boundaries or accessible entrances.",
+      "sourceCRS": "EPSG:6447",
+      "outputCRS": "EPSG:4326",
+      "features": 6,
+      "addresses": [
+        {
+          "name": "25 Park Place (SunTrust)",
+          "address": "25 PARK PLACE NE"
+        },
+        {
+          "name": "55 Park Place",
+          "address": "55 PARK PLACE NE"
+        },
+        {
+          "name": "40 Pryor Building",
+          "address": "40 PRYOR STREET SW"
+        },
+        {
+          "name": "75 Piedmont (Citizens Trust)",
+          "address": "75 PIEDMONT AVENUE NE"
+        },
+        {
+          "name": "Aderhold Learning Center",
+          "address": "60 LUCKIE STREET NW"
+        },
+        {
+          "name": "Andrew Young School of Policy Studies",
+          "address": "14 MARIETTA STREET NW"
+        }
+      ],
+      "query": {
+        "where": "UPPER(FULLADDR) LIKE '60 LUCKIE%' OR UPPER(FULLADDR) LIKE '25 PARK%' OR UPPER(FULLADDR) LIKE '55 PARK%' OR UPPER(FULLADDR) LIKE '40 PRYOR%' OR UPPER(FULLADDR) LIKE '75 PIEDMONT%' OR UPPER(FULLADDR) LIKE '14 MARIETTA%'",
+        "geometry": "-84.403,33.739,-84.36,33.769",
+        "geometryType": "esriGeometryEnvelope",
+        "inSR": 4326,
+        "outSR": 4326,
+        "outFields": "OBJECTID,FULLNAME,FULLADDR,LAST_EDITED_DATE,STATUS",
+        "f": "geojson"
+      }
+    }
+  ],
+  "deferred": [
+    {
+      "feature": "GSU and MARTA property polygons",
+      "reason": "No verified property geometry retrieved; use reference points instead."
+    },
+    {
+      "feature": "MARTA university service",
+      "url": "https://martagis.itsmarta.com/arcgisprod/rest/services/SPA/Transit_Access_Universities/MapServer/1",
+      "reason": "Layer 1 is Rail_Stations, not property polygons; connection was refused. Existing City GIS station points preserved."
+    }
+  ]
 }

@@ -11,7 +11,7 @@
   min-width: 0;
   border: 1px solid #334155;
   border-radius: 12px;
-  background: #fff;
+  background: #FAFBF8;
   color: var(--avision-ink);
   font:
     14px/1.5 system-ui,
@@ -40,6 +40,52 @@
 .avision-map-widget a:focus-visible {
   outline: 3px solid #0039A6;
   outline-offset: 2px;
+}
+.avision-map-layer-menu summary:focus-visible {
+  outline: 3px solid #0039A6;
+  outline-offset: 2px;
+}
+.avision-map-layer-menu { position: relative; }
+.avision-map-layer-menu summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+.avision-map-layer-menu summary::-webkit-details-marker { display: none; }
+.avision-map-layer-menu summary::before { content: "+"; font-weight: 800; }
+.avision-map-layer-menu[open] summary::before { content: "−"; }
+.avision-map-layer-menu summary span { padding: 0 6px; border-radius: 4px; background: #E5EEE9; }
+.avision-map-layer-list {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 1400;
+  width: min(340px, calc(100vw - 64px));
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #FAFBF8;
+  box-shadow: 0 8px 24px #33415526;
+}
+.avision-map-layer-list legend { padding: 0 5px; font-size: 12px; font-weight: 700; background: #FAFBF8; }
+.avision-map-layer-list label { cursor: pointer; }
+.avision-map-layer-list p { margin: 8px 0 0; font-size: 11px; }
+.avision-map-widget .avision-gsu-reference {
+  display: grid;
+  place-items: center;
+  border: 2px solid #334155;
+  border-radius: 4px;
+  background: #97CAEB;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
 }
 .avision-map-widget a {
   color: var(--avision-teal);
@@ -262,12 +308,19 @@
   left: 12px;
   right: 12px;
   z-index: 900;
-  background: #fff4d9;
-  border: 1px solid #d4be87;
+  background: #FAFBF8;
+  border: 1px solid #C2410C;
   padding: 9px 12px;
   border-radius: 7px;
-  color: #73561d;
+  color: #334155;
   font-size: 13px;
+}
+.avision-map-warning button {
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #E5EEE9;
 }
 .avision-map-source-dialog {
   width: min(500px, calc(100vw - 24px));

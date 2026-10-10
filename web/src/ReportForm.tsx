@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
 import { Camera, LocateFixed, Phone, TriangleAlert, X } from "lucide-react"
 import { createTicket, uploadPhoto, type Owner, type Ticket } from "./api"
+import { nearestAddress } from "./geocode"
 
 // Same snake_case values as reports.issue_type, so tickets and reports line up.
 const ISSUE_TYPES = [
@@ -44,6 +45,10 @@ export default function ReportForm({
   const uploaded = useRef<{ file: File; url: string } | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [locating, setLocating] = useState(false)
+  // The nearest street address to `location`, shown instead of raw coordinates.
+  const [place, setPlace] = useState<string | null>(null)
+  const [findingPlace, setFindingPlace] = useState(false)
+  const placeLookup = useRef(0) // so a slow, older lookup can't overwrite a newer one
   const [locationError, setLocationError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,12 +101,21 @@ export default function ReportForm({
     setLocationError(null)
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        })
+        const { latitude, longitude, accuracy } = position.coords
+        setLocation({ lat: latitude, lng: longitude, accuracy })
         setLocating(false)
+
+        // Look up the nearest address to show, and offer it as the ticket's address.
+        const lookup = ++placeLookup.current
+        setPlace(null)
+        setFindingPlace(true)
+        nearestAddress(latitude, longitude).then((found) => {
+          if (lookup !== placeLookup.current) return
+          setPlace(found)
+          setFindingPlace(false)
+          // Never replaces an address the person typed themselves.
+          if (found) setAddress((typed) => (typed.trim() ? typed : found))
+        })
       },
       (err) => {
         setLocationError(
@@ -248,12 +262,14 @@ export default function ReportForm({
           <div className="form-field full">
             <span>Location</span>
             <div className="location-row">
-              <p>
-                {location
-                  ? `Your location (${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}${
-                      location.accuracy ? `, ±${Math.round(location.accuracy)} m` : ""
-                    })`
-                  : "GSU downtown campus (default)"}
+              <p aria-live="polite">
+                {!location
+                  ? "GSU downtown campus (default)"
+                  : findingPlace
+                    ? "Finding the nearest address…"
+                    : place
+                      ? `Near ${place}`
+                      : "Your current location"}
               </p>
               <button
                 type="button"
@@ -266,6 +282,13 @@ export default function ReportForm({
               </button>
             </div>
             {locationError && <small className="field-note">{locationError}</small>}
+            {/* Laptops often guess their position from Wi-Fi and can be blocks off. */}
+            {location?.accuracy && location.accuracy > 150 && !findingPlace && (
+              <small className="field-note">
+                This device’s location is only a rough guess. Check the address
+                above before posting.
+              </small>
+            )}
           </div>
 
           <label className="form-field full">

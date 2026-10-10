@@ -1,6 +1,6 @@
 # AVision map integration
 
-The authoritative map is now in `web/src/components/avision-map/`, with unchanged GIS snapshots in `web/public/avision-map/`. This folder retains the handoff documentation; do not copy the component back here or maintain another version.
+The authoritative map is in `web/src/components/avision-map/`, with documented GIS snapshots in `web/public/avision-map/`. This folder retains the handoff documentation; do not copy the component back here or maintain another version.
 
 ## Run and verify
 
@@ -41,12 +41,14 @@ import AvisionMap from './components/avision-map/AvisionMap'
 
 ## Geography and accessibility
 
-Search covers the included City GIS snapshot: neighborhoods, GSU area, and five corridor stations. It does not geocode arbitrary addresses. Area views, pan/zoom, Soft/Street, layer controls, source dialog, and OpenStreetMap attribution remain available. Issue markers activate with Enter or Space, and the map supports arrow-key navigation.
+Search covers neighborhoods, the GSU area, five corridor stations, and six verified GSU building references. It does not geocode arbitrary addresses. Area views, pan/zoom, Soft/Street, the compact Layers menu, source dialog, and OpenStreetMap attribution remain available. Issue markers activate with Enter or Space, and the map supports arrow-key navigation. The Layers disclosure is keyboard accessible and closes with Escape.
 
 Agency identity uses fills and letters: City/ATL311 `#0039A6` / C, GSU `#97CAEB` / G with a slate outline, MARTA `#FDBE43` / M, GDOT `#F4A261` / D. Stations use a train symbol and a square shape. Status is a separate badge: open `#C2410C` / !, likely fixed `#DDD6FE` / clock, fixed `#DDD6FE` / check. Labels and status text accompany colors.
 
-The existing pilot outline is a team-defined demonstration area, not campus property lines or agency jurisdiction. No new boundaries, property overlays, or road geometry were added. Keep routing and eligibility on the backend.
+GDOT roads, the official Atlanta municipal boundary, GSU building references, neighborhoods, and the illustrative pilot outline are independently optional. Only MARTA stations start enabled. Highway lines are thin, and concurrent I-75/I-85 and SR 14/SR 154 segments are drawn once. The Atlanta view includes the Perimeter; it is a rectangular camera extent, not an ownership boundary.
 
-Tiles use `https://tile.openstreetmap.org/{z}/{x}/{y}.png`; internet access is required. GIS/tile failures display a warning, and issue selection remains usable. Do not hide attribution or add offline tile preloading.
+The existing pilot outline is a team-defined demonstration area, not campus property lines or agency jurisdiction. GSU points are building-address references, not property polygons or accessible entrances. I-285 is a highway, not the city boundary. Keep routing and eligibility on the backend. See [geographic provenance and verification](../docs/map-geography.md) for sources, dates, display processing, and deferred work.
+
+Tiles use `https://tile.openstreetmap.org/{z}/{x}/{y}.png`; internet access is required. GIS/tile failures display a warning, and issue selection remains usable. New reference layers load independently and geographic data can be retried. Do not hide attribution or add offline tile preloading.
 
 Desktop and 390 px browser verification uses fixtures from the repository's seed coordinates and mocked voting responses; no live writes. Local QA scripts/screenshots are under `output/playwright/` in the isolated checkout.
