@@ -394,3 +394,104 @@
 .avision-map-legend-item:nth-child(6) .avision-map-legend-dot { color: white; }
 .avision-map-options label, .avision-map-options button, .avision-map-views button { min-height: 44px; }
 @media (max-width: 640px) { .avision-map-search { flex-basis: auto; } }
+
+/* Theme only the UI chrome. Tiles, geometry, markers and attribution keep
+   their original geographic colors and the map's existing display options. */
+:root[data-theme="dark"] .avision-map-widget {
+  --avision-ink: var(--ink);
+  --avision-muted: var(--muted);
+  --avision-teal: var(--accent);
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] :is(
+  .avision-map-search > input,
+  .avision-map-results,
+  .avision-map-results button,
+  .avision-map-views button,
+  .avision-map-style button,
+  .avision-map-sources,
+  .avision-map-layer-menu summary,
+  .avision-map-layer-list,
+  .avision-map-layer-list legend,
+  .avision-map-source-dialog
+) {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] :is(
+  .avision-map-results button:hover,
+  .avision-map-results .avision-search-active,
+  .avision-map-views button:hover,
+  .avision-map-sources:hover,
+  .avision-map-layer-menu summary span,
+  .avision-map-dialog-heading button
+) {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+:root[data-theme="dark"] .avision-map-style button[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--blue-soft);
+  border-color: var(--accent);
+}
+
+:root[data-theme="dark"] :is(.avision-map-toolbar, .avision-map-options, .avision-map-legend) {
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .avision-map-warning {
+  color: var(--warning-text);
+  background: var(--orange-soft);
+  border-color: var(--warning-line);
+}
+
+:root[data-theme="dark"] .avision-map-warning button {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .avision-map-widget button:disabled {
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] :is(.avision-map-widget, .avision-map-source-dialog) :focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+:root[data-theme="dark"] .avision-map-source-dialog p { color: var(--muted); }
+:root[data-theme="dark"] .avision-map-source-dialog a { color: var(--accent); }
+:root[data-theme="dark"] .avision-map-source-dialog::backdrop { background: #101824b3; }
+
+/* Keep the light map labels readable even while their enclosing UI is dark. */
+:root[data-theme="dark"] .avision-map-widget :is(.leaflet-tooltip, .leaflet-control-attribution) {
+  color: #334155;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] .avision-map-widget .leaflet-control-zoom a {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .avision-map-widget .leaflet-control-zoom a:hover {
+  background: var(--hover);
+}
+
+:root[data-theme="dark"] :is(.avision-map-search > input,
+  .avision-map-views button, .avision-map-style button,
+  .avision-map-sources, .avision-map-layer-menu summary) {
+  border-color: var(--control-line);
+}
+
+:root[data-theme="dark"] .avision-map-style button[aria-pressed="true"] {
+  border-color: var(--accent);
+}

@@ -47,6 +47,7 @@ import { useAccount } from "./auth"
 import PhotoViewer from "./PhotoViewer"
 import ReportForm from "./ReportForm"
 import ReportReady, { type ReportToSend } from "./ReportReady"
+import { ThemeToggle } from "./theme"
 
 import { ticketMarker } from "./ticket-map"
 const AvisionMap = lazy(() => import("./components/avision-map/AvisionMap"))
@@ -206,9 +207,12 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
     <main className="onboarding-shell">
       <header className="onboarding-header">
         <Brand />
-        <button className="text-button" onClick={onContinue}>
-          Explore as guest <ArrowRight size={16} />
-        </button>
+        <div className="onboarding-actions">
+          <ThemeToggle />
+          <button className="text-button" onClick={onContinue}>
+            Explore as guest <ArrowRight size={16} />
+          </button>
+        </div>
       </header>
 
       <section className="onboarding-grid">
@@ -440,6 +444,7 @@ function AppHeader({
         </div>
       </div>
       <div className="header-actions">
+        <ThemeToggle />
         <button className="icon-button" aria-label="Notifications">
           <Bell size={19} />
           <span className="notification-dot" />
