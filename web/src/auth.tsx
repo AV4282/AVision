@@ -18,6 +18,7 @@ import { Auth0Provider, useAuth0 } from "@auth0/auth0-react"
 import {
   ApiError,
   recordSignIn,
+  saveDisplayName,
   saveOnboarding,
   setAccessTokenSource,
   type Member,
@@ -59,6 +60,8 @@ type AuthState = {
   signOut: () => void
   /** Saves the onboarding answers to the signed-in person's account. Throws on failure. */
   saveOnboarding: (answers: OnboardingAnswers) => Promise<void>
+  /** Changes the signed-in person's display name. Throws on failure. */
+  saveName: (name: string) => Promise<void>
 }
 
 const GUEST_STATE: AuthState = {
@@ -73,6 +76,9 @@ const GUEST_STATE: AuthState = {
   signOut: () => {},
   saveOnboarding: async () => {
     throw new Error("Sign in to save your answers.")
+  },
+  saveName: async () => {
+    throw new Error("Sign in to change your name.")
   },
 }
 
@@ -157,7 +163,18 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
   }, [error])
 
   const state = useMemo<AuthState>(() => {
-    const name = user?.name || user?.nickname || user?.email || "Signed in"
+    // A name saved on the profile wins over the one from Google.
+    const name =
+      member?.displayName || user?.name || user?.nickname || user?.email || "Signed in"
+    const freshToken = async () => {
+      const token = await getAccessTokenSilently({ timeoutInSeconds: 10 }).catch(
+        (err: unknown) => {
+          throw new Error(memberErrorMessage(err))
+        },
+      )
+      if (!token) throw new Error("Please sign in again to save your changes.")
+      return token
+    }
     return {
       configured: true,
       ready: !isLoading,
@@ -195,13 +212,10 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
         void logout({ logoutParams: { returnTo: window.location.origin } })
       },
       saveOnboarding: async (answers) => {
-        const token = await getAccessTokenSilently({ timeoutInSeconds: 10 }).catch(
-          (err: unknown) => {
-            throw new Error(memberErrorMessage(err))
-          },
-        )
-        if (!token) throw new Error("Please sign in again to save your answers.")
-        setMember(await saveOnboarding(token, answers))
+        setMember(await saveOnboarding(await freshToken(), answers))
+      },
+      saveName: async (name) => {
+        setMember(await saveDisplayName(await freshToken(), name))
       },
     }
   }, [

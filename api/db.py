@@ -53,7 +53,9 @@ def upsert_user(auth0_sub, display_name=None, avatar_url=None):
     """Find or create the user for a verified Auth0 ID, and record this sign-in.
 
     The first sign-in creates the row; every later one returns the same id.
-    A missing name or picture keeps the stored one rather than erasing it.
+    A missing picture keeps the stored one rather than erasing it. The name from
+    Auth0 is only used until there is one stored, so a name the person chose on
+    their profile (save_display_name) isn't replaced on their next sign-in.
     """
     with pool.connection() as conn:
         return conn.execute(
@@ -61,7 +63,7 @@ def upsert_user(auth0_sub, display_name=None, avatar_url=None):
                VALUES (%(sub)s, %(name)s, %(avatar)s)
                ON CONFLICT (auth0_sub) DO UPDATE
                    SET last_login_at = now(),
-                       display_name  = coalesce(EXCLUDED.display_name, users.display_name),
+                       display_name  = coalesce(users.display_name, EXCLUDED.display_name),
                        avatar_url    = coalesce(EXCLUDED.avatar_url, users.avatar_url)
                RETURNING """ + MEMBER_COLUMNS,
             {"sub": auth0_sub, "name": display_name, "avatar": avatar_url},
@@ -80,6 +82,17 @@ def save_onboarding(auth0_sub, is_student, school, takes_marta):
                WHERE auth0_sub = %(sub)s
                RETURNING """ + MEMBER_COLUMNS,
             {"sub": auth0_sub, "student": is_student, "school": school, "marta": takes_marta},
+        ).fetchone()
+
+
+def save_display_name(auth0_sub, display_name):
+    """Store the name a signed-in person chose. Returns their user, or None if unknown."""
+    with pool.connection() as conn:
+        return conn.execute(
+            """UPDATE users SET display_name = %(name)s
+               WHERE auth0_sub = %(sub)s
+               RETURNING """ + MEMBER_COLUMNS,
+            {"sub": auth0_sub, "name": display_name},
         ).fetchone()
 
 

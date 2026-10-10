@@ -5,6 +5,7 @@ import type { Member } from "./api"
 
 // The onboarding questions from the design doc, asked once after a first sign-in
 // and editable later from the profile. Every question can be left unanswered.
+// When opened from "Edit profile", the person can also change their name.
 
 const GSU = "Georgia State University"
 
@@ -50,7 +51,7 @@ export default function OnboardingQuestions({
   /** Called after saving, or when the person skips. */
   onClose: () => void
 }) {
-  const { saveOnboarding } = useAccount()
+  const { account, saveOnboarding, saveName } = useAccount()
   const ids = useId()
   const [isStudent, setIsStudent] = useState(member.isStudent)
   // GSU is the one listed choice; any other school is typed in.
@@ -61,6 +62,9 @@ export default function OnboardingQuestions({
     member.school && member.school !== GSU ? member.school : "",
   )
   const [takesMarta, setTakesMarta] = useState(member.takesMarta)
+  const currentName = member.displayName || account?.name || ""
+  const [name, setName] = useState(currentName)
+  const firstTime = member.onboardedAt === null
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -75,9 +79,15 @@ export default function OnboardingQuestions({
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (saving) return
+    const newName = name.trim()
+    if (!firstTime && !newName) {
+      setError("Enter the name you want shown on your profile.")
+      return
+    }
     setSaving(true)
     setError(null)
     try {
+      if (!firstTime && newName !== currentName) await saveName(newName)
       await saveOnboarding({
         isStudent,
         school: isStudent ? (schoolChoice === "gsu" ? GSU : otherSchool.trim() || null) : null,
@@ -85,12 +95,10 @@ export default function OnboardingQuestions({
       })
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn’t save your answers")
+      setError(err instanceof Error ? err.message : "Couldn’t save your changes")
       setSaving(false)
     }
   }
-
-  const firstTime = member.onboardedAt === null
 
   return (
     <div
@@ -110,7 +118,7 @@ export default function OnboardingQuestions({
           <div>
             <p className="eyebrow">{firstTime ? "WELCOME" : "YOUR PROFILE"}</p>
             <h2 id={`${ids}-title`}>
-              {firstTime ? "A few quick questions" : "Edit your answers"}
+              {firstTime ? "A few quick questions" : "Edit your profile"}
             </h2>
           </div>
           <button
@@ -123,6 +131,19 @@ export default function OnboardingQuestions({
             <X size={18} />
           </button>
         </div>
+
+        {!firstTime && (
+          <label className="form-field">
+            <span>Your name</span>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              maxLength={80}
+              autoComplete="name"
+              required
+            />
+          </label>
+        )}
 
         <p className="onboarding-intro">
           These help us show the issues that matter to you. Every question is optional.

@@ -19,7 +19,7 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 | Ticket details and "Still there / Fixed" voting | ✅ Working from the map, the issues list and the profile; votes set the status (2 fixed votes → likely fixed) |
 | Delete your own ticket | ✅ "Delete my ticket" in the ticket details, with a confirmation. Only the poster can; its votes and photo go with it |
 | Sign-in | ✅ Optional Google sign-in through Auth0. The API checks the sign-in token, and tickets and votes are saved under the account. Anything you did as a guest in that browser moves to your account when you sign in |
-| Onboarding questions | ✅ Asked once after a first sign-in (student? which school? take MARTA?), all optional and skippable; saved to the account and editable from **Edit profile** |
+| Onboarding questions | ✅ Asked once after a first sign-in (student? which school? take MARTA?), all optional and skippable; saved to the account and editable from **Edit profile**, where you can also change your display name (it stays changed on later sign-ins) |
 | Profile page | ✅ Your tickets and votes, impact counts with a milestone bar, your role badge (Community member or Facilities staff), your answers and when you joined |
 | 911 banner on the report form | ✅ Working |
 | Report agent: photo analysis, owner routing, report drafting | ✅ Built. "Fill in the form from this photo" appears once `GEMINI_API_KEY` is set on the server; see [Report agent](#report-agent) |

@@ -188,6 +188,14 @@ class OnboardingIn(BaseModel):
         return None if isinstance(value, str) and not value.strip() else value
 
 
+class NameIn(BaseModel):
+    """The name the person wants shown on their profile."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    display_name: str = Field(min_length=1, max_length=80, examples=["Amari B."])
+
+
 class Photo(BaseModel):
     name: str  # file name, e.g. "3f2a....jpg"
     path: str  # where this API serves it, e.g. "/uploads/3f2a....jpg"
@@ -290,6 +298,18 @@ def save_onboarding(body: OnboardingIn, authorization: AuthorizationHeader = Non
         # Signed in with Auth0, but POST /me never ran for them. Create them, then save.
         db.upsert_user(sub)
         member = db.save_onboarding(sub, body.is_student, school, body.takes_marta)
+    return member
+
+
+@app.post("/me/name", response_model=Me)
+def save_name(body: NameIn, authorization: AuthorizationHeader = None):
+    """Change the signed-in person's display name. Later sign-ins keep it."""
+    sub = verified_sub(authorization)
+    member = db.save_display_name(sub, body.display_name)
+    if member is None:
+        # Signed in with Auth0, but POST /me never ran for them. Create them, then save.
+        db.upsert_user(sub)
+        member = db.save_display_name(sub, body.display_name)
     return member
 
 

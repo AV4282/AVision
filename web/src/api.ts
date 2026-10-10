@@ -376,6 +376,16 @@ export async function saveOnboarding(
   )
 }
 
+/** Changes the signed-in person's display name. Later sign-ins keep it. */
+export async function saveDisplayName(accessToken: string, displayName: string): Promise<Member> {
+  return postAsMember(
+    "/me/name",
+    accessToken,
+    { display_name: displayName.trim() },
+    "Couldn’t save your name",
+  )
+}
+
 // ---------- photos ----------
 // uploadPhoto() sends the picture to the API, which keeps the file and answers with
 // its path, e.g. "/uploads/abc.jpg". The ticket stores that path (photo_url), and
