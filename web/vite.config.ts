@@ -40,6 +40,19 @@ react(),
       // keepAlive reuses connections; on some Windows setups, a fresh connection per
       // request intermittently fails with ECONNRESET.
       proxy: {
+        // Ticket photos. Local and live share one database, so they share one photo
+        // store too: the live server's. Otherwise a photo posted from a laptop would
+        // only exist on that laptop and show as broken for everyone else.
+        // Set PHOTO_PROXY_TARGET=local to keep photos on your own API instead.
+        // Listed before '/api' because the first matching rule wins.
+        ...(process.env.PHOTO_PROXY_TARGET === 'local'
+          ? {}
+          : {
+              '/api/uploads': {
+                target: process.env.PHOTO_PROXY_TARGET || 'https://atlantamamdani.photo',
+                changeOrigin: true,
+              },
+            }),
         '/api': {
           target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8000',
           rewrite: (p) => p.replace(/^\/api/, ''),
