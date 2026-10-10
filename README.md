@@ -12,18 +12,19 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 
 | Area | Status |
 |---|---|
-| Create a ticket (form with issue type, owner, location, details, photo link) | ✅ Working |
+| Create a ticket (form with issue type, owner, location, details, photo) | ✅ Working |
+| Photo upload | ✅ Working. The photo is shrunk, stripped of location data and stored by the ticket API. Faces and plates are not blurred yet (see photo privacy service below) |
 | View tickets (issues list with status tabs, search, sort, live counts) | ✅ Working |
-| Ticket details and "Still there / Fixed" voting | ✅ Working; votes set the status (2 fixed votes → likely fixed) |
+| Ticket details and "Still there / Fixed" voting | ✅ Working from the map, the issues list and the profile; votes set the status (2 fixed votes → likely fixed) |
 | 911 banner on the report form | ✅ Working |
 | Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live, with demo data |
 | Photo privacy service (blurs faces and plates) | ✅ Works on its own; not yet connected to the app |
 | Map | 🟢 React Leaflet map in `web/`, plotting ticket coordinates with selection, search, layers, and OpenStreetMap attribution |
 | Sign-in | 🟡 Google sign-in through Auth0 works: your name shows on the sidebar and profile, and signing in is optional. Tickets and votes are still saved under the browser's guest ID, not the account |
 | Profile page | 🟡 Placeholder content |
-| Photo upload, AI analysis, automatic routing, report drafting | ⏳ Planned (see below) |
+| AI analysis, automatic routing, report drafting | ⏳ Planned (see below) |
 
-Also not wired up yet: the map's search box and Filters button, and "View full ticket."
+In the issues list, click a row or its title to open the ticket, or use its arrow button to view the location on the map.
 
 **Live site:** https://atlantamamdani.photo. Once the first-time setup in [deploy/README.md](deploy/README.md) is done, it updates by itself after a push to `main`.
 
@@ -137,8 +138,12 @@ All demo rows are marked "(seed)", and `002_seed_tickets.sql` has the SQL to rem
 | GET | `/tickets/{id}` | One ticket |
 | POST | `/tickets` | Creates a ticket |
 | POST | `/tickets/{id}/votes` | Casts or changes the caller's vote: `{"vote": "still_there" \| "fixed"}` |
+| POST | `/uploads` | Stores a ticket photo (form field `file`; JPEG, PNG or WebP, up to 12 MB) and returns its path |
+| GET | `/uploads/{name}` | Serves a stored photo |
 
 Callers identify themselves with an `X-User-Id` header holding their guest ID; the web app handles this automatically. When Auth0 is added, the user will come from the sign-in token instead.
+
+**Photos:** a ticket stores a link to its photo (`photo_url`). The web app uploads the picture to `/uploads` first, then creates the ticket with the link it gets back. The API re-saves every photo as a JPEG of at most 1600 px, which removes the GPS position and other hidden details, and refuses files that are not images. Photos are saved in `api/uploads/` locally (ignored by git) and in `/var/lib/avision/uploads` on the server. Because everyone shares one database, a photo uploaded while running locally only shows on that machine; upload on the live site for photos everyone can see.
 
 **Vote rules:** 2 or more fixed votes that outnumber still-there votes make a ticket **Likely fixed** (set `FIXED_VOTE_THRESHOLD` to change the 2). A still-there vote reopens it. The design doc's "7 quiet days → Fixed" rule isn't built yet.
 

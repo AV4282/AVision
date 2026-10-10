@@ -8,6 +8,11 @@ atlantamamdani.photo {
 	# Ticket API (api/ folder, uvicorn on port 8000).
 	# /api/tickets on the site becomes /tickets on the API, same as in dev.
 	handle_path /api/* {
+		# Photo uploads are the biggest thing sent to the API (it accepts up to
+		# 12 MB). Anything larger is turned away here, before it uses the disk.
+		request_body {
+			max_size 15MB
+		}
 		reverse_proxy 127.0.0.1:8000
 	}
 

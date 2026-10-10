@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react"
-import { LocateFixed, Phone, TriangleAlert, X } from "lucide-react"
-import { createTicket, type Owner, type Ticket } from "./api"
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
+import { Camera, LocateFixed, Phone, TriangleAlert, X } from "lucide-react"
+import { createTicket, uploadPhoto, type Owner, type Ticket } from "./api"
 
 // Same snake_case values as reports.issue_type, so tickets and reports line up.
 const ISSUE_TYPES = [
@@ -35,7 +35,13 @@ export default function ReportForm({
   const [owner, setOwner] = useState<Owner>("City of Atlanta")
   const [address, setAddress] = useState("")
   const [description, setDescription] = useState("")
-  const [photoUrl, setPhotoUrl] = useState("")
+  const [photo, setPhoto] = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  // "photo" while the picture uploads, "ticket" while the ticket is saved.
+  const [stage, setStage] = useState<"photo" | "ticket">("ticket")
+  const fileInput = useRef<HTMLInputElement>(null)
+  // The link of a photo that already uploaded, so a retry doesn't upload it twice.
+  const uploaded = useRef<{ file: File; url: string } | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [locating, setLocating] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(null)
@@ -49,6 +55,29 @@ export default function ReportForm({
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [onClose, submitting])
+
+  // Show the chosen photo right away, straight from the device.
+  useEffect(() => {
+    if (!photo) {
+      setPhotoPreview(null)
+      return
+    }
+    const url = URL.createObjectURL(photo)
+    setPhotoPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [photo])
+
+  function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = "" // so picking the same file again still counts as a change
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      setError("That file isn’t a photo. Choose a JPEG, PNG or WebP image.")
+      return
+    }
+    setError(null)
+    setPhoto(file)
+  }
 
   function chooseIssueType(value: string) {
     setIssueType(value)
@@ -93,6 +122,15 @@ export default function ReportForm({
     setError(null)
     try {
       const where = location ?? GSU_CAMPUS
+      let photoUrl = ""
+      if (photo) {
+        if (uploaded.current?.file !== photo) {
+          setStage("photo")
+          uploaded.current = { file: photo, url: await uploadPhoto(photo) }
+        }
+        photoUrl = uploaded.current.url
+      }
+      setStage("ticket")
       const ticket = await createTicket({
         title: title.trim(),
         issueType,
@@ -101,7 +139,7 @@ export default function ReportForm({
         lng: Number(where.lng.toFixed(6)),
         address: address.trim(),
         description: description.trim(),
-        photoUrl: photoUrl.trim(),
+        photoUrl,
       })
       onCreated(ticket)
     } catch (err) {
@@ -243,18 +281,46 @@ export default function ReportForm({
             />
           </label>
 
-          <label className="form-field full">
+          <div className="form-field full">
             <span>
-              Photo link <em>optional</em>
+              Photo <em>optional</em>
             </span>
-            <input
-              type="url"
-              value={photoUrl}
-              onChange={(event) => setPhotoUrl(event.target.value)}
-              maxLength={1000}
-              placeholder="https://…"
-            />
-          </label>
+            <div className="photo-row">
+              {photoPreview && <img src={photoPreview} alt="The photo you chose" />}
+              <p>{photo ? photo.name : "No photo added"}</p>
+              {/* On a phone this offers the camera as well as the photo library. */}
+              <input
+                ref={fileInput}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={choosePhoto}
+                hidden
+              />
+              {photo && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setPhoto(null)}
+                  disabled={submitting}
+                >
+                  Remove
+                </button>
+              )}
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => fileInput.current?.click()}
+                disabled={submitting}
+              >
+                <Camera size={15} />
+                {photo ? "Change photo" : "Add a photo"}
+              </button>
+            </div>
+            <small className="field-note">
+              Photos are public. Please keep faces and license plates out of the
+              shot.
+            </small>
+          </div>
         </div>
 
         {error && (
@@ -273,7 +339,11 @@ export default function ReportForm({
             Cancel
           </button>
           <button type="submit" className="primary-button" disabled={submitting}>
-            {submitting ? "Posting…" : "Post ticket"}
+            {submitting
+              ? stage === "photo"
+                ? "Uploading photo…"
+                : "Posting…"
+              : "Post ticket"}
           </button>
         </div>
       </form>

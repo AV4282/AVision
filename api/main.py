@@ -1,5 +1,5 @@
 """
-AVision ticket API: create tickets, list them, and vote on them.
+AVision ticket API: create tickets, list them, vote on them, and store their photos.
 
 Run locally:    uvicorn main:app --reload --port 8000     (from the api/ folder)
 Try it at:      http://localhost:8000/docs
@@ -15,11 +15,13 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import db
+import photos
 
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:8443").split(",")
@@ -35,6 +37,7 @@ UserIdHeader = Annotated[UUID | None, Header(alias="X-User-Id")]
 @asynccontextmanager
 async def lifespan(_app):
     db.pool.open(wait=True, timeout=15)  # fail at startup, not on the first request
+    photos.prepare()  # same for the photo folder
     yield
     db.pool.close()
 
@@ -101,6 +104,11 @@ class Guest(BaseModel):
     id: UUID
 
 
+class Photo(BaseModel):
+    name: str  # file name, e.g. "3f2a....jpg"
+    path: str  # where this API serves it, e.g. "/uploads/3f2a....jpg"
+
+
 # ---------- routes ----------
 def require_user(user_id: UUID | None) -> UUID:
     if user_id is None:
@@ -157,3 +165,40 @@ def vote(ticket_id: UUID, body: VoteIn, user_id: UserIdHeader = None):
     if ticket is None:
         raise HTTPException(404, "Ticket not found")
     return ticket
+
+
+@app.post("/uploads", response_model=Photo, status_code=201)
+def upload_photo(file: UploadFile):
+    """Store a ticket photo (form field "file"; JPEG, PNG or WebP).
+
+    Returns where the photo is served. The web app turns `path` into a full link
+    and sends it as `photo_url` when it creates the ticket.
+    """
+    data = file.file.read(photos.MAX_BYTES + 1)
+    if len(data) > photos.MAX_BYTES:
+        raise HTTPException(413, f"That photo is too large (limit {photos.MAX_BYTES // 1024 // 1024} MB)")
+    if not data:
+        raise HTTPException(400, "The photo file is empty")
+    try:
+        name = photos.save_photo(data)
+    except photos.BadPhoto as problem:
+        raise HTTPException(400, str(problem))
+    except photos.StorageFull:
+        raise HTTPException(507, "Photo storage is full. Post the ticket without a photo for now.")
+    return {"name": name, "path": f"/uploads/{name}"}
+
+
+@app.get("/uploads/{name}")
+def get_photo(name: str):
+    """Serve a stored photo. Names never change, so browsers may keep their copy."""
+    path = photos.find(name)
+    if path is None:
+        raise HTTPException(404, "Photo not found")
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

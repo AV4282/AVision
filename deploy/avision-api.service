@@ -17,6 +17,11 @@ Group=avision
 WorkingDirectory=/opt/avision/api
 # Only reachable from this server; Caddy forwards /api/* to it.
 ExecStart=/opt/avision/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+# Uploaded ticket photos are kept in /var/lib/avision/uploads, outside the code
+# folder, so updating the site never touches them. systemd creates
+# /var/lib/avision and gives it to the user above.
+StateDirectory=avision
+Environment=UPLOAD_DIR=/var/lib/avision/uploads
 Restart=always
 RestartSec=3
 NoNewPrivileges=yes

@@ -457,10 +457,13 @@ function TicketDetail({
   ticket,
   onClose,
   onTicketChange,
+  onViewFull,
 }: {
   ticket: Ticket
   onClose: () => void
   onTicketChange: (ticket: Ticket) => void
+  /** Opens the ticket on its own. Left out where the ticket is already open that way. */
+  onViewFull?: () => void
 }) {
   const [pending, setPending] = useState<VoteChoice | null>(null)
   const [voteError, setVoteError] = useState<string | null>(null)
@@ -555,6 +558,11 @@ function TicketDetail({
             </p>
           )}
         </div>
+        {onViewFull && (
+          <button className="view-ticket-button" onClick={onViewFull}>
+            View full ticket <ArrowRight size={16} />
+          </button>
+        )}
         <p className="reported-time">
           <Clock3 size={14} /> First reported{" "}
           {ticket.firstReported.toLowerCase()} · Updated{" "}
@@ -565,14 +573,71 @@ function TicketDetail({
   )
 }
 
+/** A ticket opened on top of the page, to read it and vote. */
+function TicketModal({
+  ticket,
+  onClose,
+  onTicketChange,
+}: {
+  ticket: Ticket
+  onClose: () => void
+  onTicketChange: (ticket: Ticket) => void
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  // Keyboard and screen reader users land in the ticket, and go back to the
+  // row they opened it from when it closes.
+  useEffect(() => {
+    const opener = document.activeElement
+    dialogRef.current?.focus()
+    return () => {
+      if (opener instanceof HTMLElement) opener.focus()
+    }
+  }, [])
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        className="ticket-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={ticket.title}
+        tabIndex={-1}
+        ref={dialogRef}
+      >
+        <TicketDetail
+          ticket={ticket}
+          onClose={onClose}
+          onTicketChange={onTicketChange}
+        />
+      </div>
+    </div>
+  )
+}
+
 function MapView({
   state,
   selectedId,
   onSelect,
+  onOpen,
 }: {
   state: TicketsState
   selectedId: string | null
   onSelect: (id: string) => void
+  onOpen: (id: string) => void
 }) {
   const { tickets } = state
   const [showDetail, setShowDetail] = useState(true)
@@ -657,6 +722,7 @@ function MapView({
             }
           }}
           onTicketChange={state.replaceTicket}
+          onViewFull={() => onOpen(selected.id)}
         />
       )}
     </section>
@@ -667,10 +733,12 @@ function IssuesView({
   state,
   onReport,
   onSelect,
+  onOpen,
 }: {
   state: TicketsState
   onReport: () => void
   onSelect: (id: string) => void
+  onOpen: (id: string) => void
 }) {
   const { tickets } = state
   const [status, setStatus] = useState<"All" | Status>("All")
@@ -786,11 +854,24 @@ function IssuesView({
 
       <div className="ticket-list">
         {filtered.map((ticket) => (
-          <article className="ticket-row" key={ticket.id}>
+          // Open details from the row or title; the arrow focuses the issue on the map.
+          <article
+            className="ticket-row"
+            key={ticket.id}
+            onClick={() => onOpen(ticket.id)}
+          >
             <img src={ticket.image} alt="" />
             <div className="ticket-main">
               <div className="ticket-title-line">
-                <h3>{ticket.title}</h3>
+                <h3>
+                  <button
+                    className="ticket-title-button"
+                    onClick={() => onOpen(ticket.id)}
+                    aria-label={`Open ticket: ${ticket.title}`}
+                  >
+                    {ticket.title}
+                  </button>
+                </h3>
                 <StatusPill status={ticket.status} />
               </div>
               <p>
@@ -821,8 +902,12 @@ function IssuesView({
             </div>
             <button
               className="row-action"
-              onClick={() => onSelect(ticket.id)}
-              aria-label={`View ${ticket.title}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onSelect(ticket.id)
+              }}
+              aria-label={`View ${ticket.title} on map`}
+              title="View on map"
             >
               <ArrowRight size={18} />
             </button>
@@ -848,10 +933,12 @@ function IssuesView({
 function ProfileView({
   tickets,
   onWelcome,
-  /** Guests have nothing to sign out of; this takes them back to the sign-in screen. */
+  onOpen,
 }: {
   tickets: Ticket[]
+  /** Guests have nothing to sign out of; this takes them back to the sign-in screen. */
   onWelcome: () => void
+  onOpen: (id: string) => void
 }) {
   const { account, signOut } = useAccount()
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
@@ -901,7 +988,11 @@ function ProfileView({
           <div className="profile-ticket-list">
             {(tab === "tickets" ? myTickets : tickets.slice(0, 4)).map(
               (ticket) => (
-                <article className="profile-ticket" key={`${tab}-${ticket.id}`}>
+                <article
+                  className="profile-ticket"
+                  key={`${tab}-${ticket.id}`}
+                  onClick={() => onOpen(ticket.id)}
+                >
                   <img src={ticket.image} alt="" />
                   <div>
                     <div className="profile-ticket-top">
@@ -1042,7 +1133,12 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // The ticket opened on top of the page, from a list or "View full ticket".
+  const [openId, setOpenId] = useState<string | null>(null)
   const ticketsState = useTickets()
+  const openTicket =
+    ticketsState.tickets.find((ticket) => ticket.id === openId) ?? null
+  const closeTicket = useCallback(() => setOpenId(null), [])
   const openReport = useCallback(() => setReportOpen(true), [])
   const closeReport = useCallback(() => setReportOpen(false), [])
 
@@ -1095,6 +1191,7 @@ export default function App() {
             state={ticketsState}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onOpen={setOpenId}
           />
         )}
         {page === "issues" && (
@@ -1105,16 +1202,26 @@ export default function App() {
               setSelectedId(id)
               setView("map")
             }}
+            onOpen={setOpenId}
           />
         )}
         {page === "profile" && (
           <ProfileView
             tickets={ticketsState.tickets}
             onWelcome={() => setView("onboarding")}
+            onOpen={setOpenId}
           />
         )}
       </main>
       <MobileNav view={page} setView={setView} onReport={openReport} />
+      {openTicket && (
+        <TicketModal
+          key={openTicket.id}
+          ticket={openTicket}
+          onClose={closeTicket}
+          onTicketChange={ticketsState.replaceTicket}
+        />
+      )}
       {reportOpen && (
         <ReportForm
           onClose={closeReport}

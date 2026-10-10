@@ -4,3 +4,6 @@ uvicorn[standard]==0.54.0
 psycopg[binary,pool]==3.3.6
 psycopg-pool==3.3.3
 python-dotenv==1.2.4
+# Photo uploads: reading the upload form, and checking and cleaning the image.
+python-multipart==0.0.32
+pillow==12.3.0

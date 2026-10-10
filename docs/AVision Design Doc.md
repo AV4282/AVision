@@ -224,6 +224,11 @@ CREATE TABLE ticket_votes (
 | POST | `/tickets/{id}/votes` | Casts or changes the signed-in user's vote |
 | POST | `/tickets/{id}/merge` | Flags or confirms a duplicate of another ticket |
 
+### Onboarding Questions
+Are you a student?
+If yes, what school do you go to?
+Do you take Marta?
+
 ## Open questions
 
 - [ ] Does the Google prize accept an AI Studio key, or does it need Vertex AI on a Google Cloud project? (Ask the sponsor rep.)
