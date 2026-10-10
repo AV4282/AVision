@@ -137,10 +137,12 @@ def cast_vote(ticket_id, user_id, vote):
             raise UnknownUser from None
 
         # Enough fixed votes, outnumbering still-there votes -> likely fixed; otherwise open.
+        # Another fixed vote leaves an already-fixed ticket fixed; a still-there vote reopens it.
         # A still-there vote also counts as a fresh sighting.
         conn.execute(
             """UPDATE tickets t SET
-                   status = CASE WHEN v.fixed >= %(threshold)s AND v.fixed > v.still
+                   status = CASE WHEN t.status = 'fixed' AND %(vote)s = 'fixed' THEN 'fixed'
+                                 WHEN v.fixed >= %(threshold)s AND v.fixed > v.still
                                  THEN 'likely_fixed' ELSE 'open' END,
                    last_seen_at = CASE WHEN %(vote)s = 'still_there' THEN now()
                                        ELSE t.last_seen_at END,
