@@ -255,6 +255,58 @@ export async function createTicket(ticket: NewTicket): Promise<Ticket> {
   return toTicket(await request<ApiTicket>("POST", "/tickets", { body }))
 }
 
+// ---------- photos ----------
+// A ticket stores a link to its photo (photo_url). uploadPhoto() sends the picture
+// to the API, which keeps the file, and returns the link to put on the ticket.
+
+const PHOTO_MAX_SIDE = 1600 // pixels; the API shrinks to the same size
+
+/**
+ * Shrinks a photo in the browser before sending it, so a 10 MB phone picture
+ * uploads in a moment even on a weak signal. If the browser can't do it, the
+ * original file is sent and the API shrinks it instead.
+ */
+async function shrinkPhoto(file: File): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" })
+    const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(bitmap.width, bitmap.height))
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+    const context = canvas.getContext("2d")
+    if (!context) return file
+    context.fillStyle = "#fff" // see-through areas would turn black in a JPEG
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close()
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.85),
+    )
+    return blob ?? file
+  } catch {
+    return file
+  }
+}
+
+/** Uploads a photo and returns its full link, ready to use as a ticket's photoUrl. */
+export async function uploadPhoto(file: File): Promise<string> {
+  const form = new FormData()
+  form.append("file", await shrinkPhoto(file), "photo.jpg")
+  // No Content-Type header: the browser adds the right one for a form with a file.
+  const res = await fetch(API_URL + "/uploads", { method: "POST", body: form })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    const fallback =
+      res.status === 413
+        ? "That photo is too large. Try a smaller one."
+        : `Photo upload failed (${res.status})`
+    throw new ApiError(res.status, errorMessage(data?.detail) || fallback)
+  }
+  const { path } = (await res.json()) as { name: string; path: string }
+  // The API answers with a path like "/uploads/abc.jpg"; tickets need a full link.
+  return new URL(API_URL + path, window.location.origin).href
+}
+
 export async function vote(ticketId: string, choice: VoteChoice): Promise<Ticket> {
   return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/votes`, { body: { vote: choice } }))
 }

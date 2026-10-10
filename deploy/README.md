@@ -11,10 +11,11 @@ Once the first-time setup below is done, every push to `main` that touches `web/
 | Caddy | Web server. Serves the built web app from `web/dist`, sends `/api/...` to the ticket API, and handles HTTPS. Settings: `deploy/Caddyfile` |
 | `avision-api` | The ticket API (`api/`), kept running by systemd. Settings: `deploy/avision-api.service` |
 | `/opt/avision` | A copy of this repo |
+| `/var/lib/avision/uploads` | Photos people attach to tickets. Not in the repo, and not touched by deploys |
 
 `deploy/deploy.sh` does the update: pull, build the web app, install the API's packages, restart the API, apply the web server settings, then check that the site and the API answer.
 
-The only thing on the server that is not in this repo is `api/.env`, which holds the database connection string.
+Two things on the server are not in this repo: `api/.env`, which holds the database connection string, and the uploaded photos. The photos exist only on this server, so copy `/var/lib/avision/uploads` somewhere first if the server is ever replaced.
 
 ## First-time setup
 

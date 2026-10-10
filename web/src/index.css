@@ -2408,6 +2408,35 @@ input:focus-visible {
   }
 }
 
+/* ---------- Ticket opened on top of the page ---------- */
+.ticket-row,
+.profile-ticket {
+  cursor: pointer;
+}
+
+.ticket-modal {
+  width: min(440px, 100%);
+  border-radius: 16px;
+}
+
+/* The same panel as on the map, but sized by its content instead of pinned to the map's edge. */
+.ticket-modal .ticket-detail {
+  width: 100%;
+  height: auto;
+  max-height: calc(100dvh - 48px);
+  position: relative;
+  inset: auto;
+  border-radius: 16px;
+}
+
+.ticket-modal .detail-photo {
+  height: 210px;
+}
+
+.ticket-modal .detail-handle {
+  display: none;
+}
+
 /* ---------- Report form (new ticket) ---------- */
 .modal-backdrop {
   position: fixed;
@@ -2563,6 +2592,41 @@ input:focus-visible {
   color: var(--slate);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+/* Photo picker: same box as the location row, with a thumbnail once a photo is chosen. */
+.photo-row {
+  padding: 8px 8px 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--canvas);
+}
+
+.photo-row img {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.photo-row p {
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--slate);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.photo-row .text-button {
+  flex: none;
+  font-size: 12px;
 }
 
 .secondary-button {
