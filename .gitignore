@@ -15,3 +15,7 @@ venv/
 # Node
 node_modules/
 dist/
+
+# Local browser verification artifacts
+/output/playwright/
+/.playwright-cli/

@@ -28,7 +28,6 @@ export type Ticket = {
   image: string
   lat: number
   lng: number
-  position: { left: string; top: string } // placeholder map pin until Leaflet
 }
 
 /** Fields for POST /tickets. */
@@ -103,17 +102,6 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return new Date(iso).toLocaleDateString()
 }
 
-// Stable pseudo-random pin spot from the ID, kept inside the 15–85% band so pins
-// don't sit under the map's edges. Replaced by real lat/lng when Leaflet lands.
-function placeholderPosition(id: string) {
-  let hash = 0
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  return {
-    left: `${15 + (hash % 70)}%`,
-    top: `${15 + ((hash >>> 8) % 70)}%`,
-  }
-}
-
 function toTicket(t: ApiTicket): Ticket {
   return {
     id: t.id,
@@ -134,7 +122,6 @@ function toTicket(t: ApiTicket): Ticket {
     image: t.photo_url || PLACEHOLDER_PHOTO,
     lat: t.lat,
     lng: t.lng,
-    position: placeholderPosition(t.id),
   }
 }
 
@@ -253,6 +240,57 @@ export async function createTicket(ticket: NewTicket): Promise<Ticket> {
     photo_url: ticket.photoUrl || null,
   }
   return toTicket(await request<ApiTicket>("POST", "/tickets", { body }))
+}
+
+// ---------- signed-in account ----------
+
+/** The AVision user behind a signed-in Auth0 account. */
+export type Member = {
+  id: string // AVision user ID (not the Auth0 ID)
+  displayName: string | null
+  avatarUrl: string | null
+  role: "user" | "facilities_staff"
+  joinedAt: string // ISO timestamp
+}
+
+/**
+ * Tells the API someone signed in, proving who with their Auth0 access token.
+ * The API creates their user the first time and returns the same one after.
+ */
+export async function recordSignIn(
+  accessToken: string,
+  profile: { displayName?: string; avatarUrl?: string },
+): Promise<Member> {
+  const res = await fetch(API_URL + "/me", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      display_name: profile.displayName || null,
+      // The API only stores https picture links; anything else is left out.
+      avatar_url: profile.avatarUrl?.startsWith("https://") ? profile.avatarUrl : null,
+    }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new ApiError(res.status, errorMessage(data?.detail) || `Sign-in failed (${res.status})`)
+  }
+  const me = (await res.json()) as {
+    id: string
+    display_name: string | null
+    avatar_url: string | null
+    role: Member["role"]
+    created_at: string
+  }
+  return {
+    id: me.id,
+    displayName: me.display_name,
+    avatarUrl: me.avatar_url,
+    role: me.role,
+    joinedAt: me.created_at,
+  }
 }
 
 // ---------- photos ----------

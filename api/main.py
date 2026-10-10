@@ -5,9 +5,11 @@ and run the report agent that fills in a ticket from a photo.
 Run locally:    uvicorn main:app --reload --port 8000     (from the api/ folder)
 Try it at:      http://localhost:8000/docs
 
-Until Auth0 lands, callers identify themselves with an X-User-Id header holding
-the ID from POST /guests. Later the backend reads it from the verified token
-instead, and nothing else here changes.
+Callers identify themselves in one of two ways:
+  - Signed in: "Authorization: Bearer <Auth0 access token>". POST /me checks the
+    token and returns the person's AVision user (created on first sign-in).
+  - Guest: an X-User-Id header holding the ID from POST /guests.
+Tickets and votes still use X-User-Id; moving them to the signed-in user is next.
 """
 
 import os
@@ -24,9 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-import db  # first: it loads api/.env, which the modules below read their settings from
-import agent
-import gemini
+import db
 import photos
 
 ALLOWED_ORIGINS = [
@@ -38,6 +38,7 @@ Owner = Literal["gsu_facilities", "city_of_atlanta", "marta", "gdot"]
 Status = Literal["open", "likely_fixed", "fixed", "merged"]
 Vote = Literal["still_there", "fixed"]
 UserIdHeader = Annotated[UUID | None, Header(alias="X-User-Id")]
+AuthorizationHeader = Annotated[str | None, Header(alias="Authorization")]
 
 
 @asynccontextmanager
@@ -110,6 +111,28 @@ class Guest(BaseModel):
     id: UUID
 
 
+class MeIn(BaseModel):
+    """Display details from the person's Auth0 profile. Who they are comes from the token."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    display_name: str | None = Field(default=None, max_length=80, examples=["Amari B."])
+    avatar_url: str | None = Field(default=None, max_length=1000, pattern=r"^https://\S+$")
+
+    @field_validator("display_name", "avatar_url", mode="before")
+    @classmethod
+    def blank_to_none(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
+
+
+class Me(BaseModel):
+    id: UUID  # the AVision user ID; use this, never the Auth0 ID, to link data
+    display_name: str | None
+    avatar_url: str | None
+    role: Literal["user", "facilities_staff"]
+    created_at: datetime
+
+
 class Photo(BaseModel):
     name: str  # file name, e.g. "3f2a....jpg"
     path: str  # where this API serves it, e.g. "/uploads/3f2a....jpg"
@@ -124,6 +147,22 @@ class AnalyzeIn(BaseModel):
 
 
 # ---------- routes ----------
+def verified_sub(authorization: str | None) -> str:
+    """The Auth0 ID from a valid "Bearer" token, or a 401 explaining what's wrong."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            401, "Sign in first (send Authorization: Bearer <token>)",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        return auth.verify(token.strip())["sub"]
+    except auth.InvalidToken as problem:
+        raise HTTPException(
+            401, str(problem), headers={"WWW-Authenticate": 'Bearer error="invalid_token"'}
+        )
+
+
 def require_user(user_id: UUID | None) -> UUID:
     if user_id is None:
         raise HTTPException(401, "Send an X-User-Id header (get one from POST /guests)")
@@ -133,6 +172,14 @@ def require_user(user_id: UUID | None) -> UUID:
 @app.get("/health")
 def health():
     return {"ok": db.ping()}
+
+
+@app.post("/me", response_model=Me)
+def sign_in(authorization: AuthorizationHeader = None, body: MeIn | None = None):
+    """Record a sign-in. Creates the user the first time; returns the same user after."""
+    sub = verified_sub(authorization)
+    details = body or MeIn()
+    return db.upsert_user(sub, details.display_name, details.avatar_url)
 
 
 @app.post("/guests", response_model=Guest, status_code=201)

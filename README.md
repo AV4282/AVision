@@ -19,12 +19,12 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 | 911 banner on the report form | ✅ Working |
 | Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live, with demo data |
 | Photo privacy service (blurs faces and plates) | ✅ Works on its own; not yet connected to the app |
-| Map | 🟡 Placeholder artwork; pins are placed by ticket ID, not real coordinates. A real Leaflet map is ready in `leafletreact-map/` |
+| Map | 🟢 React Leaflet map in `web/`, plotting ticket coordinates with selection, search, GDOT roads, an official city boundary, GSU building references, and OpenStreetMap attribution. [Geographic provenance](docs/map-geography.md) |
 | Sign-in | 🟡 Google sign-in through Auth0 works: your name shows on the sidebar and profile, and signing in is optional. Tickets and votes are still saved under the browser's guest ID, not the account |
 | Profile page | 🟡 Placeholder content |
 | Report agent: photo analysis, owner routing, report drafting | ✅ Built. "Fill in the form from this photo" appears once `GEMINI_API_KEY` is set on the server; see [Report agent](#report-agent) |
 
-Also not wired up yet: the map's search box and Filters button.
+In the issues list, click a row or its title to open the ticket, or use its arrow button to view the location on the map.
 
 **Live site:** https://atlantamamdani.photo. Once the first-time setup in [deploy/README.md](deploy/README.md) is done, it updates by itself after a push to `main`.
 
@@ -34,7 +34,7 @@ Also not wired up yet: the map's search box and Filters button.
 api/               Ticket API (Python, FastAPI) and database migrations   ← main backend
 web/               Main web app (React, Vite, Tailwind)                    ← main frontend
 photo-privacy/     Photo privacy API: blurs faces and plates, reads text
-leafletreact-map/  React Leaflet map component, ready to drop into web/
+leafletreact-map/  Map integration documentation (implementation lives in web/src/components/avision-map/)
 web-next/          Earlier Next.js app with landing page, onboarding and Auth0 sign-in
 deploy/            What the live server runs, and how pushes to main update it
 docs/              Design doc and photo privacy API docs
@@ -173,10 +173,10 @@ From the design doc. The map, the visible routing explanation and the generated 
 |---|---|---|
 | Photo analysis | Must | Built, except the privacy part: Gemini tags the issue type, possible barriers, severity and confidence. Still to do: find faces and plates and blur them before anything is stored |
 | Location capture | Must | Reads GPS from the photo, then falls back to browser location or a dropped pin |
-| Owner routing + explanation | Must | Built: map rules pick GSU, City, MARTA or GDOT and show why |
-| Report drafting | Must | Built: message and phone script, using only contacts from `contacts.json` |
+| Owner routing + explanation | Must | Point-in-polygon picks GSU, City, MARTA or GDOT and shows why |
+| Report drafting | Must | Email, phone script and ATL311 text, using only contacts from `contacts.json` |
 | Issue map | Must | Real Leaflet map with pins colored by owner (component ready in `leafletreact-map/`) |
-| Confirm before saving | Must | Built: the agent only fills in the form; the user reviews it and posts |
+| Confirm before saving | Must | The user reviews the AI result before anything is posted |
 | Duplicate grouping | Should | New reports of the same issue within ~30 m join the existing ticket |
 | Hotspots layer | Should | "Reported 6 times in 3 weeks," from `hotspots_weekly` |
 | Read-aloud reports | Should | ElevenLabs reads findings aloud for low-vision users |

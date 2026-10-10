@@ -1,9 +1,10 @@
 // Sign-in with Auth0. Everything the rest of the app needs is in useAccount().
 //
-// Signing in is optional: guests can still browse, report and vote. A signed-in
-// person gets their name on the sidebar and profile. Their tickets and votes
-// are still saved under the browser's guest ID (see api.ts) until the ticket
-// API learns to read the Auth0 account.
+// Signing in is optional: guests can still browse, report and vote. After a
+// sign-in, the app gets an access token for the ticket API and sends it to
+// POST /me, which checks it and returns the person's AVision user (member).
+// Tickets and votes are still saved under the browser's guest ID (see api.ts)
+// until they move to the signed-in user.
 
 import {
   createContext,
@@ -14,13 +15,15 @@ import {
   type ReactNode,
 } from "react"
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react"
-import { AUTH0_CLIENT_ID, AUTH0_DOMAIN } from "./auth0-config"
+import { ApiError, recordSignIn, type Member } from "./api"
+import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_DOMAIN } from "./auth0-config"
 
 const domain = (import.meta.env.VITE_AUTH0_DOMAIN || AUTH0_DOMAIN)
   .trim()
   .replace(/^https?:\/\//, "")
   .replace(/\/+$/, "")
 const clientId = (import.meta.env.VITE_AUTH0_CLIENT_ID || AUTH0_CLIENT_ID).trim()
+const audience = (import.meta.env.VITE_AUTH0_AUDIENCE || AUTH0_AUDIENCE).trim()
 
 export type Account = {
   /** Stable Auth0 ID, e.g. "google-oauth2|1234". Matches users.auth0_sub. */
@@ -37,6 +40,10 @@ type AuthState = {
   ready: boolean
   /** The signed-in person, or null for a guest. */
   account: Account | null
+  /** Their AVision user, once the ticket API has confirmed the sign-in. */
+  member: Member | null
+  /** Why the ticket API couldn't confirm the sign-in, in plain words. */
+  memberError: string | null
   /** True from the click on "Continue with Google" until the browser leaves. */
   signingIn: boolean
   /** Why the last sign-in attempt failed, in plain words. */
@@ -49,6 +56,8 @@ const GUEST_STATE: AuthState = {
   configured: false,
   ready: true,
   account: null,
+  member: null,
+  memberError: null,
   signingIn: false,
   error: null,
   signIn: () => {},
@@ -68,12 +77,57 @@ function initialsOf(name: string): string {
   return letters.toUpperCase() || "?"
 }
 
+function memberErrorMessage(err: unknown): string {
+  // Auth0 couldn't hand out a token without a fresh sign-in, e.g. for a session
+  // started before the app asked for API access.
+  const code = (err as { error?: string } | null)?.error
+  if (code === "login_required" || code === "consent_required" || code === "missing_refresh_token") {
+    return "Please sign in again to connect your account."
+  }
+  if (err instanceof ApiError) return err.message
+  return "Couldn’t connect your account to AVision. Try again later."
+}
+
 /** Turns Auth0's state into the small AuthState the app uses. */
 function Auth0Bridge({ children }: { children: ReactNode }) {
-  const { isLoading, isAuthenticated, user, error, loginWithRedirect, logout } =
-    useAuth0()
+  const {
+    isLoading,
+    isAuthenticated,
+    user,
+    error,
+    loginWithRedirect,
+    logout,
+    getAccessTokenSilently,
+  } = useAuth0()
   const [signingIn, setSigningIn] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+  const [member, setMember] = useState<Member | null>(null)
+  const [memberError, setMemberError] = useState<string | null>(null)
+
+  // Once signed in, prove it to the ticket API and get the AVision user back.
+  const sub = isAuthenticated ? user?.sub : undefined
+  const displayName = user?.name || user?.nickname
+  const picture = user?.picture
+  useEffect(() => {
+    setMember(null)
+    setMemberError(null)
+    if (!sub) return
+    let cancelled = false
+    getAccessTokenSilently({ timeoutInSeconds: 10 })
+      .then((token) => {
+        if (!token) throw new Error("Auth0 returned no access token")
+        return recordSignIn(token, { displayName, avatarUrl: picture })
+      })
+      .then((result) => {
+        if (!cancelled) setMember(result)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setMemberError(memberErrorMessage(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sub, displayName, picture, getAccessTokenSilently])
 
   // A failed or cancelled sign-in comes back as ?error=... in the address bar.
   // Clear it, so reloading the page doesn't show the same error again.
@@ -97,10 +151,16 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
               initials: initialsOf(name),
             }
           : null,
+      member,
+      memberError,
       signingIn,
       error:
         startError ??
-        (error ? "Sign-in didn’t finish. Please try again." : null),
+        (error
+          ? // Auth0's own reason (its error_description), e.g. a setup problem
+            // in the dashboard, so it can be fixed without guessing.
+            `Sign-in didn’t finish${error.message ? `: ${error.message}` : "."} Please try again.`
+          : null),
       signIn: () => {
         setSigningIn(true)
         setStartError(null)
@@ -121,6 +181,8 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
     isAuthenticated,
     user,
     error,
+    member,
+    memberError,
     signingIn,
     startError,
     loginWithRedirect,
@@ -138,7 +200,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     <Auth0Provider
       domain={domain}
       clientId={clientId}
-      authorizationParams={{ redirect_uri: window.location.origin }}
+      authorizationParams={{
+        redirect_uri: window.location.origin,
+        // Ask for an access token the ticket API accepts (checked in api/auth.py).
+        ...(audience ? { audience } : {}),
+      }}
       // Remember the sign-in across page reloads. The default (memory) relies on
       // a hidden check with Auth0 that browsers block for third-party cookies,
       // and that never works with Auth0's shared Google test keys.
