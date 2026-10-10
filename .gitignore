@@ -9,3 +9,4 @@ venv/
 
 # Downloaded model cache
 .hf/
+node_modules
