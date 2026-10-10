@@ -1,0 +1,10 @@
+{
+  "description": "Streamline ticket management with a user-friendly interface featuring onboarding, map and list views for issues, and a profile page for tracking user tickets.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
