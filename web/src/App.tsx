@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   ArrowRight,
   Bell,
@@ -10,9 +18,7 @@ import {
   Eye,
   HelpCircle,
   Home,
-  Layers3,
   List,
-  LocateFixed,
   LogIn,
   LogOut,
   Map,
@@ -23,7 +29,6 @@ import {
   Search,
   Settings,
   ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
   ThumbsUp,
   User,
@@ -40,6 +45,8 @@ import {
 import { useAccount } from "./auth"
 import ReportForm from "./ReportForm"
 
+import { ticketMarker } from "./ticket-map"
+const AvisionMap = lazy(() => import("./components/avision-map/AvisionMap"))
 type View = "onboarding" | "map" | "issues" | "profile"
 
 type TicketsState = {
@@ -139,10 +146,10 @@ function TicketsNotice({
 }
 
 const ownerColors: Record<Ticket["owner"], string> = {
-  "City of Atlanta": "owner-blue",
-  "GSU Facilities": "owner-green",
-  MARTA: "owner-orange",
-  GDOT: "owner-slate",
+  "City of Atlanta": "owner-city",
+  "GSU Facilities": "owner-gsu",
+  MARTA: "owner-marta",
+  GDOT: "owner-gdot",
 }
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -164,7 +171,9 @@ function StatusPill({ status }: { status: Status }) {
     <span
       className={`status-pill status-${status.toLowerCase().replace(" ", "-")}`}
     >
-      <span className="status-dot" />
+      <span aria-hidden="true">
+        {status === "Open" ? "!" : status === "Fixed" ? "✓" : "◷"}
+      </span>
       {status}
     </span>
   )
@@ -212,7 +221,10 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
           </div>
           <div className="story-ticket-card">
             <div className="mini-photo">
-              <img src={PLACEHOLDER_PHOTO} alt="City sidewalk beside a street" />
+              <img
+                src={PLACEHOLDER_PHOTO}
+                alt="City sidewalk beside a street"
+              />
               <span className="ai-badge">
                 <Sparkles size={12} /> Possible barrier
               </span>
@@ -441,80 +453,6 @@ function AppHeader({
   )
 }
 
-function MapArtwork({
-  tickets,
-  selectedId,
-  onSelect,
-}: {
-  tickets: Ticket[]
-  selectedId: string | null
-  onSelect: (ticket: Ticket) => void
-}) {
-  return (
-    <div className="map-artwork">
-      <div className="park park-one">
-        <span>Woodruff Park</span>
-      </div>
-      <div className="park park-two">
-        <span>Hurt Park</span>
-      </div>
-      <svg
-        className="street-map"
-        viewBox="0 0 900 650"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <g className="blocks">
-          <path d="M-20 35L190 55 170 160 -20 145zM220 60L430 75 410 175 195 160zM460 78L680 95 650 195 435 176zM710 95L920 115 900 220 680 197z" />
-          <path d="M-20 175L160 188 140 300 -20 280zM190 190L400 205 375 320 165 300zM430 207L635 225 610 340 405 319zM665 226L920 245 900 360 640 340z" />
-          <path d="M-20 315L130 330 110 460 -20 440zM160 335L365 350 345 475 135 460zM395 350L595 370 570 500 370 477zM625 370L920 395 900 520 600 500z" />
-          <path d="M-20 475L100 490 80 650H-20zM130 492L335 510 315 650H105zM365 512L550 530 530 650H340zM580 530L920 560 900 650H555z" />
-        </g>
-        <g className="minor-roads">
-          <path d="M80 0L160 650M330 0L405 650M580 0L645 650M810 0L865 650" />
-          <path d="M0 125L900 195M0 275L900 345M0 430L900 500" />
-        </g>
-        <path
-          className="major-road"
-          d="M-40 590C150 500 225 410 360 300S620 95 940 40"
-        />
-        <path className="rail" d="M-20 80C210 210 490 420 920 590" />
-      </svg>
-      <div className="map-label label-one">Peachtree St</div>
-      <div className="map-label label-two">Decatur St SE</div>
-      <div className="map-label label-three">Auburn Ave NE</div>
-      <div className="map-campus">GEORGIA STATE UNIVERSITY</div>
-      {tickets.map((ticket) => (
-        <button
-          key={ticket.id}
-          className={`map-pin ${ownerColors[ticket.owner]} ${
-            selectedId === ticket.id ? "selected" : ""
-          }`}
-          style={ticket.position}
-          onClick={() => onSelect(ticket)}
-          aria-label={`View ${ticket.title}`}
-        >
-          <MapPin size={20} fill="currentColor" />
-          {ticket.reports > 1 && <span>{ticket.reports}</span>}
-        </button>
-      ))}
-      <div className="map-tools">
-        <button aria-label="Map layers">
-          <Layers3 size={18} />
-        </button>
-        <button aria-label="Use my location">
-          <LocateFixed size={18} />
-        </button>
-      </div>
-      <div className="zoom-tools">
-        <button aria-label="Zoom in">+</button>
-        <button aria-label="Zoom out">−</button>
-      </div>
-      <span className="map-credit">© OpenStreetMap contributors</span>
-    </div>
-  )
-}
-
 function TicketDetail({
   ticket,
   onClose,
@@ -547,7 +485,10 @@ function TicketDetail({
   }
 
   return (
-    <aside className="ticket-detail">
+    <aside
+      className="ticket-detail"
+      aria-label={`Ticket details: ${ticket.title}`}
+    >
       <div className="detail-handle" />
       <button
         className="detail-close"
@@ -623,8 +564,9 @@ function TicketDetail({
           </button>
         )}
         <p className="reported-time">
-          <Clock3 size={14} /> First reported {ticket.firstReported.toLowerCase()}{" "}
-          · Updated {ticket.time.toLowerCase()}
+          <Clock3 size={14} /> First reported{" "}
+          {ticket.firstReported.toLowerCase()} · Updated{" "}
+          {ticket.time.toLowerCase()}
         </p>
       </div>
     </aside>
@@ -699,73 +641,86 @@ function MapView({
 }) {
   const { tickets } = state
   const [showDetail, setShowDetail] = useState(true)
-  const [query, setQuery] = useState("")
-  // Default to the newest ticket; selectedId keeps pointing at fresh data after a reload.
+  const mapPage = useRef<HTMLElement>(null)
   const selected =
     tickets.find((ticket) => ticket.id === selectedId) ?? tickets[0] ?? null
 
-  // A newly selected ticket (e.g. one just reported) always opens its details.
+  const markers = useMemo(() => tickets.map(ticketMarker), [tickets])
+  // Votes refresh ticket data without recentering a map the user has panned.
+  const focusPoint = useMemo(
+    () =>
+      selected ? { latitude: selected.lat, longitude: selected.lng } : null,
+    [selected?.id, selected?.lat, selected?.lng],
+  )
   useEffect(() => {
     if (selectedId) setShowDetail(true)
   }, [selectedId])
 
+  useEffect(() => {
+    if (
+      selectedId &&
+      showDetail &&
+      window.matchMedia("(max-width: 1000px)").matches
+    ) {
+      mapPage.current
+        ?.querySelector(".ticket-detail")
+        ?.scrollIntoView({ block: "start" })
+    }
+  }, [selectedId, showDetail])
   return (
-    <section className="map-page">
-      <div className="map-toolbar">
-        <label className="map-search">
-          <Search size={18} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search address or issue"
+    <section
+      ref={mapPage}
+      className={selected && showDetail ? "map-page with-detail" : "map-page"}
+    >
+      <div className="integrated-map">
+        <Suspense
+          fallback={
+            <div className="empty-state" role="status">
+              Loading map…
+            </div>
+          }
+        >
+          <AvisionMap
+            height="100%"
+            dataUrl={import.meta.env.BASE_URL + "avision-map"}
+            initialArea="corridor"
+            markers={markers}
+            selectedMarkerId={selected?.id ?? null}
+            focusPoint={focusPoint}
+            onMarkerSelect={(marker) => {
+              onSelect(marker.id)
+              setShowDetail(true)
+            }}
           />
-        </label>
-        <button className="filter-button">
-          <SlidersHorizontal size={17} /> Filters
-          <span>2</span>
-        </button>
+        </Suspense>
+        {selected && !showDetail && (
+          <button className="reopen-detail" onClick={() => setShowDetail(true)}>
+            <MapPin size={17} /> Open selected ticket
+          </button>
+        )}
+        {(state.error || !selected) && (
+          <div className="integrated-map-notice">
+            <TicketsNotice
+              state={state}
+              emptyTitle="No issues reported yet"
+              emptyText="Reported issues will appear at their coordinates on the map."
+            />
+          </div>
+        )}
       </div>
-      <div className="map-legend">
-        <span>
-          <i className="owner-blue" /> City
-        </span>
-        <span>
-          <i className="owner-green" /> GSU
-        </span>
-        <span>
-          <i className="owner-orange" /> MARTA
-        </span>
-        <span>
-          <i className="owner-slate" /> GDOT
-        </span>
-      </div>
-      <MapArtwork
-        tickets={tickets}
-        selectedId={selected?.id ?? null}
-        onSelect={(ticket) => {
-          onSelect(ticket.id)
-          setShowDetail(true)
-        }}
-      />
-      {!selected && (
-        <div className="map-notice">
-          <TicketsNotice
-            state={state}
-            emptyTitle="No issues reported yet"
-            emptyText="Reported issues will appear as pins on the map."
-          />
-        </div>
-      )}
-      {selected && !showDetail && (
-        <button className="reopen-detail" onClick={() => setShowDetail(true)}>
-          <MapPin size={17} /> Open selected ticket
-        </button>
-      )}
       {selected && showDetail && (
         <TicketDetail
           key={selected.id}
           ticket={selected}
-          onClose={() => setShowDetail(false)}
+          onClose={() => {
+            setShowDetail(false)
+            mapPage.current
+              ?.querySelector<HTMLElement>(".avision-issue-selected")
+              ?.focus({ preventScroll: true })
+            if (window.matchMedia("(max-width: 1000px)").matches) {
+              mapPage.current?.scrollIntoView({ block: "start" })
+            }
+          }}
           onTicketChange={state.replaceTicket}
           onViewFull={() => onOpen(selected.id)}
         />
@@ -777,10 +732,12 @@ function MapView({
 function IssuesView({
   state,
   onReport,
+  onSelect,
   onOpen,
 }: {
   state: TicketsState
   onReport: () => void
+  onSelect: (id: string) => void
   onOpen: (id: string) => void
 }) {
   const { tickets } = state
@@ -878,6 +835,7 @@ function IssuesView({
           <label className="list-search">
             <Search size={17} />
             <input
+              aria-label="Search issues"
               placeholder="Search issues"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -896,7 +854,7 @@ function IssuesView({
 
       <div className="ticket-list">
         {filtered.map((ticket) => (
-          // The whole row opens the ticket; the arrow button does the same for keyboards.
+          // Open details from the row or title; the arrow focuses the issue on the map.
           <article
             className="ticket-row"
             key={ticket.id}
@@ -905,7 +863,15 @@ function IssuesView({
             <img src={ticket.image} alt="" />
             <div className="ticket-main">
               <div className="ticket-title-line">
-                <h3>{ticket.title}</h3>
+                <h3>
+                  <button
+                    className="ticket-title-button"
+                    onClick={() => onOpen(ticket.id)}
+                    aria-label={`Open ticket: ${ticket.title}`}
+                  >
+                    {ticket.title}
+                  </button>
+                </h3>
                 <StatusPill status={ticket.status} />
               </div>
               <p>
@@ -934,7 +900,15 @@ function IssuesView({
                 <small>fixed</small>
               </span>
             </div>
-            <button className="row-action" aria-label={`View ${ticket.title}`}>
+            <button
+              className="row-action"
+              onClick={(event) => {
+                event.stopPropagation()
+                onSelect(ticket.id)
+              }}
+              aria-label={`View ${ticket.title} on map`}
+              title="View on map"
+            >
               <ArrowRight size={18} />
             </button>
           </article>
@@ -1242,6 +1216,10 @@ export default function App() {
           <IssuesView
             state={ticketsState}
             onReport={openReport}
+            onSelect={(id) => {
+              setSelectedId(id)
+              setView("map")
+            }}
             onOpen={setOpenId}
           />
         )}
