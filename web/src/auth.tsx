@@ -15,7 +15,13 @@ import {
   type ReactNode,
 } from "react"
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react"
-import { ApiError, recordSignIn, type Member } from "./api"
+import {
+  ApiError,
+  recordSignIn,
+  saveOnboarding,
+  type Member,
+  type OnboardingAnswers,
+} from "./api"
 import { AUTH0_AUDIENCE, AUTH0_CLIENT_ID, AUTH0_DOMAIN } from "./auth0-config"
 
 const domain = (import.meta.env.VITE_AUTH0_DOMAIN || AUTH0_DOMAIN)
@@ -50,6 +56,8 @@ type AuthState = {
   error: string | null
   signIn: () => void
   signOut: () => void
+  /** Saves the onboarding answers to the signed-in person's account. Throws on failure. */
+  saveOnboarding: (answers: OnboardingAnswers) => Promise<void>
 }
 
 const GUEST_STATE: AuthState = {
@@ -62,6 +70,9 @@ const GUEST_STATE: AuthState = {
   error: null,
   signIn: () => {},
   signOut: () => {},
+  saveOnboarding: async () => {
+    throw new Error("Sign in to save your answers.")
+  },
 }
 
 const AuthContext = createContext<AuthState>(GUEST_STATE)
@@ -175,6 +186,15 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
       signOut: () => {
         void logout({ logoutParams: { returnTo: window.location.origin } })
       },
+      saveOnboarding: async (answers) => {
+        const token = await getAccessTokenSilently({ timeoutInSeconds: 10 }).catch(
+          (err: unknown) => {
+            throw new Error(memberErrorMessage(err))
+          },
+        )
+        if (!token) throw new Error("Please sign in again to save your answers.")
+        setMember(await saveOnboarding(token, answers))
+      },
     }
   }, [
     isLoading,
@@ -187,6 +207,7 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
     startError,
     loginWithRedirect,
     logout,
+    getAccessTokenSilently,
   ])
 
   return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>

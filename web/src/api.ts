@@ -25,6 +25,8 @@ export type Ticket = {
   stillThere: number
   fixed: number
   myVote: VoteChoice | null
+  /** True when this browser's user reported the ticket. */
+  mine: boolean
   image: string
   lat: number
   lng: number
@@ -39,7 +41,7 @@ export type NewTicket = {
   lng: number
   address?: string
   description?: string
-  photoUrl?: string
+  photoUrl?: string // path from uploadPhoto(), e.g. "/uploads/abc.jpg"
 }
 
 // ---------- API shapes and mapping ----------
@@ -65,6 +67,7 @@ type ApiTicket = {
   still_there: number
   fixed: number
   my_vote: VoteChoice | null
+  created_by_me?: boolean // missing from an API that hasn't been updated yet
 }
 
 const OWNER_FROM_API: Record<ApiOwner, Owner> = {
@@ -119,7 +122,8 @@ function toTicket(t: ApiTicket): Ticket {
     stillThere: t.still_there,
     fixed: t.fixed,
     myVote: t.my_vote,
-    image: t.photo_url || PLACEHOLDER_PHOTO,
+    mine: t.created_by_me === true,
+    image: photoLink(t.photo_url) || PLACEHOLDER_PHOTO,
     lat: t.lat,
     lng: t.lng,
   }
@@ -251,6 +255,66 @@ export type Member = {
   avatarUrl: string | null
   role: "user" | "facilities_staff"
   joinedAt: string // ISO timestamp
+  // Onboarding answers; null = not answered.
+  isStudent: boolean | null
+  school: string | null
+  takesMarta: boolean | null
+  onboardedAt: string | null // null = never saved, so the app asks
+}
+
+/** Answers to the onboarding questions. */
+export type OnboardingAnswers = {
+  isStudent: boolean | null
+  school: string | null
+  takesMarta: boolean | null
+}
+
+type ApiMember = {
+  id: string
+  display_name: string | null
+  avatar_url: string | null
+  role: Member["role"]
+  created_at: string
+  is_student: boolean | null
+  school: string | null
+  takes_marta: boolean | null
+  onboarded_at: string | null
+}
+
+function toMember(me: ApiMember): Member {
+  return {
+    id: me.id,
+    displayName: me.display_name,
+    avatarUrl: me.avatar_url,
+    role: me.role,
+    joinedAt: me.created_at,
+    isStudent: me.is_student,
+    school: me.school,
+    takesMarta: me.takes_marta,
+    onboardedAt: me.onboarded_at,
+  }
+}
+
+/** POST to an /me route as the signed-in person, and return their updated user. */
+async function postAsMember(
+  path: string,
+  accessToken: string,
+  body: unknown,
+  failure: string,
+): Promise<Member> {
+  const res = await fetch(API_URL + path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new ApiError(res.status, errorMessage(data?.detail) || `${failure} (${res.status})`)
+  }
+  return toMember((await res.json()) as ApiMember)
 }
 
 /**
@@ -261,41 +325,46 @@ export async function recordSignIn(
   accessToken: string,
   profile: { displayName?: string; avatarUrl?: string },
 ): Promise<Member> {
-  const res = await fetch(API_URL + "/me", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  return postAsMember(
+    "/me",
+    accessToken,
+    {
       display_name: profile.displayName || null,
       // The API only stores https picture links; anything else is left out.
       avatar_url: profile.avatarUrl?.startsWith("https://") ? profile.avatarUrl : null,
-    }),
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    throw new ApiError(res.status, errorMessage(data?.detail) || `Sign-in failed (${res.status})`)
-  }
-  const me = (await res.json()) as {
-    id: string
-    display_name: string | null
-    avatar_url: string | null
-    role: Member["role"]
-    created_at: string
-  }
-  return {
-    id: me.id,
-    displayName: me.display_name,
-    avatarUrl: me.avatar_url,
-    role: me.role,
-    joinedAt: me.created_at,
-  }
+    },
+    "Sign-in failed",
+  )
+}
+
+/** Saves the signed-in person's onboarding answers. A school is kept only for students. */
+export async function saveOnboarding(
+  accessToken: string,
+  answers: OnboardingAnswers,
+): Promise<Member> {
+  return postAsMember(
+    "/me/onboarding",
+    accessToken,
+    {
+      is_student: answers.isStudent,
+      school: answers.isStudent ? answers.school?.trim() || null : null,
+      takes_marta: answers.takesMarta,
+    },
+    "Couldn’t save your answers",
+  )
 }
 
 // ---------- photos ----------
-// A ticket stores a link to its photo (photo_url). uploadPhoto() sends the picture
-// to the API, which keeps the file, and returns the link to put on the ticket.
+// uploadPhoto() sends the picture to the API, which keeps the file and answers with
+// its path, e.g. "/uploads/abc.jpg". The ticket stores that path (photo_url), and
+// photoLink() turns it into a link for this site, so it works locally and live.
+
+/** The link to show a ticket's photo, or null if it has none. */
+export function photoLink(photoUrl: string | null): string | null {
+  if (!photoUrl) return null
+  if (photoUrl.startsWith("/uploads/")) return API_URL + photoUrl
+  return photoUrl // older tickets stored a full link
+}
 
 const PHOTO_MAX_SIDE = 1600 // pixels; the API shrinks to the same size
 
@@ -326,7 +395,7 @@ async function shrinkPhoto(file: File): Promise<Blob> {
   }
 }
 
-/** Uploads a photo and returns its full link, ready to use as a ticket's photoUrl. */
+/** Uploads a photo and returns its path, ready to use as a ticket's photoUrl. */
 export async function uploadPhoto(file: File): Promise<string> {
   const form = new FormData()
   form.append("file", await shrinkPhoto(file), "photo.jpg")
@@ -341,8 +410,7 @@ export async function uploadPhoto(file: File): Promise<string> {
     throw new ApiError(res.status, errorMessage(data?.detail) || fallback)
   }
   const { path } = (await res.json()) as { name: string; path: string }
-  // The API answers with a path like "/uploads/abc.jpg"; tickets need a full link.
-  return new URL(API_URL + path, window.location.origin).href
+  return path
 }
 
 // ---------- report agent ----------
@@ -426,7 +494,8 @@ export async function analyzePhoto(photoUrl: string, lat: number, lng: number): 
     photo: photoUrl.slice(photoUrl.lastIndexOf("/") + 1),
     lat: Number(lat.toFixed(6)),
     lng: Number(lng.toFixed(6)),
-    photo_url: photoUrl,
+    // The drafted report mentions the photo, so this has to be a full link.
+    photo_url: new URL(photoLink(photoUrl) ?? photoUrl, window.location.origin).href,
   }
   const found = await request<ApiAnalysis>("POST", "/analyze", { body, auth: false })
   return {

@@ -39,6 +39,7 @@ import {
   listTickets,
   PLACEHOLDER_PHOTO,
   vote,
+  type Member,
   type Status,
   type Ticket,
   type VoteChoice,
@@ -46,6 +47,7 @@ import {
 import { useAccount } from "./auth"
 import PhotoViewer from "./PhotoViewer"
 import ReportForm from "./ReportForm"
+import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 import { ThemeToggle } from "./theme"
 
@@ -961,15 +963,34 @@ function IssuesView({
   )
 }
 
+// Action counts the profile's progress bar works toward, one after another.
+const MILESTONES = [5, 10, 20, 50, 100, 250, 500]
+
+/** One line about the person from their onboarding answers, e.g. "Student at GSU · Rides MARTA". */
+function answersSummary(member: Member): string {
+  const parts: string[] = []
+  if (member.isStudent === true) {
+    parts.push(member.school ? `Student at ${member.school}` : "Student")
+  } else if (member.isStudent === false) {
+    parts.push("Not a student")
+  }
+  if (member.takesMarta === true) parts.push("Rides MARTA")
+  else if (member.takesMarta === false) parts.push("Doesn’t ride MARTA")
+  return parts.join(" · ") || "No answers shared"
+}
+
 function ProfileView({
   tickets,
   onWelcome,
   onOpen,
+  onEditAnswers,
 }: {
   tickets: Ticket[]
   /** Guests have nothing to sign out of; this takes them back to the sign-in screen. */
   onWelcome: () => void
   onOpen: (id: string) => void
+  /** Reopens the onboarding questions (signed-in people only). */
+  onEditAnswers: () => void
 }) {
   const { account, member, memberError, signIn, signOut } = useAccount()
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
@@ -979,9 +1000,18 @@ function ProfileView({
         year: "numeric",
       })
     : null
-  // Placeholder: the name is real, but the tickets, votes and counts below are
-  // samples until the ticket API knows which account made them.
-  const myTickets = tickets.slice(0, 3)
+  // "Mine" means this browser's user: tickets and votes are saved under its ID
+  // (see api.ts), so they show here whether or not the person is signed in.
+  const myTickets = useMemo(() => tickets.filter((ticket) => ticket.mine), [tickets])
+  const myVotes = useMemo(
+    () => tickets.filter((ticket) => ticket.myVote !== null),
+    [tickets],
+  )
+  const shown = tab === "tickets" ? myTickets : myVotes
+  const markedFixed = myTickets.filter((ticket) => ticket.status !== "Open").length
+  // Every ticket and vote is one action; the bar fills toward the next milestone.
+  const actions = myTickets.length + myVotes.length
+  const milestone = MILESTONES.find((goal) => goal > actions) ?? actions
 
   return (
     <section className="profile-page page-content">
@@ -1003,9 +1033,12 @@ function ProfileView({
             </span>
           </div>
           <p>
-            <MapPin size={15} /> Downtown Atlanta
+            Your tickets and votes from this browser
             {joined && <span>Joined {joined}</span>}
           </p>
+          {member?.onboardedAt && (
+            <p className="profile-answers">{answersSummary(member)}</p>
+          )}
           {account && memberError && (
             <p className="account-notice" role="alert">
               {memberError}{" "}
@@ -1015,7 +1048,11 @@ function ProfileView({
             </p>
           )}
         </div>
-        <button className="edit-profile-button">Edit profile</button>
+        {member && (
+          <button className="edit-profile-button" onClick={onEditAnswers}>
+            Edit profile
+          </button>
+        )}
       </div>
 
       <div className="profile-layout">
@@ -1025,17 +1062,28 @@ function ProfileView({
               className={tab === "tickets" ? "active" : ""}
               onClick={() => setTab("tickets")}
             >
-              My tickets <span>3</span>
+              My tickets <span>{myTickets.length}</span>
             </button>
             <button
               className={tab === "votes" ? "active" : ""}
               onClick={() => setTab("votes")}
             >
-              My votes <span>12</span>
+              My votes <span>{myVotes.length}</span>
             </button>
           </div>
           <div className="profile-ticket-list">
-            {(tab === "tickets" ? myTickets : tickets.slice(0, 4)).map(
+            {shown.length === 0 && (
+              <div className="empty-state">
+                {tab === "tickets" ? <MapPin size={24} /> : <ThumbsUp size={24} />}
+                <h3>{tab === "tickets" ? "No tickets yet" : "No votes yet"}</h3>
+                <p>
+                  {tab === "tickets"
+                    ? "Issues you report will show up here."
+                    : "Open an issue and vote “Still there” or “Fixed” to see it here."}
+                </p>
+              </div>
+            )}
+            {shown.map(
               (ticket) => (
                 <article
                   className="profile-ticket"
@@ -1058,8 +1106,15 @@ function ProfileView({
                       </span>
                       <span>
                         <ThumbsUp size={13} />{" "}
-                        {ticket.stillThere + ticket.fixed} votes
+                        {ticket.stillThere + ticket.fixed}{" "}
+                        {ticket.stillThere + ticket.fixed === 1 ? "vote" : "votes"}
                       </span>
+                      {tab === "votes" && (
+                        <span>
+                          <Check size={13} /> You voted{" "}
+                          {ticket.myVote === "fixed" ? "Fixed" : "Still there"}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <button aria-label={`View ${ticket.title}`}>
@@ -1084,27 +1139,33 @@ function ProfileView({
             </div>
             <div className="impact-grid">
               <div>
-                <strong>3</strong>
+                <strong>{myTickets.length}</strong>
                 <span>Tickets created</span>
               </div>
               <div>
-                <strong>12</strong>
+                <strong>{myVotes.length}</strong>
                 <span>Votes cast</span>
               </div>
               <div>
-                <strong>2</strong>
-                <span>Issues fixed</span>
+                <strong>{markedFixed}</strong>
+                <span>Marked fixed</span>
               </div>
             </div>
             <div className="impact-progress">
               <div>
                 <span>Neighborhood contributor</span>
-                <strong>15 / 20</strong>
+                <strong>
+                  {actions} / {milestone}
+                </strong>
               </div>
               <div className="progress-track">
-                <span />
+                <span style={{ width: `${Math.round((actions / milestone) * 100)}%` }} />
               </div>
-              <small>5 more actions to your next milestone</small>
+              <small>
+                {milestone - actions}{" "}
+                {milestone - actions === 1 ? "more action" : "more actions"} to
+                your next milestone
+              </small>
             </div>
           </div>
           <div className="account-card">
@@ -1193,6 +1254,17 @@ export default function App() {
   const closeToSend = useCallback(() => setToSend(null), [])
   const openReport = useCallback(() => setReportOpen(true), [])
   const closeReport = useCallback(() => setReportOpen(false), [])
+  // Onboarding questions: shown once after a first sign-in (until answered or
+  // skipped for this visit), and again from "Edit profile".
+  const [questionsOpen, setQuestionsOpen] = useState(false)
+  const [questionsSkipped, setQuestionsSkipped] = useState(false)
+  const closeQuestions = useCallback(() => {
+    setQuestionsOpen(false)
+    setQuestionsSkipped(true)
+  }, [])
+  const showQuestions =
+    !!auth.member &&
+    (questionsOpen || (auth.member.onboardedAt === null && !questionsSkipped))
 
   // Wait until we know whether this browser is signed in, so a returning
   // person never sees the welcome screen flash by.
@@ -1262,6 +1334,7 @@ export default function App() {
             tickets={ticketsState.tickets}
             onWelcome={() => setView("onboarding")}
             onOpen={setOpenId}
+            onEditAnswers={() => setQuestionsOpen(true)}
           />
         )}
       </main>
@@ -1273,6 +1346,9 @@ export default function App() {
           onClose={closeTicket}
           onTicketChange={ticketsState.replaceTicket}
         />
+      )}
+      {showQuestions && auth.member && (
+        <OnboardingQuestions member={auth.member} onClose={closeQuestions} />
       )}
       {reportOpen && (
         <ReportForm

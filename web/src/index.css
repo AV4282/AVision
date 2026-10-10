@@ -2864,3 +2864,82 @@ summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
+/* ---------- Onboarding questions (after first sign-in) ---------- */
+.onboarding-dialog {
+  width: min(480px, 100%);
+}
+
+.onboarding-intro {
+  margin: -4px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.choice-group {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.choice-group legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice-group .form-field {
+  margin-top: 10px;
+}
+
+/* A radio button shown as a pill; the real input stays for keyboards and screen readers. */
+.choice {
+  position: relative;
+  min-height: 40px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--slate);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--blue-soft);
+}
+
+:root[data-theme="dark"] .choice:not(.selected) {
+  border-color: var(--control-line);
+}
+
+.choice:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Onboarding answers under the name on the profile */
+.profile-answers {
+  margin: 6px 0 0;
+  color: var(--slate);
+  font-size: 13px;
+}

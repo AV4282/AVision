@@ -44,6 +44,11 @@ def ping():
         return conn.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
 
 
+# What the app gets back about a signed-in person (POST /me and /me/onboarding).
+MEMBER_COLUMNS = """id, display_name, avatar_url, role, created_at,
+                    is_student, school, takes_marta, onboarded_at"""
+
+
 def upsert_user(auth0_sub, display_name=None, avatar_url=None):
     """Find or create the user for a verified Auth0 ID, and record this sign-in.
 
@@ -58,9 +63,35 @@ def upsert_user(auth0_sub, display_name=None, avatar_url=None):
                    SET last_login_at = now(),
                        display_name  = coalesce(EXCLUDED.display_name, users.display_name),
                        avatar_url    = coalesce(EXCLUDED.avatar_url, users.avatar_url)
-               RETURNING id, display_name, avatar_url, role, created_at""",
+               RETURNING """ + MEMBER_COLUMNS,
             {"sub": auth0_sub, "name": display_name, "avatar": avatar_url},
         ).fetchone()
+
+
+def save_onboarding(auth0_sub, is_student, school, takes_marta):
+    """Store a signed-in person's onboarding answers. Returns their user, or None if unknown."""
+    with pool.connection() as conn:
+        return conn.execute(
+            """UPDATE users
+               SET is_student = %(student)s,
+                   school = CASE WHEN %(student)s THEN %(school)s END,
+                   takes_marta = %(marta)s,
+                   onboarded_at = now()
+               WHERE auth0_sub = %(sub)s
+               RETURNING """ + MEMBER_COLUMNS,
+            {"sub": auth0_sub, "student": is_student, "school": school, "marta": takes_marta},
+        ).fetchone()
+
+
+def photo_names_in_use():
+    """File names of every photo a ticket points at (see photos.remove_unused)."""
+    import photos  # local import: photos has no reason to load for every db use
+
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT photo_url FROM tickets WHERE photo_url IS NOT NULL"
+        ).fetchall()
+    return {name for row in rows if (name := photos.name_in(row["photo_url"]))}
 
 
 def create_guest():
@@ -75,6 +106,7 @@ def create_guest():
 
 # Every ticket read goes through this, so list and detail return the same shape.
 # my_vote is the caller's own vote, or NULL when there is no caller or no vote.
+# created_by_me is true when the caller made the ticket (for the profile page).
 TICKET_SELECT = """
 SELECT t.id, t.created_at, t.updated_at, t.issue_type, t.owner, t.lat, t.lng,
        t.address, t.title, t.description, t.photo_url, t.status, t.report_count,
@@ -82,7 +114,8 @@ SELECT t.id, t.created_at, t.updated_at, t.issue_type, t.owner, t.lat, t.lng,
        count(v.vote) FILTER (WHERE v.vote = 'still_there') AS still_there,
        count(v.vote) FILTER (WHERE v.vote = 'fixed')       AS fixed,
        (SELECT mv.vote FROM ticket_votes mv
-         WHERE mv.ticket_id = t.id AND mv.user_id = %(user_id)s::uuid) AS my_vote
+         WHERE mv.ticket_id = t.id AND mv.user_id = %(user_id)s::uuid) AS my_vote,
+       coalesce(t.created_by = %(user_id)s::uuid, false) AS created_by_me
 FROM tickets t
 LEFT JOIN ticket_votes v ON v.ticket_id = t.id
 """

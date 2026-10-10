@@ -2,7 +2,8 @@
 Photo storage for tickets.
 
 An uploaded photo is checked, cleaned and saved as a JPEG in UPLOAD_DIR, and the
-ticket stores a link to it (tickets.photo_url). Cleaning means the file is decoded
+ticket stores its path, e.g. "/uploads/3f2a....jpg" (tickets.photo_url). The web
+app turns the path into a link, so the same ticket works on every site. Cleaning means the file is decoded
 and written out again, which:
   - proves it really is an image (anything else is refused),
   - drops the hidden details phones add, such as the GPS position and phone model,
@@ -16,6 +17,7 @@ import io
 import os
 import re
 import shutil
+import time
 import uuid
 import warnings
 from pathlib import Path
@@ -31,6 +33,11 @@ MAX_SIDE = 1600  # pixels, longest side of the saved photo
 MIN_FREE_BYTES = 500 * 1024 * 1024  # stop taking photos before the disk fills up
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 NAME_PATTERN = re.compile(r"^[0-9a-f]{32}\.jpg$")
+# What tickets.photo_url holds: the path this API serves a photo at.
+PATH_PATTERN = re.compile(r"^/uploads/[0-9a-f]{32}\.jpg$")
+# A photo with no ticket is kept this long, so a ticket being posted right after
+# its photo upload never loses the photo.
+UNUSED_GRACE_SECONDS = 60 * 60
 
 # A small file can unpack into a huge picture and eat all the memory. Refuse anything
 # over 50 megapixels (the web app shrinks photos before sending, so real ones are far smaller).
@@ -95,3 +102,37 @@ def find(name: str) -> Path | None:
         return None
     path = UPLOAD_DIR / name
     return path if path.is_file() else None
+
+
+def name_in(photo_url: str | None) -> str | None:
+    """The file name a ticket's photo_url points at, or None.
+
+    Also reads older full links like "https://site/api/uploads/<name>.jpg".
+    """
+    match = re.search(r"/uploads/([0-9a-f]{32}\.jpg)$", photo_url or "")
+    return match.group(1) if match else None
+
+
+def remove_unused(names_in_use: set[str]) -> int:
+    """Delete stored photos that no ticket uses, once past the grace period.
+
+    Covers deleted tickets and uploads whose ticket was never posted. Returns how
+    many files were removed. Only our own file names are ever touched.
+    """
+    cutoff = time.time() - UNUSED_GRACE_SECONDS
+    removed = 0
+    for path in UPLOAD_DIR.iterdir():
+        name = path.name
+        if name.startswith(".") and name.endswith(".part"):
+            name = name[1:-len(".part")]  # leftover from an upload that crashed midway
+        elif name in names_in_use:
+            continue
+        if not NAME_PATTERN.fullmatch(name) or not path.is_file():
+            continue
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except FileNotFoundError:
+            pass  # already gone
+    return removed
