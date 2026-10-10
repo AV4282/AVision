@@ -136,3 +136,19 @@ def remove_unused(names_in_use: set[str]) -> int:
         except FileNotFoundError:
             pass  # already gone
     return removed
+
+
+def delete(name: str | None) -> bool:
+    """Delete one stored photo, e.g. when its ticket is deleted. True if a file was removed.
+
+    A photo stored by another server (in local dev, photos live on the live site)
+    isn't here; that server's cleanup removes it once no ticket uses it.
+    """
+    path = find(name) if name else None
+    if path is None:
+        return False
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False

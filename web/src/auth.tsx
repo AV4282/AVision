@@ -19,6 +19,7 @@ import {
   ApiError,
   recordSignIn,
   saveOnboarding,
+  setAccessTokenSource,
   type Member,
   type OnboardingAnswers,
 } from "./api"
@@ -122,6 +123,7 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMember(null)
     setMemberError(null)
+    setAccessTokenSource(null)
     if (!sub) return
     let cancelled = false
     getAccessTokenSilently({ timeoutInSeconds: 10 })
@@ -130,13 +132,19 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
         return recordSignIn(token, { displayName, avatarUrl: picture })
       })
       .then((result) => {
-        if (!cancelled) setMember(result)
+        if (cancelled) return
+        // From now on, tickets and votes are saved under this account.
+        setAccessTokenSource(
+          async () => (await getAccessTokenSilently({ timeoutInSeconds: 10 })) || null,
+        )
+        setMember(result)
       })
       .catch((err: unknown) => {
         if (!cancelled) setMemberError(memberErrorMessage(err))
       })
     return () => {
       cancelled = true
+      setAccessTokenSource(null)
     }
   }, [sub, displayName, picture, getAccessTokenSilently])
 

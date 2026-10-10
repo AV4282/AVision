@@ -5,11 +5,11 @@ and run the report agent that fills in a ticket from a photo.
 Run locally:    uvicorn main:app --reload --port 8000     (from the api/ folder)
 Try it at:      http://localhost:8000/docs
 
-Callers identify themselves in one of two ways:
-  - Signed in: "Authorization: Bearer <Auth0 access token>". POST /me checks the
-    token and returns the person's AVision user (created on first sign-in).
-  - Guest: an X-User-Id header holding the ID from POST /guests.
-Tickets and votes still use X-User-Id; moving them to the signed-in user is next.
+Callers identify themselves in one of two ways (see caller() below):
+  - Signed in: "Authorization: Bearer <Auth0 access token>". Tickets and votes are
+    saved under their AVision user. POST /me records the sign-in.
+  - Guest: an X-User-Id header holding the ID from POST /guests. Only guest IDs are
+    accepted this way, so nobody can act as a signed-in person by sending their ID.
 """
 
 import logging
@@ -86,7 +86,7 @@ app = FastAPI(title="AVision ticket API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -135,7 +135,7 @@ class Ticket(BaseModel):
     still_there: int
     fixed: int
     my_vote: Vote | None
-    created_by_me: bool  # the caller (X-User-Id) reported this ticket
+    created_by_me: bool  # the caller posted this ticket (so they may delete it)
 
 
 class VoteIn(BaseModel):
@@ -218,10 +218,37 @@ def verified_sub(authorization: str | None) -> str:
         )
 
 
-def require_user(user_id: UUID | None) -> UUID:
-    if user_id is None:
-        raise HTTPException(401, "Send an X-User-Id header (get one from POST /guests)")
-    return user_id
+def caller(
+    authorization: str | None, guest_id: UUID | None, *, required: bool = False, strict: bool = True
+) -> UUID | None:
+    """Who is making this request: their AVision user ID, or None for nobody.
+
+    A valid sign-in token wins. Otherwise X-User-Id is used, but only for guests.
+    With strict=False (for reading), a bad token or unknown guest just means
+    "nobody", so a stale ID never stops someone from browsing.
+    """
+    if authorization:
+        try:
+            return db.user_id_for_sub(verified_sub(authorization))
+        except HTTPException:
+            if strict:
+                raise
+            return None
+    if guest_id is not None:
+        guest = db.is_guest(guest_id)
+        if guest:
+            return guest_id
+        if strict:
+            raise HTTPException(
+                401,
+                "Unknown X-User-Id; get a new one from POST /guests"
+                if guest is None
+                else "That ID belongs to a signed-in account. Sign in to act as it.",
+            )
+        return None
+    if required:
+        raise HTTPException(401, "Sign in, or send an X-User-Id header (get one from POST /guests)")
+    return None
 
 
 @app.get("/health")
@@ -230,11 +257,24 @@ def health():
 
 
 @app.post("/me", response_model=Me)
-def sign_in(authorization: AuthorizationHeader = None, body: MeIn | None = None):
-    """Record a sign-in. Creates the user the first time; returns the same user after."""
+def sign_in(
+    authorization: AuthorizationHeader = None,
+    guest_id: UserIdHeader = None,
+    body: MeIn | None = None,
+):
+    """Record a sign-in. Creates the user the first time; returns the same user after.
+
+    Send the browser's guest ID as X-User-Id to move what that guest did (tickets,
+    votes) to the account. The guest is then removed.
+    """
     sub = verified_sub(authorization)
     details = body or MeIn()
-    return db.upsert_user(sub, details.display_name, details.avatar_url)
+    member = db.upsert_user(sub, details.display_name, details.avatar_url)
+    if guest_id is not None and guest_id != member["id"]:
+        moved = db.claim_guest(member["id"], guest_id)
+        if moved["tickets"] or moved["votes"]:
+            log.info("Moved %(tickets)d ticket(s) and %(votes)d vote(s) from a guest to an account", moved)
+    return member
 
 
 @app.post("/me/onboarding", response_model=Me)
@@ -263,33 +303,59 @@ def create_guest():
 def list_tickets(
     status: Status | None = None,
     owner: Owner | None = None,
-    user_id: UserIdHeader = None,
+    authorization: AuthorizationHeader = None,
+    guest_id: UserIdHeader = None,
 ):
+    user_id = caller(authorization, guest_id, strict=False)
     return db.list_tickets(status=status, owner=owner, user_id=user_id)
 
 
 @app.get("/tickets/{ticket_id}", response_model=Ticket)
-def get_ticket(ticket_id: UUID, user_id: UserIdHeader = None):
-    ticket = db.get_ticket(ticket_id, user_id)
+def get_ticket(
+    ticket_id: UUID, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
+):
+    ticket = db.get_ticket(ticket_id, caller(authorization, guest_id, strict=False))
     if ticket is None:
         raise HTTPException(404, "Ticket not found")
     return ticket
 
 
 @app.post("/tickets", response_model=Ticket, status_code=201)
-def create_ticket(body: TicketIn, user_id: UserIdHeader = None):
-    """Anyone can create a ticket; X-User-Id is optional and recorded as the creator."""
+def create_ticket(
+    body: TicketIn, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
+):
+    """Anyone can create a ticket. The caller, if any, is recorded as its poster."""
     try:
-        return db.create_ticket(body.model_dump(), user_id)
+        return db.create_ticket(body.model_dump(), caller(authorization, guest_id))
     except db.UnknownUser:
         raise HTTPException(401, "Unknown X-User-Id; get a new one from POST /guests")
 
 
+@app.delete("/tickets/{ticket_id}", status_code=204)
+def delete_ticket(
+    ticket_id: UUID, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
+):
+    """Delete a ticket. Only the person who posted it can. Its votes and photo go with it."""
+    user_id = caller(authorization, guest_id, required=True)
+    try:
+        photo_url = db.delete_ticket(ticket_id, user_id)
+    except LookupError:
+        raise HTTPException(404, "Ticket not found")
+    except db.NotYours:
+        raise HTTPException(403, "Only the person who posted this ticket can delete it")
+    photos.delete(photos.name_in(photo_url))
+
+
 @app.post("/tickets/{ticket_id}/votes", response_model=Ticket)
-def vote(ticket_id: UUID, body: VoteIn, user_id: UserIdHeader = None):
+def vote(
+    ticket_id: UUID,
+    body: VoteIn,
+    authorization: AuthorizationHeader = None,
+    guest_id: UserIdHeader = None,
+):
     """Cast or change the caller's vote. Returns the ticket with new counts and status."""
     try:
-        ticket = db.cast_vote(ticket_id, require_user(user_id), body.vote)
+        ticket = db.cast_vote(ticket_id, caller(authorization, guest_id, required=True), body.vote)
     except db.UnknownUser:
         raise HTTPException(401, "Unknown X-User-Id; get a new one from POST /guests")
     except db.TicketMerged:

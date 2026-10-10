@@ -83,6 +83,108 @@ def save_onboarding(auth0_sub, is_student, school, takes_marta):
         ).fetchone()
 
 
+def user_id_for_sub(auth0_sub):
+    """The AVision user ID for a verified Auth0 ID, creating the user if needed.
+
+    Cheaper than upsert_user: it doesn't record a sign-in. Used on every signed-in request.
+    """
+    with pool.connection() as conn:
+        return conn.execute(
+            """INSERT INTO users (auth0_sub) VALUES (%s)
+               ON CONFLICT (auth0_sub) DO UPDATE SET auth0_sub = EXCLUDED.auth0_sub
+               RETURNING id""",
+            (auth0_sub,),
+        ).fetchone()["id"]
+
+
+def is_guest(user_id):
+    """True for a guest user, False for anyone else, None if there's no such user."""
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT auth0_sub LIKE 'guest|%%' AS guest FROM users WHERE id = %s", (user_id,)
+        ).fetchone()
+    return None if row is None else row["guest"]
+
+
+# Status after votes change outside cast_vote (e.g. merged in from a guest):
+# the same rule, but a fixed or merged ticket stays as it is.
+RECOMPUTE_STATUS = """
+UPDATE tickets t SET
+    status = CASE WHEN t.status IN ('fixed', 'merged') THEN t.status
+                  WHEN v.fixed >= %(threshold)s AND v.fixed > v.still THEN 'likely_fixed'
+                  ELSE 'open' END,
+    updated_at = now()
+FROM (SELECT ticket_id,
+             count(*) FILTER (WHERE vote = 'fixed')       AS fixed,
+             count(*) FILTER (WHERE vote = 'still_there') AS still
+      FROM ticket_votes WHERE ticket_id = ANY(%(ids)s) GROUP BY ticket_id) v
+WHERE t.id = v.ticket_id
+"""
+
+
+def claim_guest(member_id, guest_id):
+    """Move a guest's tickets, votes and reports to a signed-in member, then remove the guest.
+
+    Called when someone signs in on a browser where they used AVision as a guest.
+    Where both voted on the same ticket, the member's own vote wins. Does nothing
+    unless guest_id really is a guest. Returns how many tickets and votes moved.
+    """
+    with pool.connection() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM users WHERE id = %s AND auth0_sub LIKE 'guest|%%' FOR UPDATE",
+            (guest_id,),
+        ).fetchone():
+            return {"tickets": 0, "votes": 0}
+
+        tickets = conn.execute(
+            "UPDATE tickets SET created_by = %s WHERE created_by = %s", (member_id, guest_id)
+        ).rowcount
+        # The guest's vote is dropped wherever the member already voted on that ticket.
+        dropped = [
+            row["ticket_id"]
+            for row in conn.execute(
+                """DELETE FROM ticket_votes g
+                   USING ticket_votes m
+                   WHERE g.user_id = %s AND m.user_id = %s AND m.ticket_id = g.ticket_id
+                   RETURNING g.ticket_id""",
+                (guest_id, member_id),
+            ).fetchall()
+        ]
+        votes = conn.execute(
+            "UPDATE ticket_votes SET user_id = %s WHERE user_id = %s", (member_id, guest_id)
+        ).rowcount
+        conn.execute("UPDATE reports SET user_id = %s WHERE user_id = %s", (member_id, guest_id))
+        if dropped:
+            conn.execute(RECOMPUTE_STATUS, {"ids": dropped, "threshold": FIXED_VOTE_THRESHOLD})
+        conn.execute("DELETE FROM users WHERE id = %s", (guest_id,))
+        return {"tickets": tickets, "votes": votes}
+
+
+class NotYours(Exception):
+    """The caller didn't post this ticket, so they can't change it."""
+
+
+def delete_ticket(ticket_id, user_id):
+    """Delete a ticket its poster no longer wants, with its votes.
+
+    Reports that point at it are kept but unlinked. Returns the ticket's photo_url
+    (so the caller can delete the file), or raises LookupError / NotYours.
+    """
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT created_by, photo_url FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,)
+        ).fetchone()
+        if row is None:
+            raise LookupError(ticket_id)
+        if user_id is None or row["created_by"] != user_id:
+            raise NotYours
+        conn.execute("DELETE FROM ticket_votes WHERE ticket_id = %s", (ticket_id,))
+        conn.execute("UPDATE reports SET ticket_id = NULL WHERE ticket_id = %s", (ticket_id,))
+        conn.execute("UPDATE tickets SET merged_into = NULL WHERE merged_into = %s", (ticket_id,))
+        conn.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))
+        return row["photo_url"]
+
+
 def photo_names_in_use():
     """File names of every photo a ticket points at (see photos.remove_unused)."""
     import photos  # local import: photos has no reason to load for every db use

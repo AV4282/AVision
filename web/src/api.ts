@@ -26,7 +26,7 @@ export type Ticket = {
   fixed: number
   myVote: VoteChoice | null
   /** True when this browser's user reported the ticket. */
-  mine: boolean
+  mine: boolean // the viewer posted it, so they can delete it
   image: string
   lat: number
   lng: number
@@ -129,9 +129,19 @@ function toTicket(t: ApiTicket): Ticket {
   }
 }
 
-// ---------- guest identity ----------
-// Until Auth0, each browser gets a guest user from POST /guests, kept in
-// localStorage and sent as X-User-Id so votes stick to one person.
+// ---------- who is asking ----------
+// Signed in: requests carry the Auth0 access token, and the API saves tickets
+// and votes under the person's account (auth.tsx provides the token).
+// Not signed in: the browser gets a guest user from POST /guests, kept in
+// localStorage and sent as X-User-Id. Signing in moves the guest's activity
+// to the account (see recordSignIn), and the guest ID is then forgotten.
+
+let accessToken: (() => Promise<string | null>) | null = null
+
+/** Set by auth.tsx once a sign-in is confirmed, and cleared on sign-out. */
+export function setAccessTokenSource(source: (() => Promise<string | null>) | null) {
+  accessToken = source
+}
 
 const GUEST_KEY = "avision.guestId"
 let guestId: string | null = null
@@ -194,13 +204,16 @@ function errorMessage(detail: unknown): string | null {
 }
 
 async function request<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   { body, auth = true, retried = false }: { body?: unknown; auth?: boolean; retried?: boolean } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers["Content-Type"] = "application/json"
-  if (auth) headers["X-User-Id"] = await getGuestId()
+  // Signed in: send the token. If it can't be had right now, carry on as a guest.
+  const token = auth && accessToken ? await accessToken().catch(() => null) : null
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  else if (auth) headers["X-User-Id"] = await getGuestId()
 
   const res = await fetch(API_URL + path, {
     method,
@@ -209,7 +222,7 @@ async function request<T>(
   })
 
   // The stored guest no longer exists (e.g. the database was reset): get a new one, retry once.
-  if (res.status === 401 && auth && !retried) {
+  if (res.status === 401 && auth && !token && !retried) {
     storeGuest(null)
     return request<T>(method, path, { body, auth, retried: true })
   }
@@ -217,6 +230,7 @@ async function request<T>(
     const data = await res.json().catch(() => null)
     throw new ApiError(res.status, errorMessage(data?.detail) || `Request failed (${res.status})`)
   }
+  if (res.status === 204) return undefined as T // e.g. a delete: nothing to read
   return res.json() as Promise<T>
 }
 
@@ -301,12 +315,14 @@ async function postAsMember(
   accessToken: string,
   body: unknown,
   failure: string,
+  extraHeaders: Record<string, string> = {},
 ): Promise<Member> {
   const res = await fetch(API_URL + path, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
+      ...extraHeaders,
     },
     body: JSON.stringify(body),
   })
@@ -320,12 +336,15 @@ async function postAsMember(
 /**
  * Tells the API someone signed in, proving who with their Auth0 access token.
  * The API creates their user the first time and returns the same one after.
+ * Anything this browser did as a guest moves to the account, and the guest ID
+ * is forgotten (a new one is made if they sign out and keep going).
  */
 export async function recordSignIn(
   accessToken: string,
   profile: { displayName?: string; avatarUrl?: string },
 ): Promise<Member> {
-  return postAsMember(
+  const guest = guestId ?? readStoredGuest()
+  const member = await postAsMember(
     "/me",
     accessToken,
     {
@@ -334,7 +353,10 @@ export async function recordSignIn(
       avatar_url: profile.avatarUrl?.startsWith("https://") ? profile.avatarUrl : null,
     },
     "Sign-in failed",
+    guest ? { "X-User-Id": guest } : {},
   )
+  if (guest) storeGuest(null)
+  return member
 }
 
 /** Saves the signed-in person's onboarding answers. A school is kept only for students. */
@@ -514,6 +536,11 @@ export async function analyzePhoto(photoUrl: string, lat: number, lng: number): 
     report: found.report,
     usedAgent: found.orchestrator !== "direct",
   }
+}
+
+/** Deletes a ticket. Only the person who posted it can. */
+export async function deleteTicket(ticketId: string): Promise<void> {
+  await request<void>("DELETE", `/tickets/${ticketId}`)
 }
 
 export async function vote(ticketId: string, choice: VoteChoice): Promise<Ticket> {

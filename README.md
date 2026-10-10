@@ -142,13 +142,14 @@ All demo rows are marked "(seed)", and `002_seed_tickets.sql` has the SQL to rem
 | GET | `/tickets?status=&owner=` | Lists tickets, newest first, with vote counts |
 | GET | `/tickets/{id}` | One ticket |
 | POST | `/tickets` | Creates a ticket |
+| DELETE | `/tickets/{id}` | Deletes a ticket, with its votes and photo. Only the person who posted it can |
 | POST | `/tickets/{id}/votes` | Casts or changes the caller's vote: `{"vote": "still_there" \| "fixed"}` |
 | POST | `/uploads` | Stores a ticket photo (form field `file`; JPEG, PNG or WebP, up to 12 MB) and returns its path |
 | GET | `/uploads/{name}` | Serves a stored photo |
 | GET | `/analyze/status` | Says whether photo analysis is set up |
 | POST | `/analyze` | Runs the report agent on an uploaded photo: `{"photo": "<name>.jpg", "lat": ..., "lng": ...}`. Saves nothing |
 
-Callers identify themselves with an `X-User-Id` header holding their guest ID; the web app handles this automatically. When Auth0 is added, the user will come from the sign-in token instead.
+**Who is asking:** signed-in callers send `Authorization: Bearer <Auth0 access token>`, and their tickets and votes are saved under their account. Everyone else sends `X-User-Id` with a guest ID from `POST /guests`; only guest IDs are accepted that way. When someone signs in, the web app sends its guest ID to `POST /me` once, and that guest's tickets and votes move to the account. The web app handles all of this automatically.
 
 **Photos:** a ticket stores a link to its photo (`photo_url`). The web app uploads the picture to `/uploads` first, then creates the ticket with the link it gets back. The API re-saves every photo as a JPEG of at most 1600 px, which removes the GPS position and other hidden details, and refuses files that are not images. Photos are saved in `api/uploads/` locally (ignored by git) and in `/var/lib/avision/uploads` on the server. Because everyone shares one database, a photo uploaded while running locally only shows on that machine; upload on the live site for photos everyone can see.
 

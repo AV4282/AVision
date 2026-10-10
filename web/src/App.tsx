@@ -33,9 +33,11 @@ import {
   Sparkles,
   ThumbsUp,
   User,
+  Trash2,
   X,
 } from "lucide-react"
 import {
+  deleteTicket,
   listTickets,
   PLACEHOLDER_PHOTO,
   vote,
@@ -63,6 +65,8 @@ type TicketsState = {
   replaceTicket: (ticket: Ticket) => void
   /** Put a just-created ticket at the top, matching the API's newest-first order. */
   addTicket: (ticket: Ticket) => void
+  /** Drop a ticket that was just deleted. */
+  removeTicket: (id: string) => void
 }
 
 /** Loads tickets from the API once, with a reload for retries and later refreshes. */
@@ -105,7 +109,10 @@ function useTickets(): TicketsState {
       ...current.filter((ticket) => ticket.id !== created.id),
     ])
   }, [])
-  return { tickets, loading, error, reload, replaceTicket, addTicket }
+  const removeTicket = useCallback((id: string) => {
+    setTickets((current) => current.filter((ticket) => ticket.id !== id))
+  }, [])
+  return { tickets, loading, error, reload, replaceTicket, addTicket, removeTicket }
 }
 
 /** Loading, error, and empty states shared by the map and the issues list. */
@@ -463,15 +470,35 @@ function TicketDetail({
   onClose,
   onTicketChange,
   onViewFull,
+  onDeleted,
 }: {
   ticket: Ticket
   onClose: () => void
   onTicketChange: (ticket: Ticket) => void
   /** Opens the ticket on its own. Left out where the ticket is already open that way. */
   onViewFull?: () => void
+  /** Called after the poster deletes this ticket. */
+  onDeleted: (id: string) => void
 }) {
   const [pending, setPending] = useState<VoteChoice | null>(null)
   const [voteError, setVoteError] = useState<string | null>(null)
+  // Deleting asks once more first, right where the button was.
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  async function removeTicket() {
+    if (deleting) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteTicket(ticket.id)
+      onDeleted(ticket.id)
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Couldn’t delete the ticket")
+      setDeleting(false)
+    }
+  }
   const [viewingPhoto, setViewingPhoto] = useState(false)
   // Tickets without a photo show a stock picture, which isn't worth enlarging.
   const hasPhoto = ticket.image !== PLACEHOLDER_PHOTO
@@ -596,6 +623,47 @@ function TicketDetail({
           {ticket.firstReported.toLowerCase()} · Updated{" "}
           {ticket.time.toLowerCase()}
         </p>
+        {ticket.mine && (
+          <div className="delete-ticket">
+            {!confirmingDelete ? (
+              <button
+                type="button"
+                className="delete-ticket-button"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 size={15} /> Delete my ticket
+              </button>
+            ) : (
+              <div className="delete-confirm" role="group" aria-label="Confirm delete">
+                <p>Delete this ticket for everyone? Its votes and photo go too.</p>
+                <div>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={deleting}
+                  >
+                    Keep it
+                  </button>
+                  <button
+                    type="button"
+                    className="delete-ticket-button danger"
+                    onClick={removeTicket}
+                    disabled={deleting}
+                    autoFocus
+                  >
+                    <Trash2 size={15} /> {deleting ? "Deleting…" : "Yes, delete"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {deleteError && (
+              <p className="vote-error" role="alert">
+                {deleteError}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </aside>
   )
@@ -606,10 +674,12 @@ function TicketModal({
   ticket,
   onClose,
   onTicketChange,
+  onDeleted,
 }: {
   ticket: Ticket
   onClose: () => void
   onTicketChange: (ticket: Ticket) => void
+  onDeleted: (id: string) => void
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
 
@@ -650,6 +720,7 @@ function TicketModal({
           ticket={ticket}
           onClose={onClose}
           onTicketChange={onTicketChange}
+          onDeleted={onDeleted}
         />
       </div>
     </div>
@@ -751,6 +822,7 @@ function MapView({
           }}
           onTicketChange={state.replaceTicket}
           onViewFull={() => onOpen(selected.id)}
+          onDeleted={state.removeTicket}
         />
       )}
     </section>
@@ -1241,6 +1313,12 @@ export default function App() {
   // The ticket opened on top of the page, from a list or "View full ticket".
   const [openId, setOpenId] = useState<string | null>(null)
   const ticketsState = useTickets()
+  // Once a sign-in is confirmed, reload: "yours" and your votes now come from the account.
+  const memberId = auth.member?.id
+  const reloadTickets = ticketsState.reload
+  useEffect(() => {
+    if (memberId) reloadTickets()
+  }, [memberId, reloadTickets])
   const openTicket =
     ticketsState.tickets.find((ticket) => ticket.id === openId) ?? null
   const closeTicket = useCallback(() => setOpenId(null), [])
@@ -1340,6 +1418,10 @@ export default function App() {
           ticket={openTicket}
           onClose={closeTicket}
           onTicketChange={ticketsState.replaceTicket}
+          onDeleted={(id) => {
+            ticketsState.removeTicket(id)
+            closeTicket()
+          }}
         />
       )}
       {showQuestions && auth.member && (
