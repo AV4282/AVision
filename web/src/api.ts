@@ -28,7 +28,6 @@ export type Ticket = {
   image: string
   lat: number
   lng: number
-  position: { left: string; top: string } // placeholder map pin until Leaflet
 }
 
 /** Fields for POST /tickets. */
@@ -103,17 +102,6 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return new Date(iso).toLocaleDateString()
 }
 
-// Stable pseudo-random pin spot from the ID, kept inside the 15–85% band so pins
-// don't sit under the map's edges. Replaced by real lat/lng when Leaflet lands.
-function placeholderPosition(id: string) {
-  let hash = 0
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  return {
-    left: `${15 + (hash % 70)}%`,
-    top: `${15 + ((hash >>> 8) % 70)}%`,
-  }
-}
-
 function toTicket(t: ApiTicket): Ticket {
   return {
     id: t.id,
@@ -134,7 +122,6 @@ function toTicket(t: ApiTicket): Ticket {
     image: t.photo_url || PLACEHOLDER_PHOTO,
     lat: t.lat,
     lng: t.lng,
-    position: placeholderPosition(t.id),
   }
 }
 

@@ -5,12 +5,18 @@ export const ISSUE_OWNERS: readonly {
   id: AvisionMapOwner;
   label: string;
   color: string;
+  symbol: string
 }[] = [
-  { id: "gsu", label: "GSU Facilities", color: "#2463a6" },
-  { id: "city", label: "City of Atlanta", color: "#0b7162" },
-  { id: "marta", label: "MARTA", color: "#854ca3" },
-  { id: "gdot", label: "GDOT", color: "#995315" },
-  { id: "unknown", label: "Owner unknown", color: "#59616b" },
+  { id: "gsu", label: "GSU Facilities", color: "#97CAEB", symbol: "G" },
+  {
+    id: "city",
+    label: "City of Atlanta / ATL311",
+    color: "#0039A6",
+    symbol: "C",
+  },
+  { id: "marta", label: "MARTA", color: "#FDBE43", symbol: "M" },
+  { id: "gdot", label: "GDOT", color: "#F4A261", symbol: "D" },
+  { id: "unknown", label: "Owner unknown", color: "#334155", symbol: "?" },
 ];
 
 export const ISSUE_STATUS_LABELS: Record<AvisionMapStatus, string> = {

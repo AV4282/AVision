@@ -1,7 +1,7 @@
 .avision-map-widget {
-  --avision-ink: #233e34;
-  --avision-muted: #485d53;
-  --avision-teal: #0b5b50;
+  --avision-ink: #334155;
+  --avision-muted: #334155;
+  --avision-teal: #0039A6;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -9,7 +9,7 @@
   min-height: 320px;
   width: 100%;
   min-width: 0;
-  border: 1px solid #d5dfd5;
+  border: 1px solid #334155;
   border-radius: 12px;
   background: #fff;
   color: var(--avision-ink);
@@ -38,7 +38,7 @@
 .avision-map-widget button:focus-visible,
 .avision-map-widget input:focus-visible,
 .avision-map-widget a:focus-visible {
-  outline: 3px solid #168578;
+  outline: 3px solid #0039A6;
   outline-offset: 2px;
 }
 .avision-map-widget a {
@@ -50,7 +50,7 @@
   gap: 12px;
   padding: 12px;
   flex-shrink: 0;
-  border-bottom: 1px solid #dfe7de;
+  border-bottom: 1px solid #E5EEE9;
 }
 .avision-map-search {
   position: relative;
@@ -59,10 +59,10 @@
 }
 .avision-map-search > input {
   width: 100%;
-  border: 1px solid #c9d6ca;
+  border: 1px solid #334155;
   border-radius: 8px;
   padding: 10px 36px 10px 12px;
-  background: #f8faf6;
+  background: #FAFBF8;
 }
 .avision-map-search > input::placeholder {
   color: var(--avision-muted);
@@ -86,7 +86,7 @@
   right: 0;
   z-index: 1200;
   background: #fff;
-  border: 1px solid #c9d6ca;
+  border: 1px solid #334155;
   border-radius: 9px;
   box-shadow: 0 8px 25px #24413222;
   padding: 5px;
@@ -106,7 +106,7 @@
 }
 .avision-map-results button:hover,
 .avision-map-results .avision-search-active {
-  background: #eef4e9;
+  background: #E5EEE9;
 }
 .avision-map-results small {
   font-size: 12px;
@@ -126,14 +126,14 @@
 .avision-map-style button,
 .avision-map-sources {
   padding: 9px 12px;
-  border: 1px solid #c9d6ca;
+  border: 1px solid #334155;
   border-radius: 7px;
   background: #fff;
   white-space: nowrap;
 }
 .avision-map-views button:hover,
 .avision-map-sources:hover {
-  background: #eef4e9;
+  background: #E5EEE9;
 }
 .avision-map-canvas {
   position: relative;
@@ -145,7 +145,7 @@
 .avision-map-widget .avision-leaflet-map {
   height: 100%;
   width: 100%;
-  background: #edf0e8;
+  background: #E5EEE9;
   font-family: system-ui, sans-serif;
 }
 .avision-soft-map .leaflet-tile {
@@ -157,7 +157,7 @@
   color: var(--avision-muted);
 }
 .avision-map-widget .leaflet-control-attribution a {
-  color: #304f3e;
+  color: #0039A6;
 }
 .avision-map-widget .leaflet-tooltip {
   font:
@@ -168,7 +168,7 @@
   border-radius: 5px;
 }
 .avision-map-widget .avision-station-pin {
-  background: #254f79;
+  background: #FDBE43;
   color: #fff;
   border: 2px solid #fff;
   border-radius: 7px;
@@ -184,27 +184,24 @@
   stroke: currentColor;
   stroke-width: 1.7;
 }
-.avision-map-widget .avision-issue-pin {
-  color: #fff;
-  border-radius: 50%;
-}
-.avision-map-widget .avision-issue-pin > span {
-  width: 100%;
-  height: 100%;
-  border: 3px solid #fff;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px #18364b44;
-}
+.avision-map-widget .avision-issue-pin { border-radius: 50%; color: #334155; }
+.avision-issue-agency { width: 100%; height: 100%; display: grid; place-items: center;
+  border: 2px solid #334155; border-radius: 50%; box-shadow: 0 2px 6px #18364b44; font-weight: 800; }
+.avision-owner-city .avision-issue-agency, .avision-owner-unknown .avision-issue-agency { color: white; }
+.avision-issue-selected { outline: 3px solid #0039A6; outline-offset: 4px; }
+.avision-issue-status { position: absolute; right: -8px; top: -8px; }
+.avision-issue-status, .avision-legend-status { display: inline-grid; place-items: center;
+  width: 20px; height: 20px; border: 2px solid #FAFBF8; box-shadow: 0 0 0 1px #334155; font-weight: 800; font-size: 12px; }
+.avision-issue-status-open { border-radius: 3px; color: white; background: #C2410C; }
+.avision-issue-status-fixed, .avision-issue-status-likely_fixed { border-radius: 50%; color: #334155; background: #DDD6FE; }
+.avision-issue-status-merged, .avision-issue-status-unknown { color: white; background: #334155; }
 .avision-map-legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 14px;
   padding: 8px 12px;
-  border-top: 1px solid #dfe7de;
+  border-top: 1px solid #E5EEE9;
   flex-shrink: 0;
   font-size: 12px;
 }
@@ -222,22 +219,13 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.avision-map-legend-fixed {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #59616b;
-  color: #fff;
-  opacity: 0.6;
-  font-size: 11px;
-}
 .avision-map-options {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 16px;
   padding: 10px 12px;
-  border-top: 1px solid #dfe7de;
+  border-top: 1px solid #E5EEE9;
   flex-shrink: 0;
   font-size: 13px;
 }
@@ -260,8 +248,8 @@
   padding: 6px 10px;
 }
 .avision-map-style button[aria-pressed='true'] {
-  background: #e8f2e3;
-  border-color: #a9c2a7;
+  background: #E5EEE9;
+  border-color: #334155;
   color: var(--avision-teal);
 }
 .avision-map-sources {
@@ -287,7 +275,7 @@
   padding: 22px;
   overflow-y: auto;
   background: #fff;
-  border: 1px solid #cad7cb;
+  border: 1px solid #334155;
   border-radius: 12px;
   color: var(--avision-ink);
   font:
@@ -312,7 +300,7 @@
 }
 .avision-map-dialog-heading button {
   border: 0;
-  background: #f0f4ed;
+  background: #E5EEE9;
   border-radius: 6px;
   height: 36px;
   width: 36px;
@@ -342,3 +330,14 @@
     scroll-behavior: auto !important;
   }
 }
+
+.avision-map-widget .avision-station-pin { color: #334155; border-color: #334155; }
+.avision-map-toolbar { flex-wrap: wrap; }
+.avision-map-search { flex-basis: 220px; }
+.avision-map-views { flex-wrap: wrap; }
+.avision-map-widget .avision-map-legend-dot { display: inline-grid; place-items: center;
+  width: 20px; height: 20px; border: 1px solid #334155; font-size: 11px; font-weight: 800; color: #334155; }
+.avision-map-legend-item:nth-child(3) .avision-map-legend-dot,
+.avision-map-legend-item:nth-child(6) .avision-map-legend-dot { color: white; }
+.avision-map-options label, .avision-map-options button, .avision-map-views button { min-height: 44px; }
+@media (max-width: 640px) { .avision-map-search { flex-basis: auto; } }

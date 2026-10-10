@@ -8,7 +8,7 @@ import {
   useMap,
   useMapEvents,
 } from "react-leaflet";
-import { divIcon } from "leaflet";
+import { divIcon, type Marker as LeafletMarker } from "leaflet"
 import {
   ATLANTA_VIEW,
   CORRIDOR_VIEW,
@@ -28,6 +28,8 @@ import type {
   MapCoordinates,
   NeighborhoodData,
   StationData,
+  AvisionMapStatus,
+  AvisionMapMarker,
 } from "./types";
 import "leaflet/dist/leaflet.css";
 import "./AvisionMap.css";
@@ -46,24 +48,132 @@ const stationIcon = divIcon({
   iconSize: [29, 32],
   iconAnchor: [14, 16],
 });
+// Agency fills and letters stay independent of status badges and selection rings.
 const issueIcons = new Map(
-  ISSUE_OWNERS.map((owner) => [
-    owner.id,
-    [false, true].map((fixed) =>
-      divIcon({
-        className: "avision-issue-pin",
-        html: `<span aria-hidden="true" style="background:${owner.color}">${fixed ? "✓" : "●"}</span>`,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-      }),
+  ISSUE_OWNERS.flatMap((owner) =>
+    (["open", "likely_fixed", "fixed", "merged", "unknown"] as const).flatMap(
+      (status) =>
+        [false, true].map(
+          (selected) =>
+            [
+              `${owner.id}:${status}:${selected}`,
+              divIcon({
+                className: `avision-issue-pin avision-owner-${owner.id} ${
+                  selected ? "avision-issue-selected" : ""
+                }`,
+                html: `<span class="avision-issue-agency" aria-hidden="true" style="background:${owner.color}">${owner.symbol}</span><span class="avision-issue-status avision-issue-status-${status}" aria-hidden="true">${
+                  status === "fixed"
+                    ? "✓"
+                    : status === "likely_fixed"
+                      ? "◷"
+                      : status === "merged"
+                        ? "↗"
+                        : status === "open"
+                          ? "!"
+                          : "?"
+                }</span>`,
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+              }),
+            ] as const,
+        ),
     ),
-  ]),
+  ),
 );
 
-type Focus = { bounds?: MapBounds; point?: MapCoordinates };
-type SearchResult = { key: string; name: string; kind: string; focus: Focus };
+type Focus = {
+  bounds?: MapBounds
+  point?: MapCoordinates
+}
+
+type SearchResult = {
+  key: string
+  name: string
+  kind: string
+  focus: Focus
+}
 const NO_MARKERS = Object.freeze([]);
 
+function validPoint(point: MapCoordinates) {
+  return (
+    Number.isFinite(point.latitude) &&
+    Math.abs(point.latitude) <= 90 &&
+    Number.isFinite(point.longitude) &&
+    Math.abs(point.longitude) <= 180
+  )
+}
+
+function IssueMarker({
+  marker,
+  selected,
+  onSelect,
+}: {
+  marker: AvisionMapMarker
+  selected: boolean
+  onSelect?: AvisionMapProps["onMarkerSelect"]
+}) {
+  const ref = useRef<LeafletMarker>(null)
+  const owner =
+    ISSUE_OWNERS.find((item) => item.id === marker.owner) ??
+    ISSUE_OWNERS[ISSUE_OWNERS.length - 1]
+  const status = marker.status
+    ? (ISSUE_STATUS_LABELS[marker.status] ?? "Status unknown")
+    : undefined
+  const label = [
+    marker.label,
+    marker.owner ? owner.label : undefined,
+    status,
+    selected ? "Selected" : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+  // React Leaflet does not update a Marker's title when props change.
+  useEffect(() => {
+    if (!ref.current) return
+    ref.current.options.title = label
+    const element = ref.current.getElement()
+    element?.setAttribute("title", label)
+    element?.setAttribute("aria-label", label)
+    element?.setAttribute("aria-pressed", String(selected))
+  }, [label, selected])
+  return (
+    <Marker
+      ref={ref}
+      position={[marker.latitude, marker.longitude]}
+      icon={
+        issueIcons.get(
+          `${owner.id}:${marker.status ?? "unknown"}:${selected}`,
+        ) ?? issueIcons.get(`${owner.id}:unknown:${selected}`)!
+      }
+      opacity={marker.status === "fixed" && !selected ? 0.75 : 1}
+      zIndexOffset={selected ? 2000 : 1000}
+      title={label}
+      eventHandlers={{
+        click: (event) => {
+          event.originalEvent.stopPropagation()
+          onSelect?.(marker)
+        },
+        keydown: (event) => {
+          if (
+            event.originalEvent.key === "Enter" ||
+            event.originalEvent.key === " "
+          ) {
+            event.originalEvent.preventDefault()
+            event.originalEvent.stopPropagation()
+            onSelect?.(marker)
+          }
+        },
+      }}
+    >
+      <Tooltip>
+        <strong>{marker.label}</strong>
+        <br />
+        {owner.label}
+        {status ? ` · ${status}` : ""}
+      </Tooltip>
+    </Marker>
+  )
+}
 function MapBehavior({
   focus,
   onMapClick,
@@ -75,6 +185,7 @@ function MapBehavior({
 }) {
   const map = useMap();
   useEffect(() => {
+    map.invalidateSize()
     const animate = !window.matchMedia("(prefers-reduced-motion: reduce)")
       .matches;
     if (focus.bounds)
@@ -85,7 +196,11 @@ function MapBehavior({
       });
   }, [focus, map]);
   useEffect(() => {
-    const observer = new ResizeObserver(() => map.invalidateSize());
+    const observer = new ResizeObserver(() => {
+      const center = map.getCenter()
+      map.invalidateSize({ pan: false })
+      map.setView(center, map.getZoom(), { animate: false })
+    })
     observer.observe(map.getContainer());
     return () => observer.disconnect();
   }, [map]);
@@ -108,9 +223,13 @@ export default function AvisionMap({
   height = 600,
   dataUrl = "/avision-map",
   markers = NO_MARKERS,
+  selectedMarkerId = null,
+  focusPoint,
+  initialArea = "atlanta",
   onMarkerSelect,
   onMapClick,
 }: AvisionMapProps) {
+  const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [neighborhoodData, setNeighborhoodData] =
     useState<NeighborhoodData | null>(null);
   const [stationData, setStationData] = useState<StationData | null>(null);
@@ -119,21 +238,33 @@ export default function AvisionMap({
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeResult, setActiveResult] = useState(0);
-  const [focus, setFocus] = useState<Focus>({ bounds: ATLANTA_VIEW });
-  const [view, setView] = useState<MapBounds>(ATLANTA_VIEW);
+  const [initialBounds] = useState(() =>
+    initialArea === "corridor"
+      ? CORRIDOR_VIEW
+      : initialArea === "gsu"
+        ? GSU_VIEW
+        : ATLANTA_VIEW,
+  )
+  const [focus, setFocus] = useState<Focus>({ bounds: initialBounds })
+  const [view, setView] = useState<MapBounds>(initialBounds)
   const [showBoundary, setShowBoundary] = useState(true);
   const [showNeighborhoods, setShowNeighborhoods] = useState(false);
   const [showStations, setShowStations] = useState(true);
   const [softStyle, setSoftStyle] = useState(true);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [retrievedDate, setRetrievedDate] = useState("Date unavailable");
-  const [selectedNeighborhood, setSelectedNeighborhood] = useState<
-    string | null
-  >(null);
+  const [selectedNeighborhood, setSelectedNeighborhood] =
+    useState<string | null>(null)
   const search = useRef<HTMLDivElement>(null);
   const sources = useRef<HTMLDialogElement>(null);
   const base = dataUrl.replace(/\/$/, "");
 
+  useEffect(() => {
+    if (focusPoint && validPoint(focusPoint)) {
+      setSelectedNeighborhood(null)
+      setFocus({ point: focusPoint })
+    }
+  }, [focusPoint])
   useEffect(() => {
     const controller = new AbortController();
     setDataError(false);
@@ -255,14 +386,7 @@ export default function AvisionMap({
   const highlighted = neighborhoods.find(
     (item) => item.feature.properties.NAME === selectedNeighborhood,
   );
-  const visibleMarkers = markers.filter(
-    (marker) =>
-      Number.isFinite(marker.latitude) &&
-      Math.abs(marker.latitude) <= 90 &&
-      Number.isFinite(marker.longitude) &&
-      Math.abs(marker.longitude) <= 180,
-  );
-
+  const visibleMarkers = markers.filter(validPoint)
   function selectResult(item: SearchResult) {
     setFocus({ ...item.focus });
     setSelectedNeighborhood(item.kind === "Neighborhood" ? item.name : null);
@@ -409,10 +533,13 @@ export default function AvisionMap({
       </div>
       <div className="avision-map-canvas">
         <MapContainer
-          bounds={ATLANTA_VIEW}
+          bounds={initialBounds}
           minZoom={10}
           maxZoom={19}
           zoomControl={true}
+          zoomAnimation={!reducedMotion}
+          fadeAnimation={!reducedMotion}
+          markerZoomAnimation={!reducedMotion}
           scrollWheelZoom={true}
           className="avision-leaflet-map"
         >
@@ -430,7 +557,7 @@ export default function AvisionMap({
             <GeoJSON
               data={PILOT_OUTLINE}
               style={{
-                color: "#0b7162",
+                color: "#334155",
                 weight: 2.5,
                 dashArray: "7 6",
                 fillOpacity: 0.04,
@@ -443,7 +570,7 @@ export default function AvisionMap({
               key={feature.properties.NAME}
               data={feature}
               style={{
-                color: "#786844",
+                color: "#334155",
                 weight: 1.3,
                 dashArray: "3 5",
                 fillOpacity: 0.015,
@@ -455,7 +582,7 @@ export default function AvisionMap({
             <GeoJSON
               key={`selected-${highlighted.feature.properties.NAME}`}
               data={highlighted.feature}
-              style={{ color: "#805f2f", weight: 2.5, fillOpacity: 0.07 }}
+              style={{ color: "#0039A6", weight: 2.5, fillOpacity: 0.07 }}
               interactive={false}
             />
           )}
@@ -475,55 +602,14 @@ export default function AvisionMap({
                 </Tooltip>
               </Marker>
             ))}
-          {visibleMarkers.map((marker) => {
-            const owner =
-              ISSUE_OWNERS.find((item) => item.id === marker.owner) ??
-              ISSUE_OWNERS[ISSUE_OWNERS.length - 1];
-            const status = marker.status
-              ? (ISSUE_STATUS_LABELS[marker.status] ?? "Status unknown")
-              : undefined;
-            const fixed = marker.status === "fixed";
-            const label = [
-              marker.label,
-              marker.owner ? owner.label : undefined,
-              status,
-            ]
-              .filter(Boolean)
-              .join(" · ");
-            return (
-              <Marker
-                key={`${marker.id}:${label}`}
-                position={[marker.latitude, marker.longitude]}
-                icon={issueIcons.get(owner.id)![fixed ? 1 : 0]}
-                opacity={fixed ? 0.6 : 1}
-                zIndexOffset={1000}
-                title={label}
-                eventHandlers={{
-                  click: (event) => {
-                    event.originalEvent.stopPropagation();
-                    onMarkerSelect?.(marker);
-                  },
-                  keydown: (event) => {
-                    if (
-                      event.originalEvent.key === "Enter" ||
-                      event.originalEvent.key === " "
-                    ) {
-                      event.originalEvent.preventDefault();
-                      event.originalEvent.stopPropagation();
-                      onMarkerSelect?.(marker);
-                    }
-                  },
-                }}
-              >
-                <Tooltip>
-                  <strong>{marker.label}</strong>
-                  <br />
-                  {owner.label}
-                  {status ? ` · ${status}` : ""}
-                </Tooltip>
-              </Marker>
-            );
-          })}
+          {visibleMarkers.map((marker) => (
+            <IssueMarker
+              key={marker.id}
+              marker={marker}
+              selected={marker.id === selectedMarkerId}
+              onSelect={onMarkerSelect}
+            />
+          ))}
         </MapContainer>
         {(tileError || dataError) && (
           <div className="avision-map-warning" role="status">
@@ -546,20 +632,29 @@ export default function AvisionMap({
                 className="avision-map-legend-dot"
                 style={{ backgroundColor: owner.color }}
                 aria-hidden="true"
-              />
+              >
+                {owner.symbol}
+              </span>
               {owner.label}
             </span>
           ))}
-          {visibleMarkers.some((marker) => marker.status === "fixed") && (
-            <span className="avision-map-legend-item">
-              <span
-                className="avision-map-legend-dot avision-map-legend-fixed"
-                aria-hidden="true"
-              >
-                ✓
+          <span className="avision-map-legend-title">Status</span>
+          {(["open", "likely_fixed", "fixed"] as AvisionMapStatus[]).map(
+            (status) => (
+              <span className="avision-map-legend-item" key={status}>
+                <span
+                  className={`avision-legend-status avision-issue-status-${status}`}
+                  aria-hidden="true"
+                >
+                  {status === "fixed"
+                    ? "✓"
+                    : status === "likely_fixed"
+                      ? "◷"
+                      : "!"}
+                </span>
+                {ISSUE_STATUS_LABELS[status]}
               </span>
-              Fixed
-            </span>
+            ),
           )}
         </div>
       )}
