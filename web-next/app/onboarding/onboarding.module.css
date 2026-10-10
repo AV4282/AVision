@@ -1,0 +1,395 @@
+/*
+  Website layout: on a wide screen the brand sits on the left and the questions
+  on the right, split by a yellow lane line. On a phone the brand shrinks to a
+  header and the questions take the screen.
+*/
+.page {
+  position: relative;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+/* Log in / Sign up, pinned to the top right corner. */
+.account {
+  position: absolute;
+  top: 0.5rem;
+  right: calc(var(--gutter) - 0.875rem);
+  z-index: 2;
+}
+
+/* ---------- brand side ---------- */
+.brand {
+  position: relative;
+  padding: 1.25rem var(--gutter);
+  overflow: hidden;
+}
+
+/* A lane line under the header on small screens. It is twice as wide as the
+   page and slides by one dash, so it looks like it never stops moving. */
+.brand::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 200%;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--lane) 0 1.5rem, transparent 1.5rem 2.75rem);
+  animation: lane-x 1.6s linear infinite;
+  will-change: transform;
+}
+
+@keyframes lane-x {
+  to {
+    transform: translateX(-2.75rem);
+  }
+}
+
+.wordmark {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  color: var(--paint);
+  text-decoration: none;
+  font-family: var(--font-sign);
+  font-weight: 800;
+  font-size: 1.375rem;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+.pitch,
+.paving {
+  display: none;
+}
+
+/* ---------- question side ---------- */
+.flow {
+  display: grid;
+  padding: 2.5rem var(--gutter) 3rem;
+}
+
+.panel {
+  width: 100%;
+  max-width: 30rem;
+  margin: 0 auto;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  margin-bottom: 1.75rem;
+}
+
+/* Progress is drawn as lane dashes that light up as you move along. */
+.dashes {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.dash {
+  position: relative;
+  width: 2rem;
+  height: 4px;
+  border-radius: 2px;
+  background: #3a4047;
+  overflow: hidden;
+}
+
+/* Each dash fills from the left when you reach it. */
+.dash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--lane);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.dash[data-reached="true"]::after {
+  transform: scaleX(1);
+}
+
+.count {
+  font-size: 1rem;
+  color: var(--paint-soft);
+}
+
+.step {
+  animation: arrive 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(0.625rem);
+  }
+}
+
+.question {
+  font-family: var(--font-sign);
+  font-weight: 800;
+  font-size: 2.375rem;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+  margin-bottom: 1.75rem;
+}
+
+.question:focus {
+  outline: none; /* focus is moved here by script; the heading is not a control */
+}
+
+/* Yes / No */
+.options {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 4.25rem;
+  padding: 0.2em 1.25rem 0 1.5rem; /* Overpass sits high in its box */
+  border: 1.5px solid var(--edge);
+  border-radius: var(--radius);
+  background: transparent;
+  font-family: var(--font-sign);
+  font-weight: 700;
+  font-size: 1.375rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms,
+    background-color 140ms,
+    transform 140ms;
+}
+
+.option:active {
+  transform: scale(0.985);
+}
+
+.mark {
+  position: relative;
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-top: -0.2em;
+  border: 1.5px solid var(--edge);
+  border-radius: 50%;
+  transition:
+    border-color 140ms,
+    background-color 140ms;
+}
+
+.option[aria-pressed="true"] {
+  border-color: var(--lane);
+  background: var(--asphalt-raised);
+}
+
+.option[aria-pressed="true"] .mark {
+  border-color: var(--lane);
+  background: var(--lane);
+  animation: pop 260ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+}
+
+/* a tick, so the chosen answer is not shown by colour alone */
+.option[aria-pressed="true"] .mark::after {
+  content: "";
+  position: absolute;
+  left: 0.47rem;
+  top: 0.22rem;
+  width: 0.4rem;
+  height: 0.75rem;
+  border: solid var(--asphalt);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(42deg);
+}
+
+/* School */
+.fieldLabel {
+  display: block;
+  margin: 1.75rem 0 0.5rem;
+  font-size: 1rem;
+  color: var(--paint-soft);
+}
+
+.field {
+  display: block;
+  width: 100%;
+  height: 3.75rem;
+  padding: 0 1.125rem;
+  border: 1.5px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--asphalt-raised);
+  font-size: 1.25rem;
+  transition: border-color 140ms;
+}
+
+.field:focus {
+  border-color: var(--lane);
+}
+
+.field[aria-invalid="true"] {
+  border-color: var(--alert);
+}
+
+.error {
+  min-height: 1.5rem;
+  margin-top: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--alert);
+}
+
+.note {
+  margin-top: 0.25rem;
+  font-size: 1rem;
+  color: var(--paint-soft);
+}
+
+.primary {
+  display: block;
+  width: 100%;
+  min-height: 3.75rem;
+  margin-top: 1.25rem;
+  padding: 0.2em 1.5rem 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--lane);
+  color: var(--asphalt);
+  font-family: var(--font-sign);
+  font-weight: 800;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: background-color 140ms;
+}
+
+.primary:active {
+  background: var(--lane-press);
+}
+
+.back {
+  min-height: 2.75rem;
+  margin: 1.5rem -0.5rem 0;
+  padding: 0 0.5rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  font-weight: 600;
+  color: var(--paint-soft);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.25em;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .option:hover {
+    border-color: var(--paint);
+    background: var(--asphalt-raised);
+  }
+
+  .primary:hover {
+    background: var(--lane-press);
+  }
+
+  .back:hover {
+    color: var(--paint);
+  }
+}
+
+/* ---------- wide screens: the website layout ---------- */
+@media (min-width: 60rem) {
+  .page {
+    grid-template-rows: none;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+
+  .brand {
+    display: flex;
+    flex-direction: column;
+    padding: 2.5rem 3.5rem;
+    overflow: hidden;
+  }
+
+  /* The lane line now runs down the middle of the page, moving toward you. */
+  .brand::after {
+    left: auto;
+    right: 0;
+    top: -3.5rem;
+    bottom: 0;
+    width: 3px;
+    height: auto;
+    background: repeating-linear-gradient(180deg, var(--lane) 0 2rem, transparent 2rem 3.5rem);
+    animation: lane-y 1.8s linear infinite;
+  }
+
+  @keyframes lane-y {
+    to {
+      transform: translateY(3.5rem);
+    }
+  }
+
+  .pitch {
+    display: block;
+    position: relative;
+    z-index: 1;
+    margin-top: clamp(3rem, 14vh, 8rem);
+  }
+
+  .tagline {
+    max-width: 11em;
+    font-family: var(--font-sign);
+    font-weight: 800;
+    font-size: clamp(2.75rem, 4.4vw, 4.25rem);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .lead {
+    max-width: 30em;
+    margin-top: 1.5rem;
+    color: var(--paint-soft);
+    font-size: 1.1875rem;
+  }
+
+  /* Tactile paving, the bumps at the foot of a curb ramp, seen through a camera frame. */
+  .paving {
+    display: block;
+    position: absolute;
+    left: 0;
+    right: 3px;
+    bottom: 0;
+    height: 44%;
+  }
+
+  .account {
+    top: 1.75rem;
+    right: 2.625rem;
+  }
+
+  /* The question starts level with the tagline and stays put from step to step. */
+  .flow {
+    align-items: start;
+    padding: calc(3.875rem + clamp(3rem, 14vh, 8rem)) 3.5rem 3rem;
+  }
+
+  .question {
+    font-size: 2.875rem;
+  }
+}

@@ -17,6 +17,8 @@ import {
   CONTROL_PLACEHOLDERS,
   AREA_PLACEHOLDERS,
   PILOT_OUTLINE,
+  ISSUE_OWNERS,
+  ISSUE_STATUS_LABELS,
   boundsOverlap,
   geometryBounds,
   type MapBounds,
@@ -33,6 +35,8 @@ import "./AvisionMap.css";
 export type {
   AvisionMapProps,
   AvisionMapMarker,
+  AvisionMapOwner,
+  AvisionMapStatus,
   MapCoordinates,
 } from "./types";
 
@@ -42,12 +46,19 @@ const stationIcon = divIcon({
   iconSize: [29, 32],
   iconAnchor: [14, 16],
 });
-const issueIcon = divIcon({
-  className: "avision-issue-pin",
-  html: '<span aria-hidden="true">●</span>',
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-});
+const issueIcons = new Map(
+  ISSUE_OWNERS.map((owner) => [
+    owner.id,
+    [false, true].map((fixed) =>
+      divIcon({
+        className: "avision-issue-pin",
+        html: `<span aria-hidden="true" style="background:${owner.color}">${fixed ? "✓" : "●"}</span>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      }),
+    ),
+  ]),
+);
 
 type Focus = { bounds?: MapBounds; point?: MapCoordinates };
 type SearchResult = { key: string; name: string; kind: string; focus: Focus };
@@ -243,6 +254,13 @@ export default function AvisionMap({
     : [];
   const highlighted = neighborhoods.find(
     (item) => item.feature.properties.NAME === selectedNeighborhood,
+  );
+  const visibleMarkers = markers.filter(
+    (marker) =>
+      Number.isFinite(marker.latitude) &&
+      Math.abs(marker.latitude) <= 90 &&
+      Number.isFinite(marker.longitude) &&
+      Math.abs(marker.longitude) <= 180,
   );
 
   function selectResult(item: SearchResult) {
@@ -457,31 +475,55 @@ export default function AvisionMap({
                 </Tooltip>
               </Marker>
             ))}
-          {markers
-            .filter(
-              (marker) =>
-                Number.isFinite(marker.latitude) &&
-                Math.abs(marker.latitude) <= 90 &&
-                Number.isFinite(marker.longitude) &&
-                Math.abs(marker.longitude) <= 180,
-            )
-            .map((marker) => (
+          {visibleMarkers.map((marker) => {
+            const owner =
+              ISSUE_OWNERS.find((item) => item.id === marker.owner) ??
+              ISSUE_OWNERS[ISSUE_OWNERS.length - 1];
+            const status = marker.status
+              ? (ISSUE_STATUS_LABELS[marker.status] ?? "Status unknown")
+              : undefined;
+            const fixed = marker.status === "fixed";
+            const label = [
+              marker.label,
+              marker.owner ? owner.label : undefined,
+              status,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return (
               <Marker
-                key={marker.id}
+                key={`${marker.id}:${label}`}
                 position={[marker.latitude, marker.longitude]}
-                icon={issueIcon}
+                icon={issueIcons.get(owner.id)![fixed ? 1 : 0]}
+                opacity={fixed ? 0.6 : 1}
                 zIndexOffset={1000}
-                title={marker.label}
+                title={label}
                 eventHandlers={{
                   click: (event) => {
                     event.originalEvent.stopPropagation();
                     onMarkerSelect?.(marker);
                   },
+                  keydown: (event) => {
+                    if (
+                      event.originalEvent.key === "Enter" ||
+                      event.originalEvent.key === " "
+                    ) {
+                      event.originalEvent.preventDefault();
+                      event.originalEvent.stopPropagation();
+                      onMarkerSelect?.(marker);
+                    }
+                  },
                 }}
               >
-                <Tooltip>{marker.label}</Tooltip>
+                <Tooltip>
+                  <strong>{marker.label}</strong>
+                  <br />
+                  {owner.label}
+                  {status ? ` · ${status}` : ""}
+                </Tooltip>
               </Marker>
-            ))}
+            );
+          })}
         </MapContainer>
         {(tileError || dataError) && (
           <div className="avision-map-warning" role="status">
@@ -491,6 +533,36 @@ export default function AvisionMap({
           </div>
         )}
       </div>
+      {visibleMarkers.length > 0 && (
+        <div
+          className="avision-map-legend"
+          role="group"
+          aria-label="Issue marker legend"
+        >
+          <span className="avision-map-legend-title">Issue owner</span>
+          {ISSUE_OWNERS.map((owner) => (
+            <span className="avision-map-legend-item" key={owner.id}>
+              <span
+                className="avision-map-legend-dot"
+                style={{ backgroundColor: owner.color }}
+                aria-hidden="true"
+              />
+              {owner.label}
+            </span>
+          ))}
+          {visibleMarkers.some((marker) => marker.status === "fixed") && (
+            <span className="avision-map-legend-item">
+              <span
+                className="avision-map-legend-dot avision-map-legend-fixed"
+                aria-hidden="true"
+              >
+                ✓
+              </span>
+              Fixed
+            </span>
+          )}
+        </div>
+      )}
       <div className="avision-map-options" aria-label="Map layers">
         <label>
           <input
