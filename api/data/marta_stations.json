@@ -1,0 +1,196 @@
+{
+ "about": "MARTA rail stations. A report within the routing radius of one of these goes to MARTA.",
+ "source": "MARTA GTFS feed (https://itsmarta.com/google_transit_feed/google_transit.zip), stations served by the Red, Gold, Blue and Green lines, fetched 2026-10-10",
+ "stations": [
+  {
+   "name": "Airport",
+   "lat": 33.640806,
+   "lng": -84.446214
+  },
+  {
+   "name": "Arts Center",
+   "lat": 33.78918,
+   "lng": -84.38728
+  },
+  {
+   "name": "Ashby",
+   "lat": 33.75645,
+   "lng": -84.41728
+  },
+  {
+   "name": "Avondale",
+   "lat": 33.77535,
+   "lng": -84.28191
+  },
+  {
+   "name": "Bankhead",
+   "lat": 33.77231,
+   "lng": -84.4289
+  },
+  {
+   "name": "Brookhaven-Oglethorpe",
+   "lat": 33.85999,
+   "lng": -84.3394
+  },
+  {
+   "name": "Buckhead",
+   "lat": 33.84773,
+   "lng": -84.36766
+  },
+  {
+   "name": "Chamblee",
+   "lat": 33.88786,
+   "lng": -84.30566
+  },
+  {
+   "name": "Civic Center",
+   "lat": 33.76634,
+   "lng": -84.38749
+  },
+  {
+   "name": "College Park",
+   "lat": 33.65159,
+   "lng": -84.44878
+  },
+  {
+   "name": "Decatur",
+   "lat": 33.77468,
+   "lng": -84.29553
+  },
+  {
+   "name": "Doraville",
+   "lat": 33.90296,
+   "lng": -84.28026
+  },
+  {
+   "name": "Dunwoody",
+   "lat": 33.92124,
+   "lng": -84.34427
+  },
+  {
+   "name": "East Lake",
+   "lat": 33.76518,
+   "lng": -84.31315
+  },
+  {
+   "name": "East Point",
+   "lat": 33.67753,
+   "lng": -84.4405
+  },
+  {
+   "name": "Edgewood-Candler Park",
+   "lat": 33.76193,
+   "lng": -84.33962
+  },
+  {
+   "name": "Five Points",
+   "lat": 33.75387,
+   "lng": -84.39157
+  },
+  {
+   "name": "Garnett",
+   "lat": 33.748544,
+   "lng": -84.395888
+  },
+  {
+   "name": "Georgia State",
+   "lat": 33.75007,
+   "lng": -84.38587
+  },
+  {
+   "name": "Hamilton E. Holmes",
+   "lat": 33.75448,
+   "lng": -84.47003
+  },
+  {
+   "name": "Indian Creek",
+   "lat": 33.76982,
+   "lng": -84.22953
+  },
+  {
+   "name": "Inman Park-Reynoldstown",
+   "lat": 33.75753,
+   "lng": -84.35265
+  },
+  {
+   "name": "Kensington",
+   "lat": 33.77262,
+   "lng": -84.25192
+  },
+  {
+   "name": "King Memorial",
+   "lat": 33.7499,
+   "lng": -84.3758
+  },
+  {
+   "name": "Lakewood-Ft. McPherson",
+   "lat": 33.70042,
+   "lng": -84.42883
+  },
+  {
+   "name": "Lenox",
+   "lat": 33.8454,
+   "lng": -84.35811
+  },
+  {
+   "name": "Lindbergh Center",
+   "lat": 33.82291,
+   "lng": -84.36947
+  },
+  {
+   "name": "Medical Center",
+   "lat": 33.91072,
+   "lng": -84.35145
+  },
+  {
+   "name": "Midtown",
+   "lat": 33.78107,
+   "lng": -84.38632
+  },
+  {
+   "name": "North Ave",
+   "lat": 33.77179,
+   "lng": -84.38709
+  },
+  {
+   "name": "North Springs",
+   "lat": 33.94498,
+   "lng": -84.3572
+  },
+  {
+   "name": "Oakland City",
+   "lat": 33.71716,
+   "lng": -84.42507
+  },
+  {
+   "name": "Peachtree Center",
+   "lat": 33.759684,
+   "lng": -84.387598
+  },
+  {
+   "name": "Sandy Springs",
+   "lat": 33.93174,
+   "lng": -84.35096
+  },
+  {
+   "name": "SEC District",
+   "lat": 33.75618,
+   "lng": -84.39725
+  },
+  {
+   "name": "Vine City",
+   "lat": 33.75657,
+   "lng": -84.404
+  },
+  {
+   "name": "West End",
+   "lat": 33.73612,
+   "lng": -84.41364
+  },
+  {
+   "name": "West Lake",
+   "lat": 33.75327,
+   "lng": -84.4453
+  }
+ ]
+}

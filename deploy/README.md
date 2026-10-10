@@ -72,6 +72,22 @@ It prints a key. On GitHub, open the repo > **Settings** > **Secrets and variabl
 
 **6. Try it:** Actions tab > **Deploy website** > **Run workflow**.
 
+## Report agent settings
+
+The "fill in the form from this photo" feature needs keys in `/opt/avision/api/.env`, next to `DATABASE_URL`. The full list with examples is in `api/sql/.env.example`.
+
+- `GEMINI_API_KEY` turns the feature on.
+- The Foundry settings make a Microsoft Foundry agent run the steps. Without them the server runs the same steps itself.
+
+After changing the file:
+
+```bash
+systemctl restart avision-api
+cd /opt/avision/api && UPLOAD_DIR=/var/lib/avision/uploads .venv/bin/python check_agent.py
+```
+
+`check_agent.py` tests Gemini, the routing data, the address lookup and Foundry with the real services, and prints PASS or FAIL for each with the reason.
+
 ## Day to day
 
 - **Deploy by hand:** log in to the server and type `deploy`.

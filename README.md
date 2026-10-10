@@ -22,7 +22,7 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 | Map | 🟢 React Leaflet map in `web/`, plotting ticket coordinates with selection, search, GDOT roads, an official city boundary, GSU building references, and OpenStreetMap attribution. [Geographic provenance](docs/map-geography.md) |
 | Sign-in | 🟡 Google sign-in through Auth0 works: your name shows on the sidebar and profile, and signing in is optional. Tickets and votes are still saved under the browser's guest ID, not the account |
 | Profile page | 🟡 Placeholder content |
-| AI analysis, automatic routing, report drafting | ⏳ Planned (see below) |
+| Report agent: photo analysis, owner routing, report drafting | ✅ Built. "Fill in the form from this photo" appears once `GEMINI_API_KEY` is set on the server; see [Report agent](#report-agent) |
 
 In the issues list, click a row or its title to open the ticket, or use its arrow button to view the location on the map.
 
@@ -142,10 +142,26 @@ All demo rows are marked "(seed)", and `002_seed_tickets.sql` has the SQL to rem
 | POST | `/tickets/{id}/votes` | Casts or changes the caller's vote: `{"vote": "still_there" \| "fixed"}` |
 | POST | `/uploads` | Stores a ticket photo (form field `file`; JPEG, PNG or WebP, up to 12 MB) and returns its path |
 | GET | `/uploads/{name}` | Serves a stored photo |
+| GET | `/analyze/status` | Says whether photo analysis is set up |
+| POST | `/analyze` | Runs the report agent on an uploaded photo: `{"photo": "<name>.jpg", "lat": ..., "lng": ...}`. Saves nothing |
 
 Callers identify themselves with an `X-User-Id` header holding their guest ID; the web app handles this automatically. When Auth0 is added, the user will come from the sign-in token instead.
 
 **Photos:** a ticket stores a link to its photo (`photo_url`). The web app uploads the picture to `/uploads` first, then creates the ticket with the link it gets back. The API re-saves every photo as a JPEG of at most 1600 px, which removes the GPS position and other hidden details, and refuses files that are not images. Photos are saved in `api/uploads/` locally (ignored by git) and in `/var/lib/avision/uploads` on the server. Because everyone shares one database, a photo uploaded while running locally only shows on that machine; upload on the live site for photos everyone can see.
+
+<a id="report-agent"></a>
+**Report agent** (`api/agent.py`): in the report form, "Fill in the form from this photo" sends the photo and position to `/analyze`. Four tools run in order:
+
+1. **Analyze the photo** (Gemini): issue type, title, details, possible barriers, priority, confidence.
+2. **Find the owner** (plain Python, `api/routing.py`): within 100 m of a MARTA rail station → MARTA; inside the GSU campus outline → GSU Facilities; on an interstate, US or state route → GDOT; otherwise the City of Atlanta. The reason is shown to the person.
+3. **Look up the address** (OpenStreetMap).
+4. **Draft the report** (Gemini): a message and a phone script.
+
+A Microsoft Foundry agent decides which tool to call next; if Foundry isn't set up or fails, the server runs the same steps itself. The person reviews the filled-in form before posting, and after posting gets the drafted message to send themselves. AVision never sends anything.
+
+Owner contact details come only from `api/data/contacts.json` (copied from each owner's website, with the source and date). The AI is told not to write contact details, and anything that looks like one in its text is removed. **Check `contacts.json` before the demo**, and note the GSU outline from OpenStreetMap is generous: it includes Woodruff Park and the city streets between campus buildings.
+
+Settings go in `api/.env`; the full list is in `api/sql/.env.example`. To test every part with the real services: `python check_agent.py` (from `api/`).
 
 **Vote rules:** 2 or more fixed votes that outnumber still-there votes make a ticket **Likely fixed** (set `FIXED_VOTE_THRESHOLD` to change the 2). A still-there vote reopens it. The design doc's "7 quiet days → Fixed" rule isn't built yet.
 
@@ -157,11 +173,11 @@ From the design doc. The map, the visible routing explanation and the generated 
 
 | Feature | Priority | What it does |
 |---|---|---|
-| Photo analysis | Must | Gemini tags the issue type, possible barriers, severity and confidence, and finds faces and plates to blur before anything is stored |
+| Photo analysis | Must | Built, except the privacy part: Gemini tags the issue type, possible barriers, severity and confidence. Still to do: find faces and plates and blur them before anything is stored |
 | Location capture | Must | Reads GPS from the photo, then falls back to browser location or a dropped pin |
 | Owner routing + explanation | Must | Point-in-polygon picks GSU, City, MARTA or GDOT and shows why |
 | Report drafting | Must | Email, phone script and ATL311 text, using only contacts from `contacts.json` |
-| Issue map | Must | Integrated Leaflet map with agency letters/colors, separate status badges, and ticket selection |
+| Issue map | Must | Real Leaflet map with pins colored by owner (component ready in `leafletreact-map/`) |
 | Confirm before saving | Must | The user reviews the AI result before anything is posted |
 | Duplicate grouping | Should | New reports of the same issue within ~30 m join the existing ticket |
 | Hotspots layer | Should | "Reported 6 times in 3 weeks," from `hotspots_weekly` |
@@ -185,7 +201,8 @@ From the design doc. The map, the visible routing explanation and the generated 
 | Photo privacy | Local face and plate detection + Pillow blurring; Gemini reads text |
 | Sign-in | Auth0 (`@auth0/auth0-react`), Google accounts |
 | Hosting | Vultr server with Caddy, domain from Porkbun, auto-deploy with GitHub Actions |
-| Planned | Gemini (analysis and drafting), Microsoft Foundry (agent orchestration), ElevenLabs (voice) |
+| Report agent | Microsoft Foundry Agent Service (orchestration), Gemini (photo analysis and drafting), `shapely` (owner routing) |
+| Planned | ElevenLabs (voice) |
 
 ## Notes for contributors
 

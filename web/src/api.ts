@@ -352,6 +352,108 @@ export async function uploadPhoto(file: File): Promise<string> {
   return path
 }
 
+// ---------- report agent ----------
+// The agent on the server looks at an uploaded photo and works out the issue,
+// the owner, the address and a drafted report (api/agent.py). Nothing is saved
+// by it: the form shows the result and the person decides what to post.
+
+/** How to reach an owner. Always from the server's contacts file, never written by AI. */
+export type OwnerContact = {
+  name: string
+  phone: string | null
+  phone_note: string | null
+  email: string | null
+  web: string | null
+  web_label: string | null
+  hours: string | null
+}
+
+/** A drafted report for the owner, for the person to send themselves. */
+export type DraftedReport = {
+  subject: string
+  message: string
+  phone_script: string
+}
+
+export type PhotoAnalysis = {
+  /** False when the photo doesn't show a problem; then only `summary` is filled in. */
+  reportable: boolean
+  summary: string
+  issueType: string
+  title: string
+  description: string
+  possibleBarriers: string[]
+  severity: "low" | "medium" | "high"
+  /** 0 to 1: how sure the analysis is of the issue type. */
+  confidence: number
+  owner: Owner | null
+  /** Why that owner was picked, in plain words. */
+  ownerReason: string | null
+  contact: OwnerContact | null
+  address: string | null
+  report: DraftedReport | null
+  /** True when a Microsoft Foundry agent ran the steps; false when the server ran them itself. */
+  usedAgent: boolean
+}
+
+type ApiAnalysis = {
+  analysis: {
+    is_reportable: boolean
+    issue_type: string
+    title: string
+    description: string
+    possible_barriers: string[]
+    severity: "low" | "medium" | "high"
+    confidence: number
+  }
+  owner: { id: ApiOwner; name: string; rule: string; reason: string } | null
+  contact: OwnerContact | null
+  address: string | null
+  report: DraftedReport | null
+  summary: string
+  orchestrator: "foundry_agent" | "foundry_model" | "direct"
+}
+
+/** Whether the server has photo analysis set up, so the form knows to offer it. */
+export async function analysisAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch(API_URL + "/analyze/status")
+    return res.ok && (await res.json()).available === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Runs the report agent on a photo that uploadPhoto() already stored.
+ * `photoUrl` is the link uploadPhoto() returned. Takes around 10 to 30 seconds.
+ */
+export async function analyzePhoto(photoUrl: string, lat: number, lng: number): Promise<PhotoAnalysis> {
+  const body = {
+    photo: photoUrl.slice(photoUrl.lastIndexOf("/") + 1),
+    lat: Number(lat.toFixed(6)),
+    lng: Number(lng.toFixed(6)),
+    photo_url: photoUrl,
+  }
+  const found = await request<ApiAnalysis>("POST", "/analyze", { body, auth: false })
+  return {
+    reportable: found.analysis.is_reportable,
+    summary: found.summary,
+    issueType: found.analysis.issue_type,
+    title: found.analysis.title,
+    description: found.analysis.description,
+    possibleBarriers: found.analysis.possible_barriers,
+    severity: found.analysis.severity,
+    confidence: found.analysis.confidence,
+    owner: found.owner ? OWNER_FROM_API[found.owner.id] : null,
+    ownerReason: found.owner?.reason ?? null,
+    contact: found.contact,
+    address: found.address,
+    report: found.report,
+    usedAgent: found.orchestrator !== "direct",
+  }
+}
+
 export async function vote(ticketId: string, choice: VoteChoice): Promise<Ticket> {
   return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/votes`, { body: { vote: choice } }))
 }
