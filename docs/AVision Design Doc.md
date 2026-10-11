@@ -1,18 +1,18 @@
 # AVision Design Doc
 
-Oct 9, 2026 · @Amari
+Oct 9, 2026 · Updated Oct 11, 2026 to match what was built · @Amari
 
 ## Overview
 
-AVision turns a photo of a street or campus problem into a mapped ticket and a ready-to-send report, routed to whoever actually owns the fix. It targets the Social Good track at Hacklanta '26 (Oct 9–11, Georgia State University), with an Atlanta and GSU-first scope.
+AVision turns a photo of a street or campus problem into a mapped ticket and a ready-to-send report, routed to whoever actually owns the fix. It was built for the Social Good track at Hacklanta '26 (Oct 9–11, Georgia State University), covering the City of Atlanta with a GSU and Georgia Tech focus. It is live at https://atlantamamdani.photo.
 
 **Core demo flow:**
 
-1. A user uploads a photo of an issue, such as a blocked curb ramp or a broken elevator.
-2. Gemini flags the issue and any possible accessibility barriers, with a confidence score.
-3. The location is placed on the map and routed to an owner: GSU Facilities, City of Atlanta (ATL311), MARTA, or GDOT.
-4. The user confirms, and AVision posts a public ticket and drafts an email and phone script for the owner.
-5. Other users vote on whether the issue is still there, and duplicate tickets are grouped into one.
+1. A user uploads a photo of an issue, such as a blocked curb ramp or a broken elevator. Faces and license plates are blurred on our server before the photo is stored.
+2. In one request, Gemini describes the issue and any possible accessibility barriers, with a confidence score, and screens out photos and text that plainly aren't real reports.
+3. The location comes from the device, an address search or a pin dropped on a map. Gemini picks the owner from GSU Facilities, Georgia Tech, the City of Atlanta (ATL311) or MARTA, using facts our code works out about the spot, and explains why.
+4. The user reviews and posts a public ticket. AVision then opens a drafted email in the user's own inbox, with a phone script, for them to send.
+5. Other users vote on whether the issue is still there. A "Still there" vote offers a follow-up message to the department.
 
 AVision never submits reports automatically. It always describes findings as "possible barriers," never as legal violations.
 
@@ -20,83 +20,87 @@ AVision never submits reports automatically. It always describes findings as "po
 
 &#91;embedded content: AVision architecture · web app, backend, sponsor services\]
 
-The Foundry agent orchestrates, Gemini sees and writes, and the routing step is plain Python so the owner and contacts are never invented.
+The web app (React) talks to one ticket API (FastAPI). Uploads go through a separate photo privacy service that blurs faces and plates with local models, then are stored on disk. Gemini sees and writes, a Foundry agent steers each report, and Python supplies the facts: map facts about the spot, and contact details from `contacts.json`. The model never invents a contact.
 
 ## Tech stack
 
-The stack is chosen so each sponsor tool has one clear job and most picks replace something, not add to it.
+Each sponsor tool still has one clear job. The main changes from the plan: Vite instead of Next.js, local models instead of Gemini for privacy blurring, free OpenStreetMap services instead of Google Geocoding, and a Porkbun domain.
 
 | Layer | Pick | Why |
 | --- | --- | --- |
-| Frontend | Next.js (or Vite + React), Tailwind | Fast to build; mobile-first upload page |
-| Map | Leaflet 1.x via react-leaflet + OpenStreetMap tiles | No API key; pins colored by owner, hotspots layer |
-| Photo location | `exifr` + browser geolocation + drop-a-pin fallback | Phones often strip GPS from photos |
+| Frontend | Vite + React 19 + TypeScript, Tailwind CSS v4 | Fast to build; mobile-first; dark mode |
+| Map | Leaflet 1.x via react-leaflet + OpenStreetMap tiles | No API key; custom pins by owner and status; official GIS reference layers |
+| Photo location | Browser geolocation, address search, or a dropped pin | Phones often strip GPS from photos, and the API strips it on purpose |
 | Backend | Python FastAPI | Foundry's agent SDK is Python-first |
-| Agent orchestration | Microsoft Foundry Agent Service | Calls the tools below in order |
-| Vision + writing | Gemini API (`google-genai`, response schema) | Photo analysis, barrier detection, face and plate detection for privacy blurring, report drafting; Gemini prize |
-| Routing | Python + `shapely` point-in-polygon | Deterministic: the model never guesses the owner |
-| Contacts | `contacts.json` | The model can only return contacts from this file |
-| Geocoding | Google Geocoding API (Nominatim as fallback) | Address lookup; more accurate downtown |
+| Agent orchestration | Microsoft Foundry Agent Service (`gpt-5-mini`) | Steers each report through four tools; runs alongside the work, with a time cap |
+| Vision + writing | Gemini API (`google-genai`, response schema) | One request per report: screening, photo analysis, choosing the department, drafting; Gemini prize |
+| Routing | Gemini choice from Python map facts (`shapely`); fixed map rules as backup | The model only picks from listed departments, with a reason the user sees |
+| Contacts | `contacts.json` | The only source of contact details; checked against each department's website |
+| Geocoding | Photon for address search, Nominatim for reverse lookups (both OpenStreetMap) | Free, no key; Nominatim's one-request-a-second limit is respected |
+| Photo privacy | YuNet face model (OpenCV) + DETR plate model (Hugging Face `transformers`), Pillow blur | Runs on our server, so unblurred photos never reach the AI |
 | Database | Tiger Data (TimescaleDB on Tiger Cloud, free service) | Reports are time-series events; Tiger Data prize |
-| Voice | ElevenLabs text-to-speech | Read-aloud reports for low-vision users; ElevenLabs prize |
-| Auth | Auth0 | Google sign-in (no passwords stored), one vote per user, Facilities staff role; Auth0 prize |
-| Hosting | Vultr (promo MAJORLEAGUEHACKING); laptop + tunnel as backup | Vultr prize |
-| Domain | GoDaddy Registry (promo MLHHL2694) | Real demo URL; GoDaddy prize |
+| Auth | Auth0 | Google sign-in (no passwords stored); guests can still report and vote; admin role; Auth0 prize |
+| Hosting | Vultr server with Caddy; auto-deploy with GitHub Actions | Vultr prize |
+| Domain | Porkbun (`atlantamamdani.photo`) | Real demo URL |
 
 ## Database
 
-The database is a free Tiger Cloud service (TimescaleDB on PostgreSQL), set up and seeded with 11 demo reports. The `reports` hypertable and `hotspots_weekly` view are live, the `users` table is ready to add with `avision_users.sql`, and the ticket tables are designed below and not created yet.
+The database is a free Tiger Cloud service (TimescaleDB on PostgreSQL). Every table below is live. Migrations `004`–`008` also run by themselves each time the API starts, so a fresh server never misses one.
 
-**Service:** free tier, shared compute, 750 MiB storage, us-east-1, database `tsdb`. A service that hits its storage limit becomes read-only, so photos are stored outside the database and only `photo_url` is saved.
+**Service:** free tier, shared compute, 750 MiB storage, us-east-1, database `tsdb`. A service that hits its storage limit becomes read-only, so photos are stored on the server's disk and only their paths are saved. Local development and the live site share this one database.
 
 | Object | Type | Status | Holds |
 | --- | --- | --- | --- |
-| `reports` | Hypertable, partitioned by `created_at` (7-day chunks) | Live | One row per photo submission: issue type, barriers, severity, confidence, lat/lng, owner, routing reason, generated report (JSON), status, and `user_id` (UUID linking to `users`; empty for anonymous reports) |
+| `reports` | Hypertable, partitioned by `created_at` (7-day chunks) | Live, seed data only | One row per photo submission with the full AI output. Holds the 11 seed reports; the app writes tickets directly |
 | `hotspots_weekly` | Continuous aggregate, real-time mode, refreshed every minute | Live | Report counts per week, per \~110 m grid cell, per issue type |
-| `users` | Regular table | Ready to run (`avision_users.sql`) | One row per person: AVision UUID, unique Auth0 ID (`auth0_sub`), display name, avatar URL, role (`user` or `facilities_staff`), timestamps. No password or email |
-| `tickets` | Regular table | Planned | One row per public issue; groups duplicate reports |
-| `ticket_votes` | Regular table | Planned | Each user's current "still there" or "fixed" vote on a ticket, keyed by user UUID |
+| `users` | Regular table | Live | One row per person: AVision UUID, unique `auth0_sub` (signed-in, `guest\|…` or `seed\|…`), display name, avatar, role (`user`, `facilities_staff` or `admin`), onboarding answers. No password or email |
+| `tickets` | Regular table | Live | One row per public issue: title, description, owner, location, main photo plus up to four more, status, poster, report count |
+| `ticket_votes` | Regular table | Live | Each user's current "still there" or "fixed" vote on a ticket |
+| `ticket_reports` | Regular table | Live | Who went to send a report about a ticket; each person counts once toward `report_count` |
+| `notifications` | Regular table | Live | Votes and status changes on your tickets, and on tickets you voted on |
+| Screening counts | Columns on `users` | Live | Flagged attempts and any posting pause |
 
-**Files:** `avision_schema.sql` (v2, safe to re-run), `avision_seed.sql` (rows marked "(seed)"), `avision_diagnose.sql`, `avision_users.sql` (users table migration), and `db.py` with `insert_report`, `repeat_count`, `hotspots`, and `list_reports`.
+**Files:** migrations `api/sql/000`–`008`, run with `migrate.py` (the two `000` files in the Tiger console). `db.py` holds every query. `reset_db.py` clears test data with a backup first, and `admin.py` grants admin.
 
 **Connection:** `DATABASE_URL` in `.env` (never committed), with `sslmode=require`. Python uses `psycopg` 3 with a pool of up to 5 connections.
 
-**Grid cells:** hotspots round lat/lng to 3 decimals, so two photos a few meters apart can fall in neighboring cells. A PostGIS radius search fixes this if the service offers PostGIS.
+**Grid cells:** hotspots round lat/lng to 3 decimals. Duplicate grouping (see Future expansions) would use a PostGIS radius search if the service offers it.
 
 ### User accounts
 
-Users sign in with Google through Auth0, so AVision stores no passwords; each person gets an AVision UUID linked to their Auth0 ID (for Google, a string like `google-oauth2|1048…`, not a UUID).
+Users sign in with Google through Auth0, so AVision stores no passwords. Each person gets an AVision UUID linked to their Auth0 ID. Signing in is optional: guests get a guest ID that the browser keeps.
 
 1. The user signs in with Google through Auth0, and the frontend receives a token.
-2. The frontend sends the token with each API request; the backend verifies it against the Auth0 domain.
-3. On sign-in, the backend upserts into `users` on `auth0_sub`: the first login creates the row, every later login returns the same UUID.
-4. The backend attaches that UUID to reports and votes. The frontend never sends a user ID itself, so no one can vote as someone else.
+2. The frontend sends the token with each API request, and the backend verifies it against the Auth0 tenant.
+3. On sign-in, the backend upserts into `users` on `auth0_sub`: the first login creates the row, and every later login returns the same UUID. Anything the person did as a guest in that browser moves to their account.
+4. The backend attaches that UUID to tickets and votes. A guest ID is only accepted for guests, so no one can act as a signed-in person.
 
-To demo the staff view, set a teammate's `role` to `facilities_staff`. `db.py`'s `insert_report` must receive the UUID from step 3, not the raw Auth0 ID.
+Signed-in users answer optional onboarding questions, and can change their display name and profile picture. Admins, granted with `python admin.py grant "<name>"`, can delete any ticket and mark tickets fixed.
 
 ## Map (Leaflet)
 
-The map uses stable Leaflet 1.x through `react-leaflet`, with free OpenStreetMap tiles: no API key, mobile pinch-zoom, about 42 KB gzipped. Leaflet 2.0 is still an alpha (2.0.0-alpha.1, August 2025) and `react-leaflet` targets 1.x, so it is out of scope for this weekend.
+The map uses stable Leaflet 1.x through `react-leaflet` v5 (React 19), with free OpenStreetMap tiles. It lives in `web/src/components/avision-map/` and loads on demand.
 
-**Install:** `npm install leaflet react-leaflet` (plus `@types/leaflet` for TypeScript). `react-leaflet` v5 expects React 19; on React 18, use `react-leaflet@4`.
+**Install:** `npm install leaflet react-leaflet` (plus `@types/leaflet`).
 
 ### Setup gotchas
 
-1. **Server rendering:** Leaflet reads `window`, so load the map with `dynamic(() => import('./MapView'), { ssr: false })` in Next.js.
-2. **CSS:** import `leaflet/dist/leaflet.css` and give the map container an explicit height, or tiles scatter and the map shows as a blank strip.
-3. **Marker icons:** bundlers break Leaflet's default pin images; use `CircleMarker` instead, which also gives owner colors.
+1. **Server rendering:** not an issue, since the app is a Vite single-page app with no server rendering.
+2. **CSS:** import `leaflet/dist/leaflet.css` and give the map container an explicit height, or the tiles scatter.
+3. **Marker icons:** bundlers break Leaflet's default pin images, so markers are custom `divIcon`s with the owner's color and letter, plus a separate status badge.
 
 ### Features to Leaflet components
 
 | AVision feature | Leaflet piece |
 | --- | --- |
-| Ticket pins colored by owner | `CircleMarker`, one color per owner (GSU, City, MARTA, GDOT); fixed tickets faded |
-| Ticket details and voting | `Popup` with photo, status, and Still there / Fixed buttons |
-| Hotspots layer | `Circle` sized by `report_count` from `GET /hotspots` |
-| Drop-a-pin fallback | `useMapEvents({ click })` sets the report location |
-| GSU boundary | `GeoJSON` layer of the campus polygon; doubles as a visual routing explanation |
-| Layer toggles | `LayersControl` for hotspots and the campus outline |
-| Overlapping pins | Optional `react-leaflet-cluster` plugin, only if needed |
+| Ticket pins by owner and status | `Marker` with a custom `divIcon`; keyboard-selectable |
+| Ticket details and voting | Side panel or popup outside the map, opened by selecting a pin |
+| Filters by department | Custom Filters menu, with a "Show all" button beside it; starts from the user's onboarding answers |
+| Reference layers | `GeoJSON` layers: GDOT state routes, the official city boundary, GSU buildings, neighborhoods and MARTA stations, each toggled from a Layers menu |
+| Area views | GSU + MARTA, GSU, Georgia Tech and all of Atlanta |
+| Drop-a-pin | A separate picker map in the report form; `useMapEvents({ click })` sets the location |
+
+GIS sources and processing are recorded in `docs/map-geography.md` and `docs/map.md`.
 
 ### OpenStreetMap tile rules
 
@@ -105,83 +109,82 @@ The free tiles are fine for a demo under the [OSM Tile Usage Policy](https://ope
 - Keep the "© OpenStreetMap contributors" credit visible on the map, not hidden under UI.
 - Use the HTTPS URL `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.
 - No offline or "download this area" features, and no scripts that pan the map to preload tiles.
-- Keep the tile URL in config so the provider can be swapped if tiles are throttled during judging.
+- Keep the tile URL in config so the provider can be swapped if tiles are throttled.
 
 Source: [Leaflet](https://leafletjs.com/)
 
 ## Image privacy
 
-Every uploaded photo has faces and license plates blurred before it is stored or shown, because tickets and the map are public. Gemini finds them and returns bounding boxes; Python (Pillow) does the blurring. Gemini never returns an edited image, since a regenerated photo could quietly change the evidence itself.
+Every uploaded photo has faces and license plates blurred before it is stored or shown, because tickets and the map are public. The plan was for Gemini to find them. Instead, local models on our own server do it: YuNet finds faces, a DETR model finds plates, and Pillow blurs them. So Gemini only ever sees the blurred copy, and no model returns an edited image.
 
 ### Upload pipeline
 
-1. **Fix rotation:** run `ImageOps.exif_transpose()` first. Phones store rotation in metadata, and without this the boxes land in the wrong place on sideways photos.
-2. **Read GPS, then strip metadata:** keep the coordinates for the map, then save the image with no metadata (it also holds the phone model and exact timestamp).
-3. **Detect:** the same Gemini call as photo analysis returns a `privacy_boxes` list in its response schema, so each photo needs only one call. Boxes use Gemini's `box_2d` format, `[ymin, xmin, ymax, xmax]` normalized to 0–1000; convert with `x / 1000 × width` and `y / 1000 × height`.
-4. **Blur:** pad each box by 15–20%, then pixelate it or apply a strong blur scaled to the box size. A light blur on a small face can stay readable.
-5. **Store only the blurred copy:** the original stays in memory for the request and is never written to disk or the database.
+1. **Check:** the ticket API accepts only JPEG, PNG and WebP, up to 12 MB and 50 megapixels.
+2. **Fix rotation:** `ImageOps.exif_transpose()` runs first, so sideways phone photos are blurred in the right place.
+3. **Shrink:** to at most 1600 px on a side.
+4. **Detect and blur:** the photo goes to the photo privacy service (`photo-privacy/`), which finds faces at four scales and plates in one pass. Each box is padded (30% for faces, 15% for plates) and given a strong blur scaled to its size.
+5. **Store only the blurred copy:** saved as a fresh JPEG under a random name, which drops GPS, the phone model and the timestamp. The original is never written to disk.
 
-The prompt also tells Gemini not to describe people in its text output; "a man in a red jacket" on a public ticket is its own privacy leak.
+The report prompt also tells Gemini not to describe people; "a man in a red jacket" on a public ticket would be its own privacy leak.
 
 ### When detection fails
 
-- **Fail closed:** if the Gemini call errors or times out, the photo is not published, and the ticket shows "photo pending privacy check."
-- **User review:** the confirm screen shows the blurred preview, and the user can tap or drag to blur anything that was missed.
-- **Stretch:** a local face detector such as MediaPipe as a second pass; blur everything either tool finds.
+- **Fail closed:** if the privacy service is set up but can't check a photo, the upload is refused with a plain message and nothing is stored.
+- **User review:** the form shows the stored, blurred version and says how many faces and plates were hidden.
+- **Measured:** on 40 WIDER FACE photos, it blurred every face 50 px and wider, and 191 of 197 faces between 20 and 50 px. Tiny background faces are the weak spot.
 
-**Priority:** must-have, about 1–2 hours on Saturday alongside photo analysis. **Demo moment:** upload a photo with a passerby and a parked car, and the preview shows both blurred before anything is posted.
-
-Source: [Gemini API: image understanding](https://ai.google.dev/gemini-api/docs/image-understanding)
+**Demo moment:** upload a photo with a passerby and a parked car, and the preview shows both blurred before anything is posted.
 
 ## Planned features
 
-The map, the visible routing explanation, and the generated report are never cut; everything else is cut in reverse priority if the team falls behind.
+What was built against the plan. The map, the visible routing explanation and the generated report all made it.
 
-| Feature | Priority | What it does | Prize tie-in |
+| Feature | Priority | What it does | Status |
 | --- | --- | --- | --- |
-| Photo analysis | Must | Gemini tags issue type, possible accessibility barriers, severity, and confidence, and finds faces and license plates; Pillow blurs them before anything is stored | Gemini |
-| Location capture | Must | Reads photo GPS; falls back to browser location or a dropped pin | — |
-| Owner routing + explanation | Must | Point-in-polygon picks GSU, City, MARTA, or GDOT and shows why | Foundry |
-| Report drafting | Must | Email, phone script, and ATL311 copy-paste text from `contacts.json` | Gemini |
-| Issue map | Must | Pins colored by owner, from `reports` / tickets | — |
-| Confirm before saving | Must | User reviews the AI result before anything is posted | — |
-| 911 banner | Must | Emergencies are sent to 911, never into a ticket | — |
-| Public tickets | Should | Each confirmed issue is posted as a ticket others can see | Tiger Data |
-| "Still there?" voting | Should | Users vote still there or fixed; votes drive ticket status | Tiger Data, Auth0 |
-| Duplicate grouping | Should | New reports of the same issue nearby join the existing ticket | Tiger Data |
-| Hotspots layer | Should | "Reported 6 times in 3 weeks" from the continuous aggregate | Tiger Data |
-| Read-aloud reports | Should | ElevenLabs reads findings and routing before the user confirms | ElevenLabs |
-| Sign-in + my reports | Should | Optional Auth0 login; anonymous reporting stays available | Auth0 |
-| Facilities staff view | Stretch | Auth0 role sees GSU tickets as a work queue | Auth0 |
-| Voice input | Stretch | Describe the issue by speaking | ElevenLabs |
-| MARTA outage check | Stretch | Marks a station elevator report "already reported" if MARTA lists it | — |
-| Custom domain + hosting | Should | GoDaddy domain pointed at a Vultr deploy | GoDaddy, Vultr |
+| Photo analysis | Must | Gemini tags issue type, possible barriers, severity and confidence | ✅ Built |
+| Privacy blurring | Must | Faces and plates blurred before anything is stored | ✅ Built, with local models instead of Gemini |
+| Location capture | Must | Browser location, address search or a dropped pin | ✅ Built (photo GPS isn't read; the API strips it) |
+| Owner routing + explanation | Must | Gemini picks the department from map facts and shows why; map rules as backup | ✅ Built |
+| Report drafting | Must | Email, phone script and send buttons, with contacts from `contacts.json` | ✅ Built |
+| Issue map | Must | Pins by owner and status, with filters and reference layers | ✅ Built |
+| Confirm before saving | Must | User reviews the AI result before anything is posted | ✅ Built |
+| 911 banner | Must | Emergencies are sent to 911, never into a ticket | ✅ Built |
+| Public tickets | Should | Each confirmed issue is posted as a ticket others can see | ✅ Built |
+| "Still there?" voting | Should | Votes drive ticket status; "Still there" offers a follow-up message | ✅ Built |
+| Sign-in + my reports | Should | Optional Auth0 login, profile, onboarding; anonymous reporting stays available | ✅ Built |
+| Custom domain + hosting | Should | Porkbun domain pointed at a Vultr deploy | ✅ Built |
 
-**Cut order if behind:** MARTA outage check, voice input, Facilities staff view, manual ticket merging, Vultr deploy (demo from a laptop).
+**Added beyond the plan:** Georgia Tech as a department, admins, notifications, live updates without reloading, screening that pauses repeat abusers, moving a ticket, up to five photos per ticket, profile pictures, help and privacy dialogs, and dark mode.
+
+### Future expansions
+
+| Feature | What it would do |
+| --- | --- |
+| Duplicate grouping | New reports of the same issue within about 30 m join the existing ticket instead of creating a new one |
+| MARTA outage check | Marks a station elevator or escalator report "already reported" when MARTA already lists the outage |
 
 ## Ticket system
 
-Every confirmed report becomes part of a public ticket: a new ticket if the issue is new, or an existing one if someone already reported it. Other users then vote on whether the issue is still there, and those votes move the ticket toward "fixed." A report is one person's photo; a ticket is the issue itself.
+Every posted report becomes a public ticket. Other users then vote on whether the issue is still there, and those votes move the ticket toward "fixed." Each ticket counts how many different people went to send a report about it.
 
 &#91;embedded content: ticket lifecycle · 4 states\]
 
-A ticket reaches Fixed only after votes and a quiet week agree; a single still-there vote or new report sends it back to Open.
+Votes move a ticket between Open and Likely fixed. Only an admin marks it Fixed, and a later still-there vote can reopen it. The Merged state exists in the schema, but merging isn't built.
 
 ### Grouping duplicate reports
 
-- **Automatic:** when a report is confirmed, the backend looks for an open ticket with the same `issue_type` within about 30 m. If one exists, the report joins it and the ticket's `report_count` goes up. Otherwise a new ticket is created.
-- **Ask the reporter:** a near miss (same spot but a different issue type, or the same type 30–75 m away) shows "Is this the same issue?" with the existing ticket's photo. A yes joins that ticket.
-- **Community merge:** a signed-in user can flag a ticket as a duplicate of another. The merge happens once two more users agree, or immediately if a Facilities staff user does it. The merged ticket's reports and votes move to the surviving ticket, and its status becomes `merged`.
-- **Distance in SQL:** without PostGIS, use a flat approximation that is accurate at these short distances: `111320 * sqrt((lat2 - lat1)^2 + (cos(radians(lat1)) * (lng2 - lng1))^2)` meters.
+Today each report creates its own ticket; automatic grouping is a future expansion. When someone uses a send button on a ticket's drafted message, they're recorded once in `ticket_reports`, and `report_count` counts those people.
 
 ### Voting rules
 
-- Voting requires Auth0 sign-in, so each user has one vote per ticket. Changing a vote replaces the old one.
-- Options are **still there** or **fixed**. Filing a new report on a ticket counts as a "still there" signal.
-- Status follows the lifecycle above: 3+ fixed votes that outnumber still-there votes move a ticket to likely fixed, 7 days with no still-there signal makes it fixed, and a new report within 30 days reopens it. These thresholds live in config so they can be lowered for the demo (for example, 2 votes instead of 3).
-- Stretch: only allow votes from users within about 500 m of the ticket, using browser location, to discourage drive-by votes.
+- Signed-in users and guests can vote, one vote each per ticket; a guest's votes move to their account when they sign in. Changing a vote replaces the old one.
+- Options are **still there** or **fixed**.
+- 2 or more fixed votes that outnumber still-there votes make a ticket **likely fixed**; otherwise it's **open**. The threshold is `FIXED_VOTE_THRESHOLD`.
+- **Fixed** is set by an admin.
 
 ### Schema changes
+
+The tickets as built (from `001_tickets.sql` plus later migrations):
 
 ```sql
 CREATE TABLE tickets (
@@ -189,19 +192,22 @@ CREATE TABLE tickets (
     created_at    timestamptz NOT NULL DEFAULT now(),
     updated_at    timestamptz NOT NULL DEFAULT now(),
     issue_type    text NOT NULL,
-    owner         text NOT NULL,
+    owner         text NOT NULL
+                  CHECK (owner IN ('gsu_facilities', 'georgia_tech', 'city_of_atlanta', 'marta', 'gdot')),
     lat           double precision NOT NULL,
     lng           double precision NOT NULL,
     address       text,
+    title         text NOT NULL,
+    description   text,
+    photo_url     text,                              -- "/uploads/<name>.jpg"
+    more_photos   text[] NOT NULL DEFAULT '{}',      -- up to four more
     status        text NOT NULL DEFAULT 'open'
                   CHECK (status IN ('open', 'likely_fixed', 'fixed', 'merged')),
     merged_into   uuid REFERENCES tickets(id),
+    created_by    uuid REFERENCES users(id),
     report_count  int NOT NULL DEFAULT 1,
-    last_seen_at  timestamptz NOT NULL DEFAULT now()  -- last report or still-there vote
+    last_seen_at  timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX tickets_open_idx ON tickets (issue_type, status);
-
-ALTER TABLE reports ADD COLUMN ticket_id uuid REFERENCES tickets(id);
 
 CREATE TABLE ticket_votes (
     ticket_id  uuid NOT NULL REFERENCES tickets(id),
@@ -212,29 +218,33 @@ CREATE TABLE ticket_votes (
 );
 ```
 
-`tickets` and `ticket_votes` are regular tables, not hypertables, because their rows are updated in place. Stretch for the Tiger Data pitch: a `vote_events` hypertable that keeps every vote change, for a "confidence over time" sparkline on each ticket.
+`tickets` and `ticket_votes` are regular tables, not hypertables, because their rows are updated in place.
 
 ### API endpoints
 
+The main routes. The full list is in `docs/api.md` and at `/docs` on a running API.
+
 | Method | Route | Does |
 | --- | --- | --- |
-| POST | `/reports` | Saves a confirmed report and joins or creates its ticket |
-| GET | `/tickets?status=&owner=` | Tickets for the map and the feed |
-| GET | `/tickets/{id}` | One ticket with its reports, photos, and vote counts |
-| POST | `/tickets/{id}/votes` | Casts or changes the signed-in user's vote |
-| POST | `/tickets/{id}/merge` | Flags or confirms a duplicate of another ticket |
+| POST | `/uploads` | Stores a photo, with faces and plates blurred |
+| POST | `/analyze` | Runs the report agent on a photo. Saves nothing |
+| POST | `/draft` | Picks the department and writes the message for a ticket about to be posted |
+| GET | `/tickets?status=&owner=` | Tickets for the map and the issues list |
+| GET | `/tickets/{id}` | One ticket with its vote counts |
+| POST | `/tickets` | Creates a ticket |
+| DELETE | `/tickets/{id}` | Deletes a ticket (its poster or an admin) |
+| POST | `/tickets/{id}/votes` | Casts or changes the caller's vote |
+| POST | `/tickets/{id}/follow-up` | Writes a follow-up message after a "Still there" vote |
+| POST | `/tickets/{id}/reports` | Records that the caller went to send a report |
+| POST | `/tickets/{id}/location` | Moves a ticket or changes its department (its poster or an admin) |
+| POST | `/tickets/{id}/close` | Marks a ticket fixed (admins only) |
+| GET | `/events` | Live stream of ticket changes |
+| GET | `/notifications` | What happened to your tickets and the ones you voted on |
+| GET | `/coverage` | Whether AVision takes reports at a spot (inside the City of Atlanta) |
 
 ### Onboarding Questions
-Are you a student?
-If yes, what school do you go to?
-Do you take Marta?
+Asked once after a first sign-in, all optional and editable from the profile. The answers also choose which departments' tickets the map shows first.
 
-## Open questions
-
-- [ ] Does the Google prize accept an AI Studio key, or does it need Vertex AI on a Google Cloud project? (Ask the sponsor rep.)
-- [ ] Does the Foundry setup count for any Microsoft prize, or is it there only for orchestration?
-- [ ] Is PostGIS available on the Tiger service? (`avision_diagnose.sql` checks.)
-- [ ] Vote thresholds for the demo: 2 or 3 "fixed" votes to reach `likely_fixed`?
-- [ ] Can anonymous users vote, or only signed-in users? (Current design: signed-in only.)
-- [ ] Where are photos stored: local disk, Vultr object storage, or Azure Blob?
-- [ ] Who owns each role: frontend, backend, agent, data and pitch?
+- Are you a student?
+- If yes, what school do you go to?
+- Do you take MARTA?
