@@ -63,6 +63,7 @@
   --green: #0b5b50;
   --green-soft: #e5eee9;
   --orange: #f4a261;
+  --lavender: #ddd6fe;
   --orange-soft: #fff2e5;
   --shadow: 0 16px 42px rgba(35, 52, 70, 0.12);
   font-family: "DM Sans", sans-serif;
@@ -836,6 +837,49 @@ summary:focus-visible {
   font-size: 11px;
 }
 
+/* A profile picture fills its circle, whatever shape the picture is. */
+.avatar,
+.header-avatar,
+.large-avatar {
+  overflow: hidden;
+  padding: 0;
+}
+
+.avatar-photo {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+/* The big avatar on the profile page, with a small camera button to change it.
+   The wrapper takes the avatar's place and size (set further down, with the
+   profile page's other styles), so the button can sit on the avatar's edge. */
+.large-avatar-wrap {
+  position: absolute;
+}
+
+.change-picture {
+  width: 32px;
+  height: 32px;
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  color: white;
+  background: var(--blue);
+  box-shadow: 0 2px 6px rgba(23, 35, 54, 0.25);
+  cursor: pointer;
+}
+
+.change-picture:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
 .sidebar-user div:nth-child(2) {
   min-width: 0;
 }
@@ -996,6 +1040,38 @@ summary:focus-visible {
 .detail-photo img {
   width: 100%;
   height: 100%;
+  object-fit: cover;
+}
+
+/* When a ticket has several photos: small ones under the big one, to switch between them. */
+.detail-thumbs {
+  padding: 8px 12px 0;
+  display: flex;
+  gap: 6px;
+}
+
+.detail-thumbs button {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--control-surface);
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.detail-thumbs button.selected {
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.detail-thumbs img {
+  width: 100%;
+  height: 100%;
+  display: block;
   object-fit: cover;
 }
 
@@ -1674,6 +1750,19 @@ summary:focus-visible {
   box-shadow: 0 0 0 1px var(--profile-avatar-line), 0 8px 20px rgba(35, 52, 70, 0.13);
 }
 
+.large-avatar-wrap {
+  width: 88px;
+  height: 88px;
+  left: 6px;
+  top: -43px;
+}
+
+.large-avatar-wrap .large-avatar {
+  width: 100%;
+  height: 100%;
+  position: static;
+}
+
 .profile-identity {
   flex: 1;
 }
@@ -1877,14 +1966,14 @@ summary:focus-visible {
   display: grid;
   place-items: center;
   border-radius: 10px;
-  color: var(--on-orange);
-  background: var(--orange);
+  color: var(--blue);
+  background: var(--lavender);
 }
 
 .impact-heading p {
   margin: 0;
   color: var(--green-text);
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.9px;
 }
@@ -2297,6 +2386,12 @@ summary:focus-visible {
   }
 
   .large-avatar {
+    width: 76px;
+    height: 76px;
+    top: -36px;
+  }
+
+  .large-avatar-wrap {
     width: 76px;
     height: 76px;
     top: -36px;
@@ -2867,6 +2962,78 @@ summary:focus-visible {
   margin-top: 6px;
   color: var(--ink);
   font-style: italic;
+}
+
+/* Photo picker: a row of small tiles, one per chosen photo, then the add button. */
+.photo-tiles {
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--canvas);
+}
+
+.photo-tile {
+  width: 56px;
+  height: 56px;
+  position: relative;
+  flex: none;
+}
+
+.photo-tile .photo-thumb {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.photo-tile img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+/* Still uploading: dimmed. Failed: outlined in red. */
+.photo-tile.waiting img {
+  opacity: 0.45;
+}
+
+.photo-tile.failed .photo-thumb {
+  border: 2px solid var(--error);
+}
+
+.photo-remove {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.photo-main {
+  padding: 1px 5px;
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  color: white;
+  background: rgba(23, 35, 54, 0.72);
+  font-size: 9px;
+  font-weight: 700;
+  pointer-events: none;
 }
 
 /* Photo picker: same box as the location row, with a thumbnail once a photo is chosen. */

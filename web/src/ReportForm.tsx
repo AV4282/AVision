@@ -6,6 +6,8 @@ import {
   analyzePhoto,
   createTicket,
   draftReport,
+  MAX_TICKET_PHOTOS,
+  outsideCoverage,
   photoLink,
   uploadPhoto,
   type Owner,
@@ -42,16 +44,38 @@ const FALLBACK_OWNER: Owner = "City of Atlanta"
 // Writing the report is worth a wait, but not a long one: past this the ticket posts without it.
 const DRAFT_WAIT_MS = 60_000
 
-/** "2 faces and 1 license plate", or null when nothing was hidden. */
-function hiddenSummary(stored: UploadedPhoto): string | null {
+/** "2 faces and 1 license plate" across the given photos, or null when nothing was hidden. */
+function hiddenSummary(stored: UploadedPhoto[]): string | null {
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  const faces = stored.reduce((sum, photo) => sum + (photo.facesHidden ?? 0), 0)
+  const plates = stored.reduce((sum, photo) => sum + (photo.platesHidden ?? 0), 0)
   const parts = [
-    stored.facesHidden ? count(stored.facesHidden, "face", "faces") : null,
-    stored.platesHidden ? count(stored.platesHidden, "license plate", "license plates") : null,
+    faces ? count(faces, "face", "faces") : null,
+    plates ? count(plates, "license plate", "license plates") : null,
   ].filter(Boolean)
   return parts.length ? parts.join(" and ") : null
 }
 
+/**
+ * One photo chosen for the ticket. It is sent to the server as soon as it is
+ * chosen, so the person sees the version everyone else will (faces and license
+ * plates hidden) before they post.
+ */
+type ChosenPhoto = {
+  id: number
+  file: File
+  /** A link to the file on this device, to show it before the upload finishes. */
+  preview: string
+  /** The upload, running or finished. Replaced when a failed one is tried again. */
+  upload: Promise<UploadedPhoto>
+  /** The photo as the server stored it, once the upload is done. */
+  stored: UploadedPhoto | null
+  /** Why the upload failed, if it did. */
+  error: string | null
+}
+
+// Where the ticket goes on the map: a dropped pin, the device's position, or
+// the position of an address picked from the suggestions.
 type Location = ReportLocation & { accuracy?: number; fromAddress?: boolean }
 
 export default function ReportForm({
@@ -68,12 +92,14 @@ export default function ReportForm({
   const [owner, setOwner] = useState<Owner | typeof LET_AVISION_CHOOSE>(LET_AVISION_CHOOSE)
   const [address, setAddress] = useState("")
   const [description, setDescription] = useState("")
-  const [photo, setPhoto] = useState<File | null>(null)
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
-  const [viewingPhoto, setViewingPhoto] = useState(false)
-  // The photo as the server stored it, with faces and license plates hidden.
-  const [stored, setStored] = useState<UploadedPhoto | null>(null)
-  const [photoError, setPhotoError] = useState<string | null>(null)
+  // Up to five photos. The first is the ticket's main photo: the one on the
+  // map, and the one the report agent looks at.
+  const [photos, setPhotos] = useState<ChosenPhoto[]>([])
+  const nextPhotoId = useRef(1)
+  // The photo open in the viewer, by id.
+  const [viewingPhoto, setViewingPhoto] = useState<number | null>(null)
+  // Something to say about the last pick, e.g. that not every file fit.
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null)
   // "photo" while the picture uploads, "draft" while the report is written,
   // "ticket" while the ticket is saved.
   const [stage, setStage] = useState<"photo" | "draft" | "ticket">("ticket")
@@ -85,12 +111,10 @@ export default function ReportForm({
   // Where the ticket was placed when `found` was worked out. The department
   // depends on the place, so findings from another spot aren't reused.
   const foundAt = useRef<{ lat: number; lng: number } | null>(null)
+  // The photos on the form when `found` was worked out. The drafted message
+  // lists them, so it isn't reused once photos are added or removed.
+  const foundPhotos = useRef("")
   const [analyzeError, setAnalyzeError] = useState<string | null>(null)
-  // The upload of the chosen photo, running or finished, so it is only ever sent once.
-  const uploading = useRef<{ file: File; result: Promise<UploadedPhoto> } | null>(null)
-  // The photo in the form right now, so an upload that finishes late for an
-  // earlier or removed photo is ignored.
-  const chosen = useRef<File | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [locating, setLocating] = useState(false)
   const placeLookup = useRef(0) // so a slow, older address lookup can't overwrite a newer one
@@ -100,6 +124,8 @@ export default function ReportForm({
   const analysisOwner = useRef<Owner | null>(null)
   const [addressStatus, setAddressStatus] = useState("")
   const [locationError, setLocationError] = useState<string | null>(null)
+  // Why this spot can't be reported, when it is outside the area AVision covers.
+  const [outside, setOutside] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -152,6 +178,20 @@ export default function ReportForm({
     return () => window.removeEventListener("keydown", onKey)
   }, [onClose, submitting])
 
+  // AVision only takes reports in Atlanta. Say so as soon as a spot outside it
+  // is chosen, not after the form has been filled in.
+  useEffect(() => {
+    setOutside(null)
+    if (!location) return
+    let current = true
+    outsideCoverage(location.lat, location.lng).then((reason) => {
+      if (current) setOutside(reason)
+    })
+    return () => {
+      current = false
+    }
+  }, [location])
+
   // Offer "fill in from photo" only when the server has it set up.
   useEffect(() => {
     let current = true
@@ -163,71 +203,81 @@ export default function ReportForm({
     }
   }, [])
 
-  // Show the chosen photo right away, straight from the device.
-  useEffect(() => {
-    if (!photo) {
-      setPhotoPreview(null)
-      return
-    }
-    const url = URL.createObjectURL(photo)
-    setPhotoPreview(url)
-    return () => URL.revokeObjectURL(url)
-  }, [photo])
+  // The device-side links are released when the form closes.
+  const photosNow = useRef(photos)
+  photosNow.current = photos
+  useEffect(() => () => photosNow.current.forEach((photo) => URL.revokeObjectURL(photo.preview)), [])
 
-  // Once the server has the photo, show its copy: that is the one that gets posted.
-  const shownPhoto = (stored && photoLink(stored.path)) || photoPreview
-
-  function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = "" // so picking the same file again still counts as a change
-    if (!file) return
-    if (!file.type.startsWith("image/")) {
-      setError("That file isn’t a photo. Choose a JPEG, PNG or WebP image.")
-      return
-    }
-    setError(null)
-    setPhoto(file)
-    forgetFindings()
-    // Send it straight away, so the person can see the version everyone else
-    // will see (faces and plates hidden) before they post.
-    setStored(null)
-    setPhotoError(null)
-    chosen.current = file
-    upload(file).then(
-      (saved) => {
-        if (chosen.current === file) setStored(saved)
-      },
-      (err) => {
-        // Shown under the photo. Posting, or looking at the photo, tries the upload again.
-        if (chosen.current === file) {
-          setPhotoError(err instanceof Error ? err.message : "Couldn’t upload the photo.")
-        }
-      },
+  /** Sends a photo to the server and records how it went on its entry in the list. */
+  function startUpload(id: number, file: File): Promise<UploadedPhoto> {
+    const upload = uploadPhoto(file)
+    const update = (change: Partial<ChosenPhoto>) =>
+      setPhotos((list) => list.map((photo) => (photo.id === id && photo.upload === upload ? { ...photo, ...change } : photo)))
+    upload.then(
+      (stored) => update({ stored, error: null }),
+      (err) => update({ error: err instanceof Error ? err.message : "Couldn’t upload the photo." }),
     )
+    return upload
   }
 
-  /** Uploads the photo, or returns the upload already made (or under way) for it. */
-  function upload(file: File): Promise<UploadedPhoto> {
-    if (uploading.current?.file !== file) {
-      const result = uploadPhoto(file)
-      const mine = { file, result }
-      uploading.current = mine
-      // A failed upload is forgotten, so the next step that needs the photo tries again.
-      result.catch(() => {
-        if (uploading.current === mine) uploading.current = null
-      })
+  /** The stored version of a chosen photo, waiting for its upload, or trying again if it failed. */
+  function storedPhoto(photo: ChosenPhoto): Promise<UploadedPhoto> {
+    if (photo.stored) return Promise.resolve(photo.stored)
+    if (!photo.error) return photo.upload
+    const upload = startUpload(photo.id, photo.file)
+    setPhotos((list) => list.map((each) => (each.id === photo.id ? { ...each, upload, error: null } : each)))
+    return upload
+  }
+
+  function choosePhotos(event: ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(event.target.files ?? [])
+    event.target.value = "" // so picking the same file again still counts as a change
+    if (picked.length === 0) return
+    const images = picked.filter((file) => file.type.startsWith("image/"))
+    const room = MAX_TICKET_PHOTOS - photos.length
+    const adding = images.slice(0, room)
+    if (images.length < picked.length) {
+      setPhotoNotice("Some of those files aren’t photos. Choose JPEG, PNG or WebP images.")
+    } else if (images.length > room) {
+      setPhotoNotice(
+        `A ticket can have up to ${MAX_TICKET_PHOTOS} photos, so only the first ${room === 1 ? "one was" : `${room} were`} added.`,
+      )
+    } else {
+      setPhotoNotice(null)
     }
-    return uploading.current.result
+    if (adding.length === 0) return
+    const added = adding.map((file) => {
+      const id = nextPhotoId.current++
+      return { id, file, preview: URL.createObjectURL(file), upload: startUpload(id, file), stored: null, error: null }
+    })
+    // The agent's findings are about the first photo; they only go stale if that one is new.
+    if (photos.length === 0) forgetFindings()
+    setPhotos((list) => [...list, ...added])
   }
 
-  function removePhoto() {
-    setPhoto(null)
-    setStored(null)
-    setPhotoError(null)
-    chosen.current = null
-    uploading.current = null
-    forgetFindings()
+  function removePhoto(id: number) {
+    const leaving = photos.find((photo) => photo.id === id)
+    if (!leaving) return
+    setPhotoNotice(null)
+    URL.revokeObjectURL(leaving.preview)
+    if (photos[0]?.id === id) forgetFindings() // the findings were about this photo
+    setPhotos((list) => list.filter((photo) => photo.id !== id))
   }
+
+  // Once the server has a photo, show its copy: that is the one that gets posted.
+  const shown = (photo: ChosenPhoto) => (photo.stored && photoLink(photo.stored.path)) || photo.preview
+  const viewed = photos.find((photo) => photo.id === viewingPhoto)
+  const allStored = photos.every((photo) => photo.stored !== null)
+  const failedAt = photos.findIndex((photo) => photo.error)
+  // Named by position, so it doesn't rely on the red outline alone.
+  const uploadProblem =
+    failedAt < 0
+      ? null
+      : photos.length > 1
+        ? `Photo ${failedAt + 1}: ${photos[failedAt].error} Remove it to post the rest.`
+        : photos[failedAt].error
+  const waitingFor = photos.filter((photo) => !photo.stored && !photo.error).length
+  const storedPhotos = photos.flatMap((photo) => (photo.stored ? [photo.stored] : []))
 
   // Findings and pending analysis belong to one photo and confirmed location.
   function forgetFindings() {
@@ -238,7 +288,7 @@ export default function ReportForm({
   }
 
   async function fillFromPhoto() {
-    if (!photo || analyzing || submitting) return
+    if (photos.length === 0 || analyzing || submitting) return
     if (!location) {
       setAnalyzeError("Choose a location below before analyzing the photo.")
       return
@@ -248,14 +298,15 @@ export default function ReportForm({
     setAnalyzing(true)
     setAnalyzeError(null)
     try {
-      const saved = await upload(photo)
+      // The agent looks at the first photo. The others are listed in the message it drafts.
+      const saved = await Promise.all(photos.map(storedPhoto))
       if (revision !== analysisRevision.current) return
-      setStored(saved)
-      setPhotoError(null)
-      const result = await analyzePhoto(saved.path, where.lat, where.lng)
+      const paths = saved.map((photo) => photo.path)
+      const result = await analyzePhoto(paths[0], where.lat, where.lng, paths.slice(1))
       if (revision !== analysisRevision.current) return
       setFound(result)
       foundAt.current = { lat: where.lat, lng: where.lng }
+      foundPhotos.current = paths.join("|")
       if (result.reportable) {
         // Fill the form in. Everything stays editable, and nothing is posted yet.
         const known = ISSUE_TYPES.some((type) => type.value === result.issueType)
@@ -330,14 +381,11 @@ export default function ReportForm({
     setError(null)
     try {
       const where = location
-      let photoUrl = ""
-      if (photo) {
-        setStage("photo")
-        const saved = await upload(photo)
-        setStored(saved)
-        setPhotoError(null)
-        photoUrl = saved.path
-      }
+      // Any photo still uploading is waited for; one that failed is tried again.
+      if (photos.length > 0) setStage("photo")
+      const paths = (await Promise.all(photos.map(storedPhoto))).map((photo) => photo.path)
+      const photoUrl = paths[0] ?? ""
+      const morePhotoUrls = paths.slice(1)
       const fields = {
         title: title.trim(),
         issueType,
@@ -357,6 +405,7 @@ export default function ReportForm({
         found.report &&
         found.contact &&
         found.owner === owner &&
+        foundPhotos.current === paths.join("|") &&
         foundAt.current?.lat === where.lat &&
         foundAt.current?.lng === where.lng &&
         fields.title === found.title.slice(0, 120).trim() &&
@@ -370,6 +419,7 @@ export default function ReportForm({
           draftReport({
             ...fields,
             photoPath: photoUrl || undefined,
+            morePhotoPaths: morePhotoUrls,
             owner: owner === LET_AVISION_CHOOSE ? undefined : owner,
           }).catch(() => null), // the ticket still posts; it just has no message to send
           new Promise<null>((resolve) => window.setTimeout(() => resolve(null), DRAFT_WAIT_MS)),
@@ -385,7 +435,7 @@ export default function ReportForm({
       }
 
       setStage("ticket")
-      const ticket = await createTicket({ ...fields, owner: ticketOwner, photoUrl })
+      const ticket = await createTicket({ ...fields, owner: ticketOwner, photoUrl, morePhotoUrls })
       onCreated(ticket, toSend)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t create the ticket")
@@ -437,69 +487,83 @@ export default function ReportForm({
         <fieldset className="form-grid report-fields" disabled={submitting}>
           <div className="form-field full">
             <span>
-              Photo <em>optional</em>
+              Photos <em>optional, up to {MAX_TICKET_PHOTOS}</em>
             </span>
-            <div className="photo-row">
-              {shownPhoto && (
-                <button
-                  type="button"
-                  className="photo-thumb"
-                  onClick={() => setViewingPhoto(true)}
-                  aria-label={stored ? "View your photo as it will be posted" : "View the photo you chose"}
+            <div className="photo-tiles">
+              {photos.map((photo, index) => (
+                <div
+                  className={`photo-tile${photo.error ? " failed" : ""}${photo.stored ? "" : " waiting"}`}
+                  key={photo.id}
                 >
-                  <img src={shownPhoto} alt="" />
-                </button>
-              )}
-              <p>{photo ? photo.name : "No photo added"}</p>
+                  <button
+                    type="button"
+                    className="photo-thumb"
+                    onClick={() => setViewingPhoto(photo.id)}
+                    aria-label={`View photo ${index + 1}${
+                      photo.stored ? " as it will be posted" : photo.error ? ", which could not be uploaded" : ""
+                    }`}
+                  >
+                    <img src={shown(photo)} alt="" />
+                  </button>
+                  {index === 0 && photos.length > 1 && <span className="photo-main">Main</span>}
+                  <button
+                    type="button"
+                    className="photo-remove"
+                    onClick={() => removePhoto(photo.id)}
+                    disabled={submitting || analyzing}
+                    aria-label={`Remove photo ${index + 1}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
               {/* On a phone this offers the camera as well as the photo library. */}
               <input
                 ref={fileInput}
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
-                onChange={choosePhoto}
+                multiple
+                onChange={choosePhotos}
                 hidden
               />
-              {photo && (
+              {photos.length < MAX_TICKET_PHOTOS && (
                 <button
                   type="button"
-                  className="text-button"
-                  onClick={removePhoto}
-                  disabled={submitting || analyzing}
+                  className="secondary-button"
+                  onClick={() => fileInput.current?.click()}
+                  disabled={submitting}
                 >
-                  Remove
+                  <Camera size={15} />
+                  {photos.length === 0 ? "Add photos" : "Add another"}
                 </button>
               )}
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => fileInput.current?.click()}
-                disabled={submitting}
-              >
-                <Camera size={15} />
-                {photo ? "Change photo" : "Add a photo"}
-              </button>
             </div>
-            {viewingPhoto && shownPhoto && (
+            {viewed && (
               <PhotoViewer
-                src={shownPhoto}
-                alt={stored ? "Your photo as it will be posted" : "The photo you chose"}
-                onClose={() => setViewingPhoto(false)}
+                src={shown(viewed)}
+                alt={viewed.stored ? "Your photo as it will be posted" : "The photo you chose"}
+                onClose={() => setViewingPhoto(null)}
               />
             )}
-            {photoError ? (
+            {photoNotice && (
               <small className="field-note photo-problem" role="alert">
-                {photoError}
+                {photoNotice}
               </small>
-            ) : photo && !stored ? (
+            )}
+            {uploadProblem ? (
+              <small className="field-note photo-problem" role="alert">
+                {uploadProblem}
+              </small>
+            ) : waitingFor > 0 ? (
               <small className="field-note" role="status">
-                Uploading the photo…
+                {waitingFor === 1 ? "Uploading a photo…" : `Uploading ${waitingFor} photos…`}
               </small>
-            ) : stored && stored.facesHidden !== null ? (
+            ) : photos.length > 0 && allStored && storedPhotos[0].facesHidden !== null ? (
               <small className="field-note photo-checked" role="status">
                 <ShieldCheck size={13} aria-hidden="true" />
-                {hiddenSummary(stored)
-                  ? `Hidden before saving: ${hiddenSummary(stored)}. Tap the photo to check.`
-                  : "No faces or license plates were found. Tap the photo to check."}
+                {hiddenSummary(storedPhotos)
+                  ? `Hidden before saving: ${hiddenSummary(storedPhotos)}. Tap a photo to check.`
+                  : "No faces or license plates were found. Tap a photo to check."}
               </small>
             ) : (
               <small className="field-note">
@@ -508,19 +572,21 @@ export default function ReportForm({
               </small>
             )}
 
-            {photo && canAnalyze && (
+            {photos.length > 0 && canAnalyze && (
               <button
                 type="button"
                 className="ai-button"
                 onClick={fillFromPhoto}
-                disabled={analyzing || submitting}
+                disabled={analyzing || submitting || outside !== null}
               >
                 <Sparkles size={15} />
                 {analyzing
                   ? "Looking at the photo… this takes about 10 seconds"
                   : found
                     ? "Look at the photo again"
-                    : "Fill in the form from this photo"}
+                    : photos.length > 1
+                      ? "Fill in the form from the main photo"
+                      : "Fill in the form from this photo"}
               </button>
             )}
             {analyzeError && (
@@ -643,6 +709,11 @@ export default function ReportForm({
                   : "Confirm the issue’s location before posting."}
               </p>
             </div>
+            {outside && (
+              <small className="field-note photo-problem" role="alert">
+                {outside} Move the pin or pick an address in Atlanta to report something there.
+              </small>
+            )}
             {/* Laptops often guess their position from Wi-Fi and can be blocks off. */}
             {location?.accuracy && location.accuracy > 150 && (
               <small className="field-note">
@@ -682,7 +753,7 @@ export default function ReportForm({
           >
             Cancel
           </button>
-          <button type="submit" className="primary-button" disabled={submitting}>
+          <button type="submit" className="primary-button" disabled={submitting || outside !== null}>
             {submitting
               ? stage === "photo"
                 ? "Uploading photo…"

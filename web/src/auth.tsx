@@ -19,6 +19,7 @@ import {
   ApiError,
   recordSignIn,
   saveDisplayName,
+  uploadAvatar,
   saveOnboarding,
   setAccessTokenSource,
   type Member,
@@ -62,6 +63,8 @@ type AuthState = {
   saveOnboarding: (answers: OnboardingAnswers) => Promise<void>
   /** Changes the signed-in person's display name. Throws on failure. */
   saveName: (name: string) => Promise<void>
+  /** Sets the signed-in person's profile picture. Throws on failure. */
+  savePicture: (file: File) => Promise<void>
 }
 
 const GUEST_STATE: AuthState = {
@@ -79,6 +82,9 @@ const GUEST_STATE: AuthState = {
   },
   saveName: async () => {
     throw new Error("Sign in to change your name.")
+  },
+  savePicture: async () => {
+    throw new Error("Sign in to add a profile picture.")
   },
 }
 
@@ -216,6 +222,9 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
       },
       saveName: async (name) => {
         setMember(await saveDisplayName(await freshToken(), name))
+      },
+      savePicture: async (file) => {
+        setMember(await uploadAvatar(await freshToken(), file))
       },
     }
   }, [

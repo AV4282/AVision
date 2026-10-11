@@ -26,13 +26,14 @@ from uuid import UUID
 from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 import db  # first: it loads api/.env, which the modules below read their settings from
 import agent
 import auth
 import gemini
 import photos
+import routing
 
 log = logging.getLogger("uvicorn.error")  # shows up in uvicorn's (and journalctl's) log
 
@@ -44,6 +45,11 @@ ALLOWED_ORIGINS = [
 Owner = Literal["gsu_facilities", "city_of_atlanta", "marta", "gdot"]
 Status = Literal["open", "likely_fixed", "fixed", "merged"]
 Vote = Literal["still_there", "fixed"]
+MAX_TICKET_PHOTOS = 5
+# A stored photo's path, as POST /uploads returns it, e.g. "/uploads/3f2a....jpg".
+PhotoPath = Annotated[str, Field(pattern=photos.PATH_PATTERN.pattern)]
+# A photo's public link, for putting in a drafted message.
+PhotoLink = Annotated[str, Field(max_length=1000, pattern=r"^https?://\S+$")]
 UserIdHeader = Annotated[UUID | None, Header(alias="X-User-Id")]
 AuthorizationHeader = Annotated[str | None, Header(alias="Authorization")]
 
@@ -70,6 +76,7 @@ def photo_cleanup_loop(stop: threading.Event):
 @asynccontextmanager
 async def lifespan(_app):
     db.pool.open(wait=True, timeout=15)  # fail at startup, not on the first request
+    db.ensure_schema()  # add anything this version needs that the database doesn't have yet
     photos.prepare()  # same for the photo folder
     stop = threading.Event()
     # Once at startup (so each deploy tidies up), then every few hours.
@@ -113,6 +120,20 @@ def _running_version() -> str | None:
 VERSION = _running_version()
 
 
+# AVision only takes reports in its own area (see routing.coverage). Set
+# ALLOW_OUTSIDE_ATLANTA=1 in api/.env to switch the check off, e.g. for a demo elsewhere.
+ALLOW_OUTSIDE = os.getenv("ALLOW_OUTSIDE_ATLANTA", "").strip().lower() in ("1", "true", "yes")
+
+
+def require_covered(lat: float, lng: float):
+    """Refuse a position outside the area AVision covers, with a message for the person."""
+    if ALLOW_OUTSIDE:
+        return
+    area = routing.coverage(lat, lng)
+    if not area["covered"]:
+        raise HTTPException(422, area["reason"])
+
+
 # ---------- models ----------
 class TicketIn(BaseModel):
     # Trim whitespace, so "   " counts as an empty title. Examples fill /docs "Try it out".
@@ -133,10 +154,22 @@ class TicketIn(BaseModel):
         default=None, pattern=photos.PATH_PATTERN.pattern, examples=[None]
     )
 
+    # The ticket's other photos, after the main one above: up to four more paths
+    # from POST /uploads, which makes five photos in all.
+    more_photo_urls: list[PhotoPath] = Field(default_factory=list, max_length=MAX_TICKET_PHOTOS - 1)
+
     @field_validator("address", "description", "photo_url", mode="before")
     @classmethod
     def blank_to_none(cls, value):
         return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def tidy_photos(self):
+        """No photo listed twice, and the first one there is always the main photo."""
+        seen = list(dict.fromkeys(url for url in (self.photo_url, *self.more_photo_urls) if url))
+        self.photo_url = seen[0] if seen else None
+        self.more_photo_urls = seen[1:]
+        return self
 
 
 class Ticket(BaseModel):
@@ -150,7 +183,8 @@ class Ticket(BaseModel):
     address: str | None
     title: str
     description: str | None
-    photo_url: str | None
+    photo_url: str | None  # the main photo
+    photo_urls: list[str]  # every photo, main one first; empty if the ticket has none
     status: Status
     report_count: int
     last_seen_at: datetime
@@ -233,6 +267,8 @@ class AnalyzeIn(BaseModel):
     lng: float = Field(ge=-180, le=180, examples=[-84.3853])
     # The photo's public link, to put in the drafted report. Optional.
     photo_url: str | None = Field(default=None, max_length=1000, pattern=r"^https?://\S+$")
+    # Links to the report's other photos, to list in the drafted report too.
+    more_photo_urls: list[PhotoLink] = Field(default_factory=list, max_length=MAX_TICKET_PHOTOS - 1)
 
 
 class DraftIn(BaseModel):
@@ -250,6 +286,8 @@ class DraftIn(BaseModel):
     photo: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}\.jpg$", examples=[None])
     # The photo's public link, to put in the drafted report.
     photo_url: str | None = Field(default=None, max_length=1000, pattern=r"^https?://\S+$", examples=[None])
+    # Links to the ticket's other photos, to list in the message too.
+    more_photo_urls: list[PhotoLink] = Field(default_factory=list, max_length=MAX_TICKET_PHOTOS - 1)
     # The department the person picked by hand. Leave it out to have it chosen from the issue and the place.
     owner: Owner | None = Field(default=None, examples=[None])
 
@@ -365,6 +403,45 @@ def save_name(body: NameIn, authorization: AuthorizationHeader = None):
     return member
 
 
+@app.post("/me/avatar", response_model=Me)
+def save_avatar(file: UploadFile, authorization: AuthorizationHeader = None):
+    """Set the signed-in person's profile picture (form field "file"; JPEG, PNG or WebP).
+
+    The picture is cleaned like any upload (re-saved, so the phone's hidden
+    details are dropped) and shrunk, but faces are not blurred: it is theirs.
+    Later sign-ins keep it. The old picture's file is removed by the photo cleanup.
+    """
+    sub = verified_sub(authorization)
+    data = file.file.read(photos.MAX_BYTES + 1)
+    if len(data) > photos.MAX_BYTES:
+        raise HTTPException(413, f"That picture is too large (limit {photos.MAX_BYTES // 1024 // 1024} MB)")
+    if not data:
+        raise HTTPException(400, "The picture file is empty")
+    try:
+        saved = photos.save_photo(data, profile_picture=True)
+    except photos.BadPhoto as problem:
+        raise HTTPException(400, str(problem))
+    except photos.StorageFull:
+        raise HTTPException(507, "Photo storage is full. Try again later.")
+    path = f"/uploads/{saved.name}"
+    member = db.save_avatar(sub, path)
+    if member is None:
+        # Signed in with Auth0, but POST /me never ran for them. Create them, then save.
+        db.upsert_user(sub)
+        member = db.save_avatar(sub, path)
+    return member
+
+
+@app.get("/coverage")
+def coverage(lat: float, lng: float):
+    """Whether AVision takes reports at a position, so the form can say so before anything is posted."""
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise HTTPException(422, "That isn't a position on the map.")
+    if ALLOW_OUTSIDE:
+        return {"covered": True, "reason": "Reports are being taken everywhere."}
+    return routing.coverage(lat, lng)
+
+
 @app.post("/guests", response_model=Guest, status_code=201)
 def create_guest():
     """Create a guest user. The frontend saves the ID and sends it as X-User-Id."""
@@ -396,7 +473,11 @@ def get_ticket(
 def create_ticket(
     body: TicketIn, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
 ):
-    """Anyone can create a ticket. The caller, if any, is recorded as its poster."""
+    """Anyone can create a ticket. The caller, if any, is recorded as its poster.
+
+    Only inside the area AVision covers: the City of Atlanta and MARTA rail stations.
+    """
+    require_covered(body.lat, body.lng)
     try:
         return db.create_ticket(body.model_dump(), caller(authorization, guest_id))
     except db.UnknownUser:
@@ -407,15 +488,16 @@ def create_ticket(
 def delete_ticket(
     ticket_id: UUID, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
 ):
-    """Delete a ticket. Only the person who posted it can, or an admin. Its votes and photo go with it."""
+    """Delete a ticket. Only the person who posted it can, or an admin. Its votes and photos go with it."""
     user_id = caller(authorization, guest_id, required=True)
     try:
-        photo_url = db.delete_ticket(ticket_id, user_id, admin=db.is_admin(user_id))
+        photo_urls = db.delete_ticket(ticket_id, user_id, admin=db.is_admin(user_id))
     except LookupError:
         raise HTTPException(404, "Ticket not found")
     except db.NotYours:
         raise HTTPException(403, "Only the person who posted this ticket can delete it")
-    photos.delete(photos.name_in(photo_url))
+    for photo_url in photo_urls:
+        photos.delete(photos.name_in(photo_url))
 
 
 @app.post("/tickets/{ticket_id}/close", response_model=Ticket)
@@ -556,6 +638,7 @@ def analyze(body: AnalyzeIn):
     details, the address and a drafted report. Nothing is saved: the person
     reviews the result, then the web app creates the ticket as usual.
     """
+    require_covered(body.lat, body.lng)
     path = photos.find(body.photo)
     if path is None:
         raise HTTPException(404, "Photo not found. Upload it first with POST /uploads.")
@@ -564,7 +647,12 @@ def analyze(body: AnalyzeIn):
     _take_analysis_slot()
     try:
         return agent.run(
-            agent.Job(photo=path.read_bytes(), lat=body.lat, lng=body.lng, photo_url=body.photo_url)
+            agent.Job(
+                photo=path.read_bytes(),
+                lat=body.lat,
+                lng=body.lng,
+                photo_links=[link for link in (body.photo_url, *body.more_photo_urls) if link],
+            )
         )
     except gemini.GeminiFailed as problem:
         raise HTTPException(502, str(problem))
@@ -583,6 +671,7 @@ def draft(body: DraftIn):
     When Gemini isn't set up, is over its cap or fails, fixed map rules pick the
     department and the message is a plain fill-in one, so this always answers.
     """
+    require_covered(body.lat, body.lng)
     path = photos.find(body.photo) if body.photo else None
     return agent.draft_for_ticket(
         title=body.title,
@@ -592,7 +681,7 @@ def draft(body: DraftIn):
         lat=body.lat,
         lng=body.lng,
         photo=path.read_bytes() if path else None,
-        photo_url=body.photo_url if path else None,
+        photo_links=[link for link in (body.photo_url, *body.more_photo_urls) if link],
         owner=body.owner,
         use_ai=gemini.is_configured() and _analysis_slot() is None,
     )
@@ -601,6 +690,8 @@ def draft(body: DraftIn):
 class FollowUpIn(BaseModel):
     # The ticket photo's public link, to put in the message. Optional.
     photo_url: str | None = Field(default=None, max_length=1000, pattern=r"^https?://\S+$", examples=[None])
+    # Links to the ticket's other photos, to list in the message too.
+    more_photo_urls: list[PhotoLink] = Field(default_factory=list, max_length=MAX_TICKET_PHOTOS - 1)
 
 
 @app.post("/tickets/{ticket_id}/follow-up")
@@ -616,6 +707,10 @@ def follow_up(ticket_id: UUID, body: FollowUpIn | None = None):
         raise HTTPException(404, "Ticket not found")
     return agent.follow_up_for_ticket(
         ticket,
-        photo_url=body.photo_url if body and ticket["photo_url"] else None,
+        photo_links=(
+            [link for link in (body.photo_url, *body.more_photo_urls) if link]
+            if body and ticket["photo_url"]
+            else None
+        ),
         use_ai=gemini.is_configured() and _analysis_slot() is None,
     )

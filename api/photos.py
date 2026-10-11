@@ -40,6 +40,7 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR") or Path(__file__).parent / "uploads")
 
 MAX_BYTES = int(os.getenv("UPLOAD_MAX_MB", "12")) * 1024 * 1024
 MAX_SIDE = 1600  # pixels, longest side of the saved photo
+AVATAR_SIDE = 512  # the same for a profile picture, which is only ever shown small
 MIN_FREE_BYTES = 500 * 1024 * 1024  # stop taking photos before the disk fills up
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 NAME_PATTERN = re.compile(r"^[0-9a-f]{32}\.jpg$")
@@ -97,8 +98,12 @@ def prepare():
     probe.unlink()
 
 
-def save_photo(data: bytes) -> Saved:
-    """Clean the image in `data`, hide faces and plates, and save it."""
+def save_photo(data: bytes, profile_picture: bool = False) -> Saved:
+    """Clean the image in `data`, hide faces and plates, and save it.
+
+    A profile picture is cleaned the same way and saved smaller, but faces are
+    left alone: it is a picture of the person, chosen by them.
+    """
     if shutil.disk_usage(UPLOAD_DIR).free < MIN_FREE_BYTES:
         raise StorageFull
 
@@ -109,7 +114,8 @@ def save_photo(data: bytes) -> Saved:
             colors = original.info.get("icc_profile")  # keeps colors true; holds nothing personal
             photo = ImageOps.exif_transpose(original)  # turn it the way the phone was held
             photo = photo.convert("RGB")
-            photo.thumbnail((MAX_SIDE, MAX_SIDE))
+            side = AVATAR_SIDE if profile_picture else MAX_SIDE
+            photo.thumbnail((side, side))
     except BadPhoto:
         raise
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
@@ -119,7 +125,7 @@ def save_photo(data: bytes) -> Saved:
         raise BadPhoto("That file isn't a photo we can read. Use a JPEG, PNG or WebP.") from None
 
     faces = plates = None
-    if PRIVACY_URL:
+    if PRIVACY_URL and not profile_picture:
         photo, faces, plates = _hide_faces_and_plates(photo)
 
     # A random name, so nobody can guess other photos' links or overwrite one.

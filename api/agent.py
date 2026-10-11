@@ -121,7 +121,7 @@ class Job:
     photo: bytes
     lat: float
     lng: float
-    photo_url: str | None = None
+    photo_links: list[str] = field(default_factory=list)  # public links to the ticket's photos, for the message
     # Filled in by _prepare(), once, for everyone to read.
     analysis: dict | None = None
     routing: dict | None = None
@@ -403,7 +403,7 @@ def _result(job: Job, orchestrator: str) -> dict:
             "timings": job.timings,
         }
 
-    report = _with_facts(job.draft, job.address, job.lat, job.lng, job.photo_url) if job.draft else None
+    report = _with_facts(job.draft, job.address, job.lat, job.lng, job.photo_links) if job.draft else None
     return {
         "analysis": analysis,
         "owner": _owner_for_app(job.routing),
@@ -431,15 +431,18 @@ def _contact_for_app(contact: dict) -> dict:
     return {key: contact[key] for key in ("name", "phone", "phone_note", "email", "web", "web_label", "hours")}
 
 
-def _with_facts(draft: dict, address: str | None, lat: float, lng: float, photo_url: str | None) -> dict:
+def _with_facts(draft: dict, address: str | None, lat: float, lng: float, photo_links: list[str] | None) -> dict:
     """The drafted report with the plain facts added under the message.
 
     The facts are added here, not written by Gemini, so they are always right.
     """
     place = f"{address} ({lat:.5f}, {lng:.5f})" if address else f"{lat:.5f}, {lng:.5f}"
     facts = [f"Location: {place}"]
-    if photo_url:
-        facts.append(f"Photo: {photo_url}")
+    if photo_links and len(photo_links) == 1:
+        facts.append(f"Photo: {photo_links[0]}")
+    elif photo_links:
+        facts.append("Photos:")
+        facts.extend(photo_links)
     facts.append("Sent with AVision, a community reporting site for Atlanta.")
     return {
         "subject": draft["subject"],
@@ -460,7 +463,7 @@ def draft_for_ticket(
     lat: float,
     lng: float,
     photo: bytes | None = None,
-    photo_url: str | None = None,
+    photo_links: list[str] | None = None,
     owner: str | None = None,
     use_ai: bool = True,
 ) -> dict:
@@ -485,13 +488,13 @@ def draft_for_ticket(
         "owner": _owner_for_app(found["routing"]),
         "contact": _contact_for_app(found["routing"]["contact"]),
         "address": found["address"],
-        "report": _with_facts(draft, found["address"], lat, lng, photo_url),
+        "report": _with_facts(draft, found["address"], lat, lng, photo_links),
         "written_by": "gemini" if found["draft"] else "template",
         "timings": found["timings"],
     }
 
 
-def follow_up_for_ticket(ticket: dict, photo_url: str | None = None, use_ai: bool = True) -> dict:
+def follow_up_for_ticket(ticket: dict, photo_links: list[str] | None = None, use_ai: bool = True) -> dict:
     """A follow-up message about a ticket that is still there, for its department.
 
     `ticket` is a row from db.get_ticket(). The department is the ticket's own;
@@ -539,7 +542,7 @@ def follow_up_for_ticket(ticket: dict, photo_url: str | None = None, use_ai: boo
             f"It was reported on {first_reported} and it is still there.",
         }
 
-    report = _with_facts(draft, place, lat, lng, photo_url)
+    report = _with_facts(draft, place, lat, lng, photo_links)
     # One more fact for a follow-up, above the "Sent with AVision" line.
     body = report["message"].rsplit("\n", 1)
     report["message"] = f"{body[0]}\nFirst reported: {first_reported}\n{body[1]}"

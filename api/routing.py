@@ -38,6 +38,9 @@ import geometry
 DATA = Path(__file__).parent / "data"
 
 MARTA_RADIUS_M = 100  # stations are long; entrances can be this far from the middle
+# Where reports are taken at all (see coverage()).
+CITY_EDGE_SLACK_M = 250  # how far past the city limits still counts, to allow for an inexact position
+STATION_REACH_M = 300  # a station outside the city, with its entrances, bus bays and parking
 ROAD_WIDTH_M = 25  # how close to a road's center line still counts as "on" it
 
 # Route numbers GDOT maintains: interstates, US routes and Georgia state routes.
@@ -52,6 +55,26 @@ CONTACTS = _load("contacts.json")["owners"]
 MARTA_STATIONS = _load("marta_stations.json")["stations"]
 GSU_CAMPUS = shape(_load("gsu_campus.geojson")["geometry"])
 ATLANTA = shape(_load("atlanta_city_limits.geojson")["geometry"])
+
+
+def coverage(lat: float, lng: float) -> dict:
+    """Whether AVision takes reports at this position: {"covered": bool, "reason": str}.
+
+    Covered means inside the City of Atlanta (with a little slack at the edge,
+    because a phone's position is rarely exact), or at a MARTA rail station,
+    since several stations AVision routes to MARTA sit just outside the city.
+    """
+    here = Point(lng, lat)
+    if ATLANTA.contains(here) or geometry.distance_m(lat, lng, ATLANTA) <= CITY_EDGE_SLACK_M:
+        return {"covered": True, "reason": "This spot is in the City of Atlanta."}
+    station, distance = _nearest_station(lat, lng)
+    if distance <= STATION_REACH_M:
+        return {"covered": True, "reason": f"This spot is at MARTA's {station['name']} station."}
+    return {
+        "covered": False,
+        "reason": "AVision only takes reports in the City of Atlanta and at MARTA rail stations right now. "
+        "This spot is outside that area.",
+    }
 
 
 def emailable() -> dict:
