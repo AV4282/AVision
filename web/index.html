@@ -1,7 +1,6 @@
 <!doctype html>
-<html lang="<!-- figma:lang -->">
+<html lang="en">
   <head>
-    <!-- figma:head-start -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
@@ -15,13 +14,16 @@
             : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       })();
     </script>
-    <title><!-- figma:title --></title>
-    <!-- figma:head-end -->
+    <title>AVision | Atlanta accessibility map</title>
+    <meta name="description" content="Streamline ticket management with a user-friendly interface featuring onboarding, map and list views for issues, and a profile page for tracking user tickets." />
+    <!-- Kept out of search engines for now; public/robots.txt says the same. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/logo.svg" />
+    <meta property="og:title" content="AVision | Atlanta accessibility map" />
+    <meta property="og:description" content="Streamline ticket management with a user-friendly interface featuring onboarding, map and list views for issues, and a profile page for tracking user tickets." />
   </head>
   <body>
-    <!-- figma:body-start -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- figma:body-end -->
   </body>
 </html>

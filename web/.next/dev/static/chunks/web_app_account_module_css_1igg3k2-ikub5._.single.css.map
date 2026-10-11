@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/web/app/account.module.css"],"sourcesContent":["/* Keeps its height while loading, so nothing jumps when the links appear. */\n.account {\n  display: flex;\n  align-items: center;\n  justify-content: flex-end;\n  gap: 0.25rem;\n  min-height: 2.75rem;\n  font-size: 1rem;\n  font-weight: 600;\n}\n\n.name {\n  max-width: 12rem;\n  margin-right: 0.5rem;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n  color: var(--paint-soft);\n}\n\n.link,\n.button {\n  display: inline-flex;\n  align-items: center;\n  min-height: 2.75rem;\n  padding: 0 0.875rem;\n  border-radius: 999px;\n  color: var(--paint);\n  text-decoration: none;\n  white-space: nowrap;\n  transition:\n    border-color 140ms,\n    background-color 140ms;\n}\n\n.button {\n  border: 1.5px solid var(--edge);\n}\n\n@media (hover: hover) {\n  .link:hover {\n    background: var(--asphalt-raised);\n  }\n\n  .button:hover {\n    border-color: var(--paint);\n    background: var(--asphalt-raised);\n  }\n}\n"],"names":[],"mappings":"AACA;;;;;;;;;;AAUA;;;;;;;;;AASA;;;;;;;;;;;;AAeA;;;;AAIA;EACE;;;;EAIA"}}]
-}

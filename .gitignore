@@ -19,3 +19,6 @@ dist/
 # Local browser verification artifacts
 /output/playwright/
 /.playwright-cli/
+
+# Next.js build cache (from the old Next.js app)
+.next/

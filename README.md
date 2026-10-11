@@ -32,7 +32,6 @@ web/            Web app (React, Vite, Tailwind)
 photo-privacy/  Photo privacy service: blurs faces and plates
 deploy/         Live server setup and auto-deploy
 docs/           Reference docs and the design doc
-leafletreact-map/                Map integration notes
 Avision_Pedestrian_Perspective/  Example photos for demos, with credits
 ```
 

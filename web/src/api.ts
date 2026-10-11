@@ -631,16 +631,6 @@ async function shrinkPhoto(file: File, maxSide = PHOTO_MAX_SIDE): Promise<Blob> 
   }
 }
 
-/**
- * Whether AVision takes reports at a position (the City of Atlanta and MARTA
- * rail stations). Returns null if it's covered, or the reason it isn't. If the
- * check itself can't be made, this says "covered": the server checks again
- * when the ticket is posted.
- */
-export async function outsideCoverage(lat: number, lng: number): Promise<string | null> {
-  return (await checkSpot(lat, lng)).outside
-}
-
 /** Departments that can't be chosen at a spot, each with the reason. */
 export type BlockedOwners = Partial<Record<Owner, string>>
 
@@ -1008,26 +998,6 @@ export async function followUpReport(ticket: Ticket): Promise<TicketDraft> {
 /** Deletes a ticket. Only the person who posted it can, or an admin. */
 export async function deleteTicket(ticketId: string): Promise<void> {
   await request<void>("DELETE", `/tickets/${ticketId}`)
-}
-
-/**
- * Changes where a ticket is and/or which department it goes to. Only its
- * poster can, or an admin. Send the ticket's own position to leave it in place.
- *
- * Without `owner`, the server only changes the department when a move calls
- * for it (the new spot belongs to a different one, say off a campus).
- */
-export async function moveTicket(
-  ticketId: string,
-  to: { lat: number; lng: number; address: string; owner?: Owner },
-): Promise<Ticket> {
-  const body = {
-    lat: to.lat,
-    lng: to.lng,
-    address: to.address || null,
-    owner: to.owner ? OWNER_TO_API[to.owner] : null,
-  }
-  return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/location`, { body }))
 }
 
 /** What to change on a ticket. A field left out stays as it is. */
