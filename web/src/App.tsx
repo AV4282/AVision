@@ -1,4 +1,5 @@
 import {
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -228,9 +229,26 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
           <div className="story-glow one" />
           <div className="story-glow two" />
           <div className="story-map-lines" />
-          <div className="story-content">
+          {/* The key replays the entrance animation when the panel changes. */}
+          <div className="story-content" key={step}>
             <p className="eyebrow light">{panel.eyebrow}</p>
-            <h1>{panel.title}</h1>
+            {/* Each word is its own piece so the title can come in word by word.
+                Screen readers get the whole sentence at once. */}
+            <h1>
+              <span className="sr-only">{panel.title}</span>
+              <span aria-hidden="true">
+                {panel.title.split(" ").map((word, index) => (
+                  <Fragment key={index}>
+                    <span
+                      className="story-word"
+                      style={{ animationDelay: `${320 + index * 65}ms` }}
+                    >
+                      {word}
+                    </span>{" "}
+                  </Fragment>
+                ))}
+              </span>
+            </h1>
             <p className="story-copy">{panel.body}</p>
           </div>
           <div className="story-ticket-card">
@@ -406,9 +424,6 @@ function Sidebar({
         <nav className="support-nav">
           <button>
             <HelpCircle size={18} /> Help & resources
-          </button>
-          <button>
-            <Settings size={18} /> Settings
           </button>
         </nav>
         <div className="sidebar-user">

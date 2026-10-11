@@ -1,10 +1,19 @@
 """
-Owner routing: which agency a report goes to, and how to reach it.
+Where a report is, and the map-math backup for who should get it.
 
-Plain map math, no AI. The answer comes from four fixed rules, checked in order,
-and the contact details come from data/contacts.json. So an owner or a phone
-number can never be made up; a wrong one can only come from wrong data, which
-is easy to find and fix.
+The department is chosen by Gemini (gemini.choose_owner), which is given what
+the problem is plus the facts this file works out about the spot:
+
+    location_facts()   nearest MARTA station, inside GSU's campus or not, the road
+                       and its route numbers, inside the city or not
+    emailable()        the departments Gemini may choose from (data/contacts.json)
+
+Gemini can only answer with one of those departments, and the contact details
+always come from data/contacts.json, so neither can be made up.
+
+find_owner() is the older, AI-free answer: four fixed rules, checked in order.
+It is still used as a hint for Gemini and as the answer when Gemini is not
+available, so the app keeps routing either way.
 
     1. Within 100 m of a MARTA rail station       -> MARTA
     2. Inside the GSU downtown campus outline     -> GSU Facilities
@@ -45,6 +54,43 @@ GSU_CAMPUS = shape(_load("gsu_campus.geojson")["geometry"])
 ATLANTA = shape(_load("atlanta_city_limits.geojson")["geometry"])
 
 
+def emailable() -> dict:
+    """The departments a report can be emailed to, as {owner: contact}. Gemini picks from these."""
+    return {owner: contact for owner, contact in CONTACTS.items() if contact.get("email")}
+
+
+def location_facts(lat: float, lng: float, road: dict | None = None, address: str | None = None) -> list[str]:
+    """What the map says about a position, one plain line per fact, for Gemini to weigh.
+
+    `road` is the closest road from geocode.nearest_road(), or None when that
+    lookup wasn't possible.
+    """
+    here = Point(lng, lat)
+    station, distance = _nearest_station(lat, lng)
+    facts = [f"Map position: {lat:.5f}, {lng:.5f}"]
+    if address:
+        facts.append(f"Nearest address: {address}")
+    facts.append(f"Nearest MARTA rail station: {station['name']}, about {_round_m(distance)} m away")
+    facts.append(
+        "Inside the outline of Georgia State University's downtown campus: "
+        + ("yes" if GSU_CAMPUS.contains(here) else "no")
+    )
+    if road:
+        name = road["name"] or "an unnamed road"
+        routes = [route for route in road["routes"] if STATE_ROUTE.match(route)]
+        kind = f"a state route ({' / '.join(routes)})" if routes else "an ordinary street, not a state route"
+        facts.append(f"Nearest road: {name}, about {road['distance_m']} m away, {kind}")
+    facts.append("Inside Atlanta city limits: " + ("yes" if ATLANTA.contains(here) else "no"))
+    return facts
+
+
+def _nearest_station(lat: float, lng: float) -> tuple[dict, float]:
+    return min(
+        ((s, geometry.between_m(lat, lng, s["lat"], s["lng"])) for s in MARTA_STATIONS),
+        key=lambda pair: pair[1],
+    )
+
+
 def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
     """Pick the owner for a position.
 
@@ -56,10 +102,7 @@ def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
     """
     here = Point(lng, lat)
 
-    station, distance = min(
-        ((s, geometry.between_m(lat, lng, s["lat"], s["lng"])) for s in MARTA_STATIONS),
-        key=lambda pair: pair[1],
-    )
+    station, distance = _nearest_station(lat, lng)
     if distance <= MARTA_RADIUS_M:
         return _answer(
             "marta",

@@ -13,9 +13,11 @@
 # What it does, in order:
 #   1. Pulls the latest code.
 #   2. Builds the web app (web/) into web/dist.
-#   3. Installs the ticket API's packages (api/) and restarts it.
-#   4. Applies the web server settings (deploy/Caddyfile).
-#   5. Checks that the site and the API answer.
+#   3. Sets up the photo privacy service (photo-privacy/), which blurs faces and
+#      license plates, if this server has the memory for it.
+#   4. Installs the ticket API's packages (api/) and restarts it.
+#   5. Applies the web server settings (deploy/Caddyfile).
+#   6. Checks that the site and the API answer.
 #
 # First-time server setup is in deploy/README.md.
 
@@ -24,6 +26,12 @@ set -euo pipefail
 APP=/opt/avision
 SITE=atlantamamdani.photo
 API_SERVICE=avision-api
+PRIVACY_SERVICE=avision-privacy
+PRIVACY_URL=http://127.0.0.1:8001
+PRIVACY_MIN_MEMORY_MB=1800 # the service peaks at about 1.1 GB, next to everything else
+PRIVACY_MIN_DISK_MB=4000   # its packages and models take about 2.5 GB
+# Tells the ticket API where the privacy service is. Present only while the service runs.
+PRIVACY_SETTING=/etc/systemd/system/$API_SERVICE.service.d/photo-privacy.conf
 LOCK=/run/avision-deploy.lock
 
 step() { printf '\n== %s\n' "$*"; }
@@ -52,25 +60,121 @@ build_web() {
   rm -rf .tmp-dist-old
 }
 
+# Makes sure the current folder has a Python environment in .venv.
+make_venv() {
+  [ -x .venv/bin/pip ] && return 0
+  rm -rf .venv
+  if ! python3 -m venv .venv 2>/dev/null; then
+    # Ubuntu ships Python without the venv module.
+    rm -rf .venv
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv >/dev/null || return 1
+    python3 -m venv .venv || return 1
+  fi
+}
+
+# The services run as their own user, which has no login and owns nothing but
+# its data folders.
+make_service_user() {
+  id avision >/dev/null 2>&1 ||
+    useradd --system --no-create-home --shell /usr/sbin/nologin avision
+}
+
+# Installs and starts the photo privacy service. Prints why and returns 1 if
+# this server can't run it or it doesn't come up. Each step checks itself,
+# because a function called from "if" doesn't stop on errors by itself.
+start_privacy() {
+  cd "$APP/photo-privacy" || return 1
+
+  local memory disk
+  memory=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+  if [ "$memory" -lt "$PRIVACY_MIN_MEMORY_MB" ]; then
+    echo "This server has $memory MB of memory. Blurring needs a server with 2 GB or more."
+    return 1
+  fi
+  disk=$(df -Pm "$APP" | awk 'NR == 2 {print $4}')
+  if [ ! -d .venv ] && [ "$disk" -lt "$PRIVACY_MIN_DISK_MB" ]; then
+    echo "This server has $disk MB of free disk. Installing the blurring service needs $PRIVACY_MIN_DISK_MB MB."
+    return 1
+  fi
+
+  # Installing takes a few minutes, so it is only redone when the list of packages changes.
+  local wanted installed=.venv/.installed-requirements
+  wanted=$(sha256sum <requirements.txt)
+  if [ ! -x .venv/bin/uvicorn ] || [ "$(cat "$installed" 2>/dev/null)" != "$wanted" ]; then
+    echo "Installing its packages. The first time takes about five minutes."
+    make_venv || { echo "Could not create its Python environment."; return 1; }
+    .venv/bin/pip install --quiet --disable-pip-version-check -r requirements.txt ||
+      { echo "Could not install its packages."; return 1; }
+    echo "$wanted" >"$installed"
+  fi
+
+  make_service_user || return 1
+  local unit=/etc/systemd/system/$PRIVACY_SERVICE.service
+  # Restarting reloads the models, and photo uploads are refused meanwhile, so
+  # restart only when the service's own files changed.
+  local running=/run/$PRIVACY_SERVICE.version version
+  version=$(cat photo-cleanse.py requirements.txt "$APP/deploy/$PRIVACY_SERVICE.service" | sha256sum)
+  if ! cmp -s "$APP/deploy/$PRIVACY_SERVICE.service" "$unit"; then
+    cp "$APP/deploy/$PRIVACY_SERVICE.service" "$unit" || return 1
+    systemctl daemon-reload
+  fi
+  systemctl enable --quiet "$PRIVACY_SERVICE"
+  if ! systemctl is-active --quiet "$PRIVACY_SERVICE" || [ "$(cat "$running" 2>/dev/null)" != "$version" ]; then
+    echo "Starting it. The first start downloads its two models (about 320 MB)."
+    systemctl restart "$PRIVACY_SERVICE" || true
+  fi
+
+  # Up to five minutes: loading the models takes a while, and longer the first time.
+  local _ restarts
+  for _ in $(seq 1 100); do
+    if curl -fsS -m 5 "$PRIVACY_URL/health" 2>/dev/null | grep -q '"ok": *true'; then
+      echo "$version" >"$running"
+      echo "Photo privacy service is up."
+      return 0
+    fi
+    # Stop waiting early if it has given up, or keeps crashing and restarting.
+    restarts=$(systemctl show -p NRestarts --value "$PRIVACY_SERVICE" 2>/dev/null || echo 0)
+    if systemctl is-failed --quiet "$PRIVACY_SERVICE" || [ "${restarts:-0}" -ge 3 ]; then
+      break
+    fi
+    sleep 3
+  done
+  journalctl -u "$PRIVACY_SERVICE" -n 20 --no-pager >&2 || true
+  echo "The photo privacy service did not start. Its last log lines are above."
+  return 1
+}
+
+update_privacy() {
+  step "Updating the photo privacy service"
+  # A problem here never stops a deploy. The site carries on without blurring,
+  # exactly as it ran before this service existed, and says so below.
+  if start_privacy; then
+    mkdir -p "$(dirname "$PRIVACY_SETTING")"
+    if ! grep -qsF "PHOTO_PRIVACY_URL=$PRIVACY_URL" "$PRIVACY_SETTING"; then
+      printf '[Service]\nEnvironment=PHOTO_PRIVACY_URL=%s\n' "$PRIVACY_URL" >"$PRIVACY_SETTING"
+      systemctl daemon-reload
+    fi
+    return 0
+  fi
+  note "Faces and license plates in new photos are NOT being blurred on this server."
+  if [ -e "$PRIVACY_SETTING" ]; then
+    rm -f "$PRIVACY_SETTING"
+    systemctl daemon-reload
+  fi
+  # Leave nothing half-running that would only use memory.
+  systemctl disable --now --quiet "$PRIVACY_SERVICE" 2>/dev/null || true
+}
+
 update_api() {
   step "Updating the ticket API"
   cd "$APP/api"
 
-  if [ ! -x .venv/bin/pip ]; then
-    rm -rf .venv
-    if ! python3 -m venv .venv 2>/dev/null; then
-      # Ubuntu ships Python without the venv module.
-      rm -rf .venv
-      DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv >/dev/null
-      python3 -m venv .venv
-    fi
-  fi
+  make_venv
   .venv/bin/pip install --quiet --disable-pip-version-check -r requirements.txt
 
-  # The API runs as its own user, which may read the database password and
-  # nothing else of note. Nobody else on the server can read that file.
-  id avision >/dev/null 2>&1 ||
-    useradd --system --no-create-home --shell /usr/sbin/nologin avision
+  # The API may read the database password and nothing else of note. Nobody
+  # else on the server can read that file.
+  make_service_user
   local env_file
   for env_file in .env sql/.env; do
     if [ -f "$env_file" ]; then
@@ -173,6 +277,7 @@ main() {
   esac
 
   build_web
+  update_privacy
   update_api
   update_web_server
   check_site
@@ -184,6 +289,10 @@ main() {
   fi
   if grep -qs 'AUTH0_CLIENT_SECRET' web/.env.local; then
     note "web/.env.local on this server still holds the old Next.js sign-in secrets. Nothing uses them now. Remove them with: rm $APP/web/.env.local"
+  fi
+
+  if [ ! -e "$PRIVACY_SETTING" ]; then
+    note "Photo blurring is off (see the photo privacy step above). Photos are stored as uploaded."
   fi
 
   printf '\nLive: https://%s (version %s)\n' "$SITE" "$(git rev-parse --short HEAD)"

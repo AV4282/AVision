@@ -8,12 +8,12 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 
 ## Current state
 
-**Working now:** people can report an issue with a photo, see it on a real map, vote on whether it's still there, and sign in with Google so their tickets and votes follow them. Everything is stored in Tiger Data and live at https://atlantamamdani.photo. **The main gap: photos are published without faces and plates blurred** (the photo privacy service isn't connected yet).
+**Working now:** people can report an issue with a photo, see it on a real map, vote on whether it's still there, and sign in with Google so their tickets and votes follow them. Everything is stored in Tiger Data and live at https://atlantamamdani.photo. Faces and license plates are blurred before a photo is stored, when the server runs the photo privacy service (it needs a server with about 2 GB of memory; the end of each deploy log says whether it is on).
 
 | Area | Status |
 |---|---|
 | Create a ticket (form with issue type, owner, location, details, photo) | ✅ Working. Location comes from the device ("Use my location") or a picked address suggestion; without either, the ticket goes on the GSU campus default |
-| Photo upload | ✅ Working. The photo is shrunk, stripped of location data and stored by the ticket API. 🔴 Faces and plates are **not** blurred yet |
+| Photo upload | ✅ Working. The photo is shrunk, stripped of location data, sent through the photo privacy service to blur faces and license plates, then stored by the ticket API. The form shows the stored version and says what was hidden |
 | View tickets (issues list with status tabs, search, sort, live counts) | ✅ Working |
 | Map | ✅ React Leaflet map in `web/`, plotting tickets at their real coordinates with selection, search, GDOT roads, the official city boundary, GSU building references and OpenStreetMap attribution. [Geographic provenance](docs/map-geography.md) |
 | Ticket details and "Still there / Fixed" voting | ✅ Working from the map, the issues list and the profile; votes set the status (2 fixed votes → likely fixed) |
@@ -22,9 +22,10 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 | Onboarding questions | ✅ Asked once after a first sign-in (student? which school? take MARTA?), all optional and skippable; saved to the account and editable from **Edit profile**, where you can also change your display name (it stays changed on later sign-ins) |
 | Profile page | ✅ Your tickets and votes, impact counts with a milestone bar, your role badge (Community member or Facilities staff), your answers and when you joined |
 | 911 banner on the report form | ✅ Working |
-| Report agent: photo analysis, owner routing, report drafting | ✅ Built. "Fill in the form from this photo" appears once `GEMINI_API_KEY` is set on the server; see [Report agent](#report-agent) |
+| Report agent: photo analysis, choosing the department, report drafting | ✅ Built. "Fill in the form from this photo" appears once `GEMINI_API_KEY` is set on the server; see [Report agent](#report-agent) |
+| Message to the department | ✅ Every posted ticket opens a drafted email, editable, with a button that opens it in the person's own email addressed to the department (GSU Facilities, ATL311 or MARTA Customer Service). AVision never sends it |
 | Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live |
-| Photo privacy service (blurs faces and plates) | 🟡 Works on its own in `photo-privacy/`; not connected to the app yet |
+| Photo privacy service (blurs faces and plates) | ✅ Connected: the ticket API sends every upload through it when `PHOTO_PRIVACY_URL` is set, and refuses the photo if it can't be checked. `deploy.sh` sets it up on the server when there is enough memory |
 
 In the issues list, click a row or its title to open the ticket, or use its arrow button to view the location on the map.
 
@@ -105,6 +106,8 @@ pip install -r requirements.txt     # use its own virtual environment; it instal
 uvicorn photo-cleanse:app --port 8001 --env-file .env
 ```
 
+To have a locally run ticket API blur its uploads with it, add `PHOTO_PRIVACY_URL="http://127.0.0.1:8001"` to `api/.env` and restart the API. Without that line, photos are stored unblurred.
+
 See [docs/Image-Privacy-API.md](docs/Image-Privacy-API.md) for its settings.
 
 ### 4. Optional: the old Next.js app
@@ -171,24 +174,29 @@ Also `--accounts` (delete signed-in accounts too), `--reports` (delete reports t
 | POST | `/tickets` | Creates a ticket |
 | DELETE | `/tickets/{id}` | Deletes a ticket, with its votes and photo. Only the person who posted it can |
 | POST | `/tickets/{id}/votes` | Casts or changes the caller's vote: `{"vote": "still_there" \| "fixed"}` |
-| POST | `/uploads` | Stores a ticket photo (form field `file`; JPEG, PNG or WebP, up to 12 MB) and returns its path |
+| POST | `/uploads` | Stores a ticket photo (form field `file`; JPEG, PNG or WebP, up to 12 MB) with faces and plates blurred, and returns its path and how many of each were hidden |
 | GET | `/uploads/{name}` | Serves a stored photo |
 | GET | `/analyze/status` | Says whether photo analysis is set up |
 | POST | `/analyze` | Runs the report agent on an uploaded photo: `{"photo": "<name>.jpg", "lat": ..., "lng": ...}`. Saves nothing |
+| POST | `/draft` | For a ticket about to be posted (`title`, `issue_type`, `lat`, `lng`, optional `address`, `description`, `photo`, `owner`): picks the department and writes the message to send it. Saves and sends nothing |
 
 **Who is asking:** signed-in callers send `Authorization: Bearer <Auth0 access token>`, and their tickets and votes are saved under their account. Everyone else sends `X-User-Id` with a guest ID from `POST /guests`; only guest IDs are accepted that way. When someone signs in, the web app sends its guest ID to `POST /me` once, and that guest's tickets and votes move to the account. The web app handles all of this automatically.
 
-**Photos:** the web app shrinks the picture, uploads it to `/uploads`, then creates the ticket with the path it gets back (`/uploads/<name>.jpg`); `photo_url` stores only that path, and the app builds the full link when it shows the photo. The API re-saves every photo as a JPEG of at most 1600 px, which removes the GPS position and other hidden details, and refuses files that are not images. Photos live in `/var/lib/avision/uploads` on the server (and `api/uploads/`, gitignored, for an API run locally). In local dev, Vite sends `/api/uploads` to the live server, so every ticket's photo is in one place (see [Web app](#2-web-app-port-8443)). A photo is deleted with its ticket, and the API also removes any photo no ticket uses once it's an hour old (at startup and every 6 hours). **Faces and plates are not blurred yet.**
+**Photos:** the web app shrinks the picture, uploads it to `/uploads`, then creates the ticket with the path it gets back (`/uploads/<name>.jpg`); `photo_url` stores only that path, and the app builds the full link when it shows the photo. The API re-saves every photo as a JPEG of at most 1600 px, which removes the GPS position and other hidden details, and refuses files that are not images. Photos live in `/var/lib/avision/uploads` on the server (and `api/uploads/`, gitignored, for an API run locally). In local dev, Vite sends `/api/uploads` to the live server, so every ticket's photo is in one place (see [Web app](#2-web-app-port-8443)). A photo is deleted with its ticket, and the API also removes any photo no ticket uses once it's an hour old (at startup and every 6 hours).
+
+**Faces and license plates:** when `PHOTO_PRIVACY_URL` is set, the API sends each cleaned photo to the photo privacy service (`photo-privacy/`) and stores only what comes back, so the saved file, the one the public and Gemini see, has them blurred. If the service can't be reached, the upload is refused with a plain message; a photo is never stored unchecked. The web app uploads a photo as soon as it is chosen, shows the stored version, and says how many faces and plates were hidden. On the live server `deploy.sh` installs and starts the service by itself when the server has at least about 2 GB of memory, and otherwise leaves photos unblurred and says so at the end of the deploy.
 
 <a id="report-agent"></a>
 **Report agent** (`api/agent.py`): in the report form, "Fill in the form from this photo" sends the photo and position to `/analyze`. Four tools run in order:
 
 1. **Analyze the photo** (Gemini): issue type, title, details, possible barriers, priority, confidence.
-2. **Find the owner** (plain Python, `api/routing.py`): within 100 m of a MARTA rail station → MARTA; inside the GSU campus outline → GSU Facilities; on an interstate, US or state route → GDOT; otherwise the City of Atlanta. The reason is shown to the person.
+2. **Choose the department** (Gemini, `gemini.choose_owner`): Gemini is given what the photo shows and what the map says about the spot (the nearest MARTA station and how far, whether it is inside the GSU campus outline, the road and whether it is a state route, whether it is inside the city) and picks one of the departments in `api/data/contacts.json` that has an email address: GSU Facilities, the City of Atlanta (ATL311) or MARTA. It cannot answer with anything else. The reason is shown to the person. If Gemini can't be asked, fixed map rules pick instead (`api/routing.py`): within 100 m of a MARTA rail station → MARTA; inside the GSU campus outline → GSU Facilities; otherwise the City of Atlanta.
 3. **Look up the address** (OpenStreetMap).
 4. **Draft the report** (Gemini): a message and a phone script.
 
-A Microsoft Foundry agent decides which tool to call next; if Foundry isn't set up or fails, the server runs the same steps itself. The person reviews the filled-in form before posting, and after posting gets the drafted message to send themselves. AVision never sends anything.
+A Microsoft Foundry agent decides which tool to call next; if Foundry isn't set up or fails, the server runs the same steps itself. The person reviews the filled-in form before posting.
+
+**After posting:** every ticket opens a "Now tell ..." box with the drafted message, which the person can edit, and a button that opens it in their own email (or Gmail in the browser) addressed to the department. If the photo was already analyzed and nothing was changed, that draft is used; otherwise "Post ticket" asks `/draft`, which picks the department and writes the message from what is in the form (and the photo, if there is one). "Who should fix it?" starts on "Let AVision choose"; picking a department by hand overrides the AI. Without Gemini, `/draft` still answers, using the map rules and a plain template. AVision never sends anything itself.
 
 Owner contact details come only from `api/data/contacts.json` (copied from each owner's website, with the source and date). The AI is told not to write contact details, and anything that looks like one in its text is removed. **Check `contacts.json` before the demo**, and note the GSU outline from OpenStreetMap is generous: it includes Woodruff Park and the city streets between campus buildings.
 
@@ -204,10 +212,10 @@ From the design doc. The map, the visible routing explanation and the generated 
 
 | Feature | Priority | What it does |
 |---|---|---|
-| Photo analysis | Must | Built, except the privacy part: Gemini tags the issue type, possible barriers, severity and confidence. **Still to do:** find faces and plates and blur them before anything is stored (`photo-privacy/` does this on its own; it needs connecting) |
+| Photo analysis | Must | Built: faces and plates are blurred before anything is stored (`photo-privacy/`, when the server runs it), then Gemini tags the issue type, possible barriers, severity and confidence |
 | Location capture | Must | Partly built: browser location and address suggestions. Still to do: read GPS from the photo before the API strips it, and drop a pin on the map |
-| Owner routing + explanation | Must | Built (`api/routing.py`): MARTA station, GSU campus, state route or City, with the reason shown |
-| Report drafting | Must | Built: message and phone script, using only contacts from `api/data/contacts.json` |
+| Owner routing + explanation | Must | Built: Gemini picks GSU Facilities, ATL311 or MARTA from the issue and the place, with the reason shown; fixed map rules (`api/routing.py`) are the backup |
+| Report drafting | Must | Built: every posted ticket gets an editable message, an email button and a phone script, using only contacts from `api/data/contacts.json` |
 | Issue map | Must | Built: Leaflet map in `web/` with pins colored by owner |
 | Confirm before saving | Must | Built: the agent only fills in the form; the person reviews it and posts |
 | Duplicate grouping | Should | New reports of the same issue within ~30 m join the existing ticket |
@@ -233,7 +241,7 @@ From the design doc. The map, the visible routing explanation and the generated 
 | Photo privacy | Local face and plate detection + Pillow blurring; Gemini reads text |
 | Sign-in | Auth0 (`@auth0/auth0-react`), Google accounts |
 | Hosting | Vultr server with Caddy, domain from Porkbun, auto-deploy with GitHub Actions |
-| Report agent | Microsoft Foundry Agent Service (orchestration), Gemini (photo analysis and drafting), `shapely` (owner routing) |
+| Report agent | Microsoft Foundry Agent Service (orchestration), Gemini (photo analysis, choosing the department, drafting), `shapely` (map facts and backup routing) |
 | Planned | ElevenLabs (voice) |
 
 ## Notes for contributors

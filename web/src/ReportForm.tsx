@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { Camera, LocateFixed, Phone, Sparkles, TriangleAlert, X } from "lucide-react"
+import { Camera, LocateFixed, Phone, ShieldCheck, Sparkles, TriangleAlert, X } from "lucide-react"
 import AddressField from "./AddressField"
 import {
   analysisAvailable,
   analyzePhoto,
   createTicket,
+  draftReport,
+  photoLink,
   uploadPhoto,
   type Owner,
   type PhotoAnalysis,
   type Ticket,
+  type TicketDraft,
+  type UploadedPhoto,
 } from "./api"
 import { nearestAddress } from "./geocode"
 import PhotoViewer from "./PhotoViewer"
@@ -26,8 +30,24 @@ const ISSUE_TYPES = [
   { value: "other", label: "Something else" },
 ] as const
 
-// Picked by hand until the routing step chooses the owner from the location.
+// The department is chosen on the server when the ticket is posted, by Gemini,
+// from the issue and the place (api/agent.py). These are for picking one by hand.
 const OWNERS: Owner[] = ["City of Atlanta", "GSU Facilities", "MARTA", "GDOT"]
+const LET_AVISION_CHOOSE = "auto"
+// What the ticket is filed under if the choice can't be made (the server is unreachable).
+const FALLBACK_OWNER: Owner = "City of Atlanta"
+// Writing the report is worth a wait, but not a long one: past this the ticket posts without it.
+const DRAFT_WAIT_MS = 45_000
+
+/** "2 faces and 1 license plate", or null when nothing was hidden. */
+function hiddenSummary(stored: UploadedPhoto): string | null {
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  const parts = [
+    stored.facesHidden ? count(stored.facesHidden, "face", "faces") : null,
+    stored.platesHidden ? count(stored.platesHidden, "license plate", "license plates") : null,
+  ].filter(Boolean)
+  return parts.length ? parts.join(" and ") : null
+}
 
 // Default location: GSU downtown campus, where the seed reports are.
 const GSU_CAMPUS = { lat: 33.7531, lng: -84.3853 }
@@ -41,28 +61,38 @@ export default function ReportForm({
   onCreated,
 }: {
   onClose: () => void
-  /** `toSend` is the agent's drafted report, when there is one that matches the ticket. */
+  /** `toSend` is the drafted message for the ticket's department. Null only if it couldn't be written. */
   onCreated: (ticket: Ticket, toSend: ReportToSend | null) => void
 }) {
   const [issueType, setIssueType] = useState<string>(ISSUE_TYPES[0].value)
   const [title, setTitle] = useState<string>(ISSUE_TYPES[0].label)
   const [titleEdited, setTitleEdited] = useState(false)
-  const [owner, setOwner] = useState<Owner>("City of Atlanta")
+  const [owner, setOwner] = useState<Owner | typeof LET_AVISION_CHOOSE>(LET_AVISION_CHOOSE)
   const [address, setAddress] = useState("")
   const [description, setDescription] = useState("")
   const [photo, setPhoto] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [viewingPhoto, setViewingPhoto] = useState(false)
-  // "photo" while the picture uploads, "ticket" while the ticket is saved.
-  const [stage, setStage] = useState<"photo" | "ticket">("ticket")
+  // The photo as the server stored it, with faces and license plates hidden.
+  const [stored, setStored] = useState<UploadedPhoto | null>(null)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  // "photo" while the picture uploads, "draft" while the report is written,
+  // "ticket" while the ticket is saved.
+  const [stage, setStage] = useState<"photo" | "draft" | "ticket">("ticket")
   const fileInput = useRef<HTMLInputElement>(null)
   // The report agent: looks at the photo and fills in the form (see api/agent.py).
   const [canAnalyze, setCanAnalyze] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [found, setFound] = useState<PhotoAnalysis | null>(null)
+  // Where the ticket was placed when `found` was worked out. The department
+  // depends on the place, so findings from another spot aren't reused.
+  const foundAt = useRef<{ lat: number; lng: number } | null>(null)
   const [analyzeError, setAnalyzeError] = useState<string | null>(null)
-  // The link of a photo that already uploaded, so a retry doesn't upload it twice.
-  const uploaded = useRef<{ file: File; url: string } | null>(null)
+  // The upload of the chosen photo, running or finished, so it is only ever sent once.
+  const uploading = useRef<{ file: File; result: Promise<UploadedPhoto> } | null>(null)
+  // The photo in the form right now, so an upload that finishes late for an
+  // earlier or removed photo is ignored.
+  const chosen = useRef<File | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [locating, setLocating] = useState(false)
   const placeLookup = useRef(0) // so a slow, older address lookup can't overwrite a newer one
@@ -100,6 +130,9 @@ export default function ReportForm({
     return () => URL.revokeObjectURL(url)
   }, [photo])
 
+  // Once the server has the photo, show its copy: that is the one that gets posted.
+  const shownPhoto = (stored && photoLink(stored.path)) || photoPreview
+
   function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = "" // so picking the same file again still counts as a change
@@ -110,6 +143,45 @@ export default function ReportForm({
     }
     setError(null)
     setPhoto(file)
+    forgetFindings()
+    // Send it straight away, so the person can see the version everyone else
+    // will see (faces and plates hidden) before they post.
+    setStored(null)
+    setPhotoError(null)
+    chosen.current = file
+    upload(file).then(
+      (saved) => {
+        if (chosen.current === file) setStored(saved)
+      },
+      (err) => {
+        // Shown under the photo. Posting, or looking at the photo, tries the upload again.
+        if (chosen.current === file) {
+          setPhotoError(err instanceof Error ? err.message : "Couldn’t upload the photo.")
+        }
+      },
+    )
+  }
+
+  /** Uploads the photo, or returns the upload already made (or under way) for it. */
+  function upload(file: File): Promise<UploadedPhoto> {
+    if (uploading.current?.file !== file) {
+      const result = uploadPhoto(file)
+      const mine = { file, result }
+      uploading.current = mine
+      // A failed upload is forgotten, so the next step that needs the photo tries again.
+      result.catch(() => {
+        if (uploading.current === mine) uploading.current = null
+      })
+    }
+    return uploading.current.result
+  }
+
+  function removePhoto() {
+    setPhoto(null)
+    setStored(null)
+    setPhotoError(null)
+    chosen.current = null
+    uploading.current = null
     forgetFindings()
   }
 
@@ -124,12 +196,13 @@ export default function ReportForm({
     setAnalyzing(true)
     setAnalyzeError(null)
     try {
-      if (uploaded.current?.file !== photo) {
-        uploaded.current = { file: photo, url: await uploadPhoto(photo) }
-      }
+      const saved = await upload(photo)
+      setStored(saved)
+      setPhotoError(null)
       const where = location ?? GSU_CAMPUS
-      const result = await analyzePhoto(uploaded.current.url, where.lat, where.lng)
+      const result = await analyzePhoto(saved.path, where.lat, where.lng)
       setFound(result)
+      foundAt.current = { lat: where.lat, lng: where.lng }
       if (result.reportable) {
         // Fill the form in. Everything stays editable, and nothing is posted yet.
         const known = ISSUE_TYPES.some((type) => type.value === result.issueType)
@@ -201,28 +274,60 @@ export default function ReportForm({
       const where = location ?? GSU_CAMPUS
       let photoUrl = ""
       if (photo) {
-        if (uploaded.current?.file !== photo) {
-          setStage("photo")
-          uploaded.current = { file: photo, url: await uploadPhoto(photo) }
-        }
-        photoUrl = uploaded.current.url
+        setStage("photo")
+        const saved = await upload(photo)
+        setStored(saved)
+        setPhotoError(null)
+        photoUrl = saved.path
       }
-      setStage("ticket")
-      const ticket = await createTicket({
+      const fields = {
         title: title.trim(),
         issueType,
-        owner,
         lat: Number(where.lat.toFixed(6)),
         lng: Number(where.lng.toFixed(6)),
         address: address.trim(),
         description: description.trim(),
-        photoUrl,
-      })
-      // Offer the drafted report only if it still matches: same owner as posted.
-      const toSend =
-        found?.report && found.contact && found.owner === owner
-          ? { contact: found.contact, report: found.report }
-          : null
+      }
+
+      // Every ticket gets a message to send to its department. If the photo
+      // was already looked at and nothing was changed since, that message is
+      // ready. Otherwise the server writes one now, from what is in the form.
+      let toSend: ReportToSend | null = null
+      let ticketOwner: Owner = owner === LET_AVISION_CHOOSE ? FALLBACK_OWNER : owner
+      if (
+        found?.reportable &&
+        found.report &&
+        found.contact &&
+        found.owner === owner &&
+        foundAt.current?.lat === where.lat &&
+        foundAt.current?.lng === where.lng &&
+        fields.title === found.title.slice(0, 120).trim() &&
+        fields.description === found.description.slice(0, 2000).trim() &&
+        fields.address === (found.address ?? "").trim()
+      ) {
+        toSend = { contact: found.contact, report: found.report, reason: found.ownerReason }
+      } else {
+        setStage("draft")
+        const drafted = await Promise.race<TicketDraft | null>([
+          draftReport({
+            ...fields,
+            photoPath: photoUrl || undefined,
+            owner: owner === LET_AVISION_CHOOSE ? undefined : owner,
+          }).catch(() => null), // the ticket still posts; it just has no message to send
+          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), DRAFT_WAIT_MS)),
+        ])
+        if (drafted) {
+          ticketOwner = drafted.owner
+          toSend = {
+            contact: drafted.contact,
+            report: drafted.report,
+            reason: drafted.decidedBy === "person" ? null : drafted.ownerReason,
+          }
+        }
+      }
+
+      setStage("ticket")
+      const ticket = await createTicket({ ...fields, owner: ticketOwner, photoUrl })
       onCreated(ticket, toSend)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t create the ticket")
@@ -277,14 +382,14 @@ export default function ReportForm({
               Photo <em>optional</em>
             </span>
             <div className="photo-row">
-              {photoPreview && (
+              {shownPhoto && (
                 <button
                   type="button"
                   className="photo-thumb"
                   onClick={() => setViewingPhoto(true)}
-                  aria-label="View the photo you chose"
+                  aria-label={stored ? "View your photo as it will be posted" : "View the photo you chose"}
                 >
-                  <img src={photoPreview} alt="" />
+                  <img src={shownPhoto} alt="" />
                 </button>
               )}
               <p>{photo ? photo.name : "No photo added"}</p>
@@ -300,11 +405,8 @@ export default function ReportForm({
                 <button
                   type="button"
                   className="text-button"
-                  onClick={() => {
-                    setPhoto(null)
-                    forgetFindings()
-                  }}
-                  disabled={submitting}
+                  onClick={removePhoto}
+                  disabled={submitting || analyzing}
                 >
                   Remove
                 </button>
@@ -319,17 +421,34 @@ export default function ReportForm({
                 {photo ? "Change photo" : "Add a photo"}
               </button>
             </div>
-            {viewingPhoto && photoPreview && (
+            {viewingPhoto && shownPhoto && (
               <PhotoViewer
-                src={photoPreview}
-                alt="The photo you chose"
+                src={shownPhoto}
+                alt={stored ? "Your photo as it will be posted" : "The photo you chose"}
                 onClose={() => setViewingPhoto(false)}
               />
             )}
-            <small className="field-note">
-              Photos are public. Please keep faces and license plates out of the
-              shot.
-            </small>
+            {photoError ? (
+              <small className="field-note photo-problem" role="alert">
+                {photoError}
+              </small>
+            ) : photo && !stored ? (
+              <small className="field-note" role="status">
+                Uploading the photo…
+              </small>
+            ) : stored && stored.facesHidden !== null ? (
+              <small className="field-note photo-checked" role="status">
+                <ShieldCheck size={13} aria-hidden="true" />
+                {hiddenSummary(stored)
+                  ? `Hidden before saving: ${hiddenSummary(stored)}. Tap the photo to check.`
+                  : "No faces or license plates were found. Tap the photo to check."}
+              </small>
+            ) : (
+              <small className="field-note">
+                Photos are public. Please keep faces and license plates out of the
+                shot.
+              </small>
+            )}
 
             {photo && canAnalyze && (
               <button
@@ -408,8 +527,9 @@ export default function ReportForm({
             <span>Who should fix it?</span>
             <select
               value={owner}
-              onChange={(event) => setOwner(event.target.value as Owner)}
+              onChange={(event) => setOwner(event.target.value as Owner | typeof LET_AVISION_CHOOSE)}
             >
+              <option value={LET_AVISION_CHOOSE}>Let AVision choose (recommended)</option>
               {OWNERS.map((name) => (
                 <option key={name} value={name}>
                   {name}
@@ -513,7 +633,9 @@ export default function ReportForm({
             {submitting
               ? stage === "photo"
                 ? "Uploading photo…"
-                : "Posting…"
+                : stage === "draft"
+                  ? "Writing your report…"
+                  : "Posting…"
               : "Post ticket"}
           </button>
         </div>

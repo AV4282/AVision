@@ -1,0 +1,48 @@
+/* [project]/web/app/account.module.css [app-client] (css) */
+.account-module__o7v49a__account {
+  justify-content: flex-end;
+  align-items: center;
+  gap: .25rem;
+  min-height: 2.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex;
+}
+
+.account-module__o7v49a__name {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+  color: var(--paint-soft);
+  margin-right: .5rem;
+  overflow: hidden;
+}
+
+.account-module__o7v49a__link, .account-module__o7v49a__button {
+  min-height: 2.75rem;
+  color: var(--paint);
+  white-space: nowrap;
+  border-radius: 999px;
+  align-items: center;
+  padding: 0 .875rem;
+  text-decoration: none;
+  transition: border-color .14s, background-color .14s;
+  display: inline-flex;
+}
+
+.account-module__o7v49a__button {
+  border: 1.5px solid var(--edge);
+}
+
+@media (hover: hover) {
+  .account-module__o7v49a__link:hover {
+    background: var(--asphalt-raised);
+  }
+
+  .account-module__o7v49a__button:hover {
+    border-color: var(--paint);
+    background: var(--asphalt-raised);
+  }
+}
+
+/*# sourceMappingURL=web_app_account_module_css_1igg3k2-ikub5._.single.css.map*/

@@ -1,0 +1,8 @@
+{
+  "pages": {},
+  "app": {
+    "[project]/web/app/onboarding/page": []
+  },
+  "appUsingSizeAdjust": false,
+  "pagesUsingSizeAdjust": false
+}

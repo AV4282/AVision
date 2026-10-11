@@ -1,14 +1,17 @@
 """
-The two jobs Gemini does for the report agent: look at the photo, and write the report.
+The three jobs Gemini does for the report agent.
 
   analyze_photo()  photo -> what the issue is, how serious, how sure
-  draft_report()   the findings + owner + place -> a message and a phone script
+  choose_owner()   the issue + what the map says about the spot -> which department
+  draft_report()   the issue + the place -> a message and a phone script
 
-Both ask for a fixed JSON shape (a response schema), so the answer can be used
+All three ask for a fixed JSON shape (a response schema), so the answer can be used
 directly instead of being picked out of free text.
 
-Two rules are built into the prompts and checked again in code:
+Three rules are built into the prompts and checked again in code:
   - Findings are "possible" issues or barriers, never legal violations.
+  - Gemini can only choose a department from the list it is given
+    (data/contacts.json). Any other answer is refused.
   - Gemini writes no contact details. Phone numbers, emails and links come only
     from data/contacts.json, added by the app. Anything that looks like one in
     Gemini's text is removed (see _strip_contacts).
@@ -17,11 +20,12 @@ Two rules are built into the prompts and checked again in code:
 import logging
 import os
 import re
+import threading
 from typing import Literal
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 log = logging.getLogger("avision.gemini")
 
@@ -88,18 +92,40 @@ Describe only what is visible. Rules:
 - Never read out or mention license plates, faces, names or phone numbers that appear in the photo.
 - If the photo does not show a reportable problem, set is_reportable to false and say what it shows instead."""
 
-DRAFT_INSTRUCTIONS = """You write a short report that a member of the public will send to the agency responsible \
-for fixing a problem. You are given the findings, the place and the agency's name.
+CHOOSE_INSTRUCTIONS = """You decide which department a report on AVision should be sent to. AVision is a site \
+where people in Atlanta report everyday problems so the right department can fix them.
+
+You are given what the problem is, what the map says about the spot, and the departments you may choose from \
+with what each one looks after.
+
+How to decide:
+- Use both the problem and the place. The department that owns the spot is the one that fixes it.
+- Something that is part of a MARTA station, stop or vehicle goes to MARTA, even where the station sits inside \
+the university campus.
+- Something in or on a Georgia State University building, or on campus grounds, goes to GSU Facilities.
+- A public street, sidewalk, curb ramp, crosswalk or traffic signal goes to the city, even where it runs past a \
+station or through the campus.
+- Being near a station or inside the campus outline is a clue, not proof. A cracked public sidewalk 60 m from a \
+station is still the city's.
+- If nothing clearly fits, choose the city.
+
+Answer with the department's id exactly as listed, and one plain sentence for the person reporting that says \
+why, naming the place. Do not include any phone number, email address or web link."""
+
+DRAFT_INSTRUCTIONS = """You write a short report that a member of the public will send to the department \
+responsible for fixing a problem. You are given the issue and the place.
 
 Rules:
 - Stick to the facts you are given. Do not invent details.
 - Call things "possible" issues or barriers. Never say anything is illegal, a violation, or non-compliant.
 - Do NOT include any phone number, email address, web link or staff name. The app adds contact details itself.
+- Do not name the department you are writing to. The app addresses the message.
 - Do not describe people.
 - Plain words, short sentences."""
 
 
 _shared_client: genai.Client | None = None
+_client_lock = threading.Lock()
 
 
 def _client() -> genai.Client:
@@ -108,11 +134,13 @@ def _client() -> genai.Client:
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise NotConfigured
-    if _shared_client is None:
-        # GEMINI_BASE_URL is only for tests, to point at a stand-in for Gemini.
-        options = types.HttpOptions(timeout=TIMEOUT_MS, base_url=os.getenv("GEMINI_BASE_URL") or None)
-        _shared_client = genai.Client(api_key=key, http_options=options)
-    return _shared_client
+    # Two requests can arrive at once; the lock makes sure they end up sharing one client.
+    with _client_lock:
+        if _shared_client is None:
+            # GEMINI_BASE_URL is only for tests, to point at a stand-in for Gemini.
+            options = types.HttpOptions(timeout=TIMEOUT_MS, base_url=os.getenv("GEMINI_BASE_URL") or None)
+            _shared_client = genai.Client(api_key=key, http_options=options)
+        return _shared_client
 
 
 def is_configured() -> bool:
@@ -165,18 +193,65 @@ def analyze_photo(jpeg: bytes) -> dict:
     return result
 
 
-def draft_report(analysis: dict, owner_name: str, address: str | None, lat: float, lng: float) -> dict:
-    """A message and phone script for the owner, as a dict with the Draft fields."""
-    facts = (
-        f"Agency: {owner_name}\n"
-        f"Issue: {analysis['title']}\n"
-        f"What was seen: {analysis['description']}\n"
-        f"Who it may affect: {'; '.join(analysis['possible_barriers']) or 'not stated'}\n"
-        f"Seriousness: {analysis['severity']}\n"
-        f"Place: {address or 'no street address found'} (map position {lat:.5f}, {lng:.5f})"
+def choose_owner(issue: dict, location: list[str], departments: dict, suggestion: str | None = None) -> dict:
+    """Which department this report goes to: {"owner": <id>, "reason": <one sentence>}.
+
+    `issue` is what the problem is (see _issue_lines), `location` is the lines from
+    routing.location_facts(), and `departments` is {id: contact} from
+    data/contacts.json. The answer is always one of those ids: the response
+    schema allows nothing else, and anything else fails validation.
+    `suggestion` is what the map rules alone would pick, as a hint.
+    """
+    ids = tuple(departments)
+    Choice = create_model(
+        "Choice",
+        owner=(Literal[ids], Field(description="The id of the department this report should go to.")),
+        reason=(
+            str,
+            Field(description="One plain sentence, at most 30 words, on why this department, naming the place."),
+        ),
+    )
+    listed = "\n".join(
+        f"- {owner}: {contact['name']}. Looks after: {contact.get('handles') or 'not stated'}"
+        for owner, contact in departments.items()
+    )
+    asked = (
+        "The problem\n" + "\n".join(_issue_lines(issue))
+        + "\n\nThe place\n" + "\n".join(location)
+        + (f"\nMap rules alone would pick: {suggestion}" if suggestion else "")
+        + "\n\nDepartments you may choose from\n" + listed
+    )
+    choice = _ask(f"Choose the department for this report.\n\n{asked}", CHOOSE_INSTRUCTIONS, Choice)
+    return {"owner": choice.owner, "reason": _strip_contacts(choice.reason)[:300]}
+
+
+def draft_report(issue: dict, address: str | None, lat: float, lng: float) -> dict:
+    """A message and phone script about the issue, as a dict with the Draft fields.
+
+    `issue` needs a "title"; "description", "possible_barriers" and "severity" are
+    used when present (a photo analysis has them all, a typed ticket may not).
+    The draft names no department, so it stays right whoever it is sent to.
+    """
+    facts = "\n".join(
+        _issue_lines(issue)
+        + [f"Place: {address or 'no street address found'} (map position {lat:.5f}, {lng:.5f})"]
     )
     draft = _ask(f"Write the report from these facts.\n\n{facts}", DRAFT_INSTRUCTIONS, Draft).model_dump()
     return {key: _strip_contacts(text) for key, text in draft.items()}
+
+
+def _issue_lines(issue: dict) -> list[str]:
+    """The issue as plain lines for a prompt, leaving out whatever isn't known."""
+    lines = [f"Issue: {issue['title']}"]
+    if issue.get("issue_type") and issue["issue_type"] != "other":
+        lines.append(f"Type: {issue['issue_type'].replace('_', ' ')}")
+    if issue.get("description"):
+        lines.append(f"What was seen: {issue['description']}")
+    if issue.get("possible_barriers"):
+        lines.append(f"Who it may affect: {'; '.join(issue['possible_barriers'])}")
+    if issue.get("severity"):
+        lines.append(f"Seriousness: {issue['severity']}")
+    return lines
 
 
 # Anything shaped like a phone number, email address or link.

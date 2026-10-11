@@ -1,0 +1,112 @@
+/* [project]/web/app/paving.module.css [app-client] (css) */
+.paving-module__wvHSnG__root {
+  perspective: 44rem;
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.paving-module__wvHSnG__dots {
+  transform-origin: 50% 100%;
+  background-image: radial-gradient(circle, var(--lane) 0 21%, transparent 23%);
+  will-change: transform;
+  background-size: 3rem 3rem;
+  animation: 3.2s linear infinite paving-module__wvHSnG__roll;
+  position: absolute;
+  inset: -20% -35% -45%;
+  transform: rotateX(60deg);
+}
+
+@keyframes paving-module__wvHSnG__roll {
+  to {
+    transform: rotateX(60deg) translateY(3rem);
+  }
+}
+
+.paving-module__wvHSnG__fade {
+  background: linear-gradient(to bottom, var(--asphalt) 8%, transparent 78%);
+  position: absolute;
+  inset: 0;
+}
+
+.paving-module__wvHSnG__viewfinder {
+  width: min(22rem, 56%);
+  margin: 0 auto;
+  animation: .7s cubic-bezier(.2, .7, .2, 1) .5s both paving-module__wvHSnG__settle, 5.5s ease-in-out 2.4s infinite paving-module__wvHSnG__focus;
+  position: absolute;
+  inset: 30% 0 16%;
+}
+
+@keyframes paving-module__wvHSnG__settle {
+  from {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes paving-module__wvHSnG__focus {
+  0%, 68%, 100% {
+    transform: scale(1);
+  }
+
+  76% {
+    transform: scale(.92);
+  }
+
+  84% {
+    transform: scale(1.015);
+  }
+
+  90% {
+    transform: scale(1);
+  }
+}
+
+.paving-module__wvHSnG__viewfinder i {
+  border: 0 solid var(--paint);
+  width: 1.75rem;
+  height: 1.75rem;
+  animation: 5.5s ease-in-out 2.4s infinite paving-module__wvHSnG__lock;
+  position: absolute;
+}
+
+@keyframes paving-module__wvHSnG__lock {
+  0%, 80%, 100% {
+    border-color: var(--paint);
+  }
+
+  85%, 93% {
+    border-color: var(--lane);
+  }
+}
+
+.paving-module__wvHSnG__viewfinder i:first-child {
+  border-top-width: 2px;
+  border-left-width: 2px;
+  top: 0;
+  left: 0;
+}
+
+.paving-module__wvHSnG__viewfinder i:nth-child(2) {
+  border-top-width: 2px;
+  border-right-width: 2px;
+  top: 0;
+  right: 0;
+}
+
+.paving-module__wvHSnG__viewfinder i:nth-child(3) {
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+  bottom: 0;
+  left: 0;
+}
+
+.paving-module__wvHSnG__viewfinder i:nth-child(4) {
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+  bottom: 0;
+  right: 0;
+}
+
+/*# sourceMappingURL=web_app_paving_module_css_1igg3k2-ikub5._.single.css.map*/
