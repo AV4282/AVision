@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { Camera, LocateFixed, Phone, ShieldCheck, Sparkles, TriangleAlert, X } from "lucide-react"
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
+import { Camera, Check, LoaderCircle, Phone, ShieldCheck, Sparkles, TriangleAlert, X } from "lucide-react"
 import AddressField from "./AddressField"
 import {
   analysisAvailable,
@@ -19,6 +19,9 @@ import {
 import { nearestAddress } from "./geocode"
 import PhotoViewer from "./PhotoViewer"
 import type { ReportToSend } from "./ReportReady"
+import type { ReportLocation } from "./ReportLocationPicker"
+
+const ReportLocationPicker = lazy(() => import("./ReportLocationPicker"))
 
 // Same snake_case values as reports.issue_type, so tickets and reports line up.
 const ISSUE_TYPES = [
@@ -71,12 +74,9 @@ type ChosenPhoto = {
   error: string | null
 }
 
-// Default location: GSU downtown campus, where the seed reports are.
-const GSU_CAMPUS = { lat: 33.7531, lng: -84.3853 }
-
-// Where the ticket goes on the map: the device's position ("Use my location"),
-// or the position of an address picked from the suggestions.
-type Location = { lat: number; lng: number; accuracy?: number; fromAddress?: boolean }
+// Where the ticket goes on the map: a dropped pin, the device's position, or
+// the position of an address picked from the suggestions.
+type Location = ReportLocation & { accuracy?: number; fromAddress?: boolean }
 
 export default function ReportForm({
   onClose,
@@ -118,11 +118,57 @@ export default function ReportForm({
   const [location, setLocation] = useState<Location | null>(null)
   const [locating, setLocating] = useState(false)
   const placeLookup = useRef(0) // so a slow, older address lookup can't overwrite a newer one
+  const locationRequest = useRef(0)
+  const addressEdited = useRef(false)
+  const analysisRevision = useRef(0)
+  const analysisOwner = useRef<Owner | null>(null)
+  const [addressStatus, setAddressStatus] = useState("")
   const [locationError, setLocationError] = useState<string | null>(null)
   // Why this spot can't be reported, when it is outside the area AVision covers.
   const [outside, setOutside] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => () => {
+    ++placeLookup.current
+    ++locationRequest.current
+    ++analysisRevision.current
+  }, [])
+
+  useEffect(() => {
+    if (!location || location.fromAddress || submitting) return
+    const controller = new AbortController()
+    const lookup = placeLookup.current
+    const timer = window.setTimeout(async () => {
+      const nearby = await nearestAddress(location.lat, location.lng, controller.signal)
+      if (controller.signal.aborted || lookup !== placeLookup.current) return
+      if (nearby) {
+        if (!addressEdited.current) setAddress(nearby)
+        setAddressStatus(addressEdited.current ? `Nearest address: ${nearby}. Your address was kept.` : "Nearest address filled in. You can edit it.")
+      } else {
+        setAddressStatus("No address found. Your precise coordinates are kept; you can add a landmark.")
+      }
+    }, 500)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [location, submitting])
+
+  function confirmLocation(point: Location) {
+    if (submitting) return
+    ++placeLookup.current
+    ++locationRequest.current
+    setLocating(false)
+    setError(null)
+    setLocationError(null)
+    setAddressStatus(point.fromAddress ? "Address and pin synchronized." : "Looking up the nearest address…")
+    if (!addressEdited.current) setAddress("")
+    if (analysisOwner.current && owner === analysisOwner.current) setOwner(LET_AVISION_CHOOSE)
+    analysisOwner.current = null
+    forgetFindings()
+    setLocation({ lat: point.lat, lng: point.lng, accuracy: point.accuracy, fromAddress: point.fromAddress })
+  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -133,8 +179,7 @@ export default function ReportForm({
   }, [onClose, submitting])
 
   // AVision only takes reports in Atlanta. Say so as soon as a spot outside it
-  // is chosen, not after the form has been filled in. (The default spot, the GSU
-  // campus, is inside, so there is nothing to check until a location is set.)
+  // is chosen, not after the form has been filled in.
   useEffect(() => {
     setOutside(null)
     if (!location) return
@@ -234,22 +279,31 @@ export default function ReportForm({
   const waitingFor = photos.filter((photo) => !photo.stored && !photo.error).length
   const storedPhotos = photos.flatMap((photo) => (photo.stored ? [photo.stored] : []))
 
-  // Findings belong to one photo. A new photo, or none, starts clean.
+  // Findings and pending analysis belong to one photo and confirmed location.
   function forgetFindings() {
+    ++analysisRevision.current
+    foundAt.current = null
     setFound(null)
     setAnalyzeError(null)
   }
 
   async function fillFromPhoto() {
-    if (photos.length === 0 || analyzing) return
+    if (photos.length === 0 || analyzing || submitting) return
+    if (!location) {
+      setAnalyzeError("Choose a location below before analyzing the photo.")
+      return
+    }
+    const revision = ++analysisRevision.current
+    const where = location
     setAnalyzing(true)
     setAnalyzeError(null)
     try {
       // The agent looks at the first photo. The others are listed in the message it drafts.
       const saved = await Promise.all(photos.map(storedPhoto))
+      if (revision !== analysisRevision.current) return
       const paths = saved.map((photo) => photo.path)
-      const where = location ?? GSU_CAMPUS
       const result = await analyzePhoto(paths[0], where.lat, where.lng, paths.slice(1))
+      if (revision !== analysisRevision.current) return
       setFound(result)
       foundAt.current = { lat: where.lat, lng: where.lng }
       foundPhotos.current = paths.join("|")
@@ -260,12 +314,15 @@ export default function ReportForm({
         setTitle(result.title.slice(0, 120))
         setTitleEdited(true)
         setDescription(result.description.slice(0, 2000))
-        if (result.owner) setOwner(result.owner)
+        if (result.owner) {
+          setOwner(result.owner)
+          analysisOwner.current = result.owner
+        }
         const nearby = result.address
-        if (nearby) setAddress((typed) => (typed.trim() ? typed : nearby))
+        if (nearby && !addressEdited.current) setAddress((typed) => (typed.trim() ? typed : nearby))
       }
     } catch (err) {
-      setAnalyzeError(
+      if (revision === analysisRevision.current) setAnalyzeError(
         err instanceof Error ? err.message : "Couldn’t analyze the photo. Fill in the form yourself.",
       )
     } finally {
@@ -282,32 +339,26 @@ export default function ReportForm({
   }
 
   function useMyLocation() {
+    if (locating || submitting) return
     if (!("geolocation" in navigator)) {
       setLocationError("This browser can’t share its location.")
       return
     }
     setLocating(true)
     setLocationError(null)
+    const lookup = ++locationRequest.current
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        if (lookup !== locationRequest.current) return
         const { latitude, longitude, accuracy } = position.coords
-        setLocation({ lat: latitude, lng: longitude, accuracy })
-        setLocating(false)
-
-        // Look up the nearest street address and offer it as the ticket's address.
-        // It never replaces an address the person typed themselves.
-        const lookup = ++placeLookup.current
-        nearestAddress(latitude, longitude).then((found) => {
-          if (found && lookup === placeLookup.current) {
-            setAddress((typed) => (typed.trim() ? typed : found))
-          }
-        })
+        confirmLocation({ lat: latitude, lng: longitude, accuracy })
       },
       (err) => {
+        if (lookup !== locationRequest.current) return
         setLocationError(
           err.code === err.PERMISSION_DENIED
-            ? "Location permission was denied. Using GSU campus instead."
-            : "Couldn’t get your location. Using GSU campus instead.",
+            ? "Location permission was denied. Choose a pin or an address suggestion."
+            : "Couldn’t get your location. Choose a pin or an address suggestion.",
         )
         setLocating(false)
       },
@@ -318,10 +369,18 @@ export default function ReportForm({
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (submitting) return
+    if (!location) {
+      setError("Choose a location: drop a pin, select an address suggestion, or use your location.")
+      return
+    }
+    ++placeLookup.current
+    ++locationRequest.current
+    ++analysisRevision.current
+    setLocating(false)
     setSubmitting(true)
     setError(null)
     try {
-      const where = location ?? GSU_CAMPUS
+      const where = location
       // Any photo still uploading is waited for; one that failed is tried again.
       if (photos.length > 0) setStage("photo")
       const paths = (await Promise.all(photos.map(storedPhoto))).map((photo) => photo.path)
@@ -425,7 +484,7 @@ export default function ReportForm({
           </p>
         </div>
 
-        <div className="form-grid">
+        <fieldset className="form-grid report-fields" disabled={submitting}>
           <div className="form-field full">
             <span>
               Photos <em>optional, up to {MAX_TICKET_PHOTOS}</em>
@@ -555,12 +614,6 @@ export default function ReportForm({
                       </ul>
                     )}
                     {found.ownerReason && <p>{found.ownerReason}</p>}
-                    {!location && (
-                      <p>
-                        No location is set, so this used the GSU campus. Set the
-                        location below and look again to get the right owner.
-                      </p>
-                    )}
                     <p className="ai-check">
                       The form below is filled in. Check it and fix anything
                       that’s wrong before you post.
@@ -592,7 +645,10 @@ export default function ReportForm({
             <span>Who should fix it?</span>
             <select
               value={owner}
-              onChange={(event) => setOwner(event.target.value as Owner | typeof LET_AVISION_CHOOSE)}
+              onChange={(event) => {
+                analysisOwner.current = null
+                setOwner(event.target.value as Owner | typeof LET_AVISION_CHOOSE)
+              }}
             >
               <option value={LET_AVISION_CHOOSE}>Let AVision choose (recommended)</option>
               {OWNERS.map((name) => (
@@ -623,42 +679,39 @@ export default function ReportForm({
             </span>
             <AddressField
               value={address}
-              onChange={setAddress}
+              onChange={(text) => {
+                addressEdited.current = true
+                setAddress(text)
+              }}
               onPick={(suggestion) => {
-                // A picked address also places the ticket, unless the device's
-                // own position is already in use (that one is more exact) and is
-                // somewhere AVision covers.
-                if (!location || location.fromAddress || outside) {
-                  setLocation({ lat: suggestion.lat, lng: suggestion.lng, fromAddress: true })
-                }
+                confirmLocation({ lat: suggestion.lat, lng: suggestion.lng, fromAddress: true })
               }}
             />
           </label>
 
+          <Suspense fallback={<div className="form-field full report-location-loading" role="status">Loading location map…</div>}>
+            <ReportLocationPicker location={location} onChange={confirmLocation} onLocate={useMyLocation}
+              locating={locating} disabled={submitting} />
+          </Suspense>
+
           <div className="form-field full">
-            <span>Location</span>
-            <div className="location-row">
+            {addressStatus && <small className="field-note" role="status">{addressStatus}</small>}
+            <div className={`location-row location-status ${locating ? "pending" : locationError ? "failed" : location ? "confirmed" : "unconfirmed"}`}
+              role="status" aria-live="polite" aria-atomic="true">
+              {locating ? <LoaderCircle size={20} aria-hidden="true" />
+                : locationError || !location ? <X size={20} aria-hidden="true" />
+                : <Check size={20} aria-hidden="true" />}
               <p>
-                {location
-                  ? `${location.fromAddress ? "The address above" : "Your location"} (${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}${
-                      location.accuracy ? `, ±${Math.round(location.accuracy)} m` : ""
-                    })`
-                  : "GSU downtown campus (default)"}
+                {locating ? "Finding your location…"
+                  : locationError ? `${locationError}${location ? " Your selected pin is still confirmed." : ""}`
+                  : location
+                  ? `Location confirmed${location.accuracy ? ` (±${Math.round(location.accuracy)} m)` : ""}`
+                  : "Confirm the issue’s location before posting."}
               </p>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={useMyLocation}
-                disabled={locating}
-              >
-                <LocateFixed size={15} />
-                {locating ? "Locating…" : "Use my location"}
-              </button>
             </div>
-            {locationError && <small className="field-note">{locationError}</small>}
             {outside && (
               <small className="field-note photo-problem" role="alert">
-                {outside} Pick an address in Atlanta above to report something there.
+                {outside} Move the pin or pick an address in Atlanta to report something there.
               </small>
             )}
             {/* Laptops often guess their position from Wi-Fi and can be blocks off. */}
@@ -683,7 +736,7 @@ export default function ReportForm({
             />
           </label>
 
-        </div>
+        </fieldset>
 
         {error && (
           <p className="form-error" role="alert">
