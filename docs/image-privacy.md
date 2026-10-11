@@ -76,6 +76,7 @@ Then set `PHOTO_PRIVACY_URL="http://127.0.0.1:8001"` in the root `.env` and rest
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model for text reading |
 | `ALLOWED_ORIGINS` | `*` | Sites allowed to call it from a browser |
 | `FACE_THRESHOLD`, `PLATE_THRESHOLD` | `0.4`, `0.5` | Detector sensitivity |
+| `FACE_MIN_PX` | `10` | Faces narrower than this are left alone, since they're too small to recognize and usually aren't faces. Raise it if photos report faces that aren't there |
 
 **On the live server**, `deploy/deploy.sh` installs it as the `avision-privacy` service and sets `PHOTO_PRIVACY_URL` when the server has at least about 2 GB of memory. The end of each deploy log says whether blurring is on. The `Dockerfile` in `photo-privacy/` runs it on any container host.
 

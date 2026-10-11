@@ -70,17 +70,18 @@ Upload first, then send `path` as the ticket's `photo_url`. The face and plate c
 
 | Method | Route | Body | Does |
 |---|---|---|---|
-| GET | `/analyze/status` | none | `{available, orchestrator}`; `orchestrator` is `foundry_agent`, `foundry_model` or `direct` |
+| GET | `/analyze/status` | none | `{available, orchestrator, model}`; `orchestrator` is `foundry_agent`, `foundry_model` or `direct` |
 | POST | `/analyze` | `{photo: "<name>.jpg", lat, lng, photo_url?}` | Runs the agent on an uploaded photo. Returns `{analysis, owner, contact, address, report, summary, orchestrator, tool_calls}` |
 | POST | `/draft` | `{title, issue_type, lat, lng, address?, description?, photo?, photo_url?, owner?}` | Picks the department (unless `owner` is given) and writes the message. Returns `{owner, contact, address, report, written_by}` |
+| POST | `/tickets/{id}/follow-up` | optional `{photo_url}` | Writes a follow-up message to the ticket's department, offered after a "Still there" vote. Same shape as `/draft`, plus `timings`. `404` if the ticket doesn't exist |
 
-Neither saves nor sends anything. `/analyze` needs Gemini; `/draft` always answers, falling back to map rules and a plain template when it can't use AI. The [report agent](report-agent.md) doc covers how both work.
+None of these saves or sends anything. `/analyze` needs Gemini; `/draft` and `/follow-up` always answer, falling back to map rules and a plain template when they can't use AI. The [report agent](report-agent.md) doc covers how they work.
 
-AI use is capped at `ANALYZE_PER_MINUTE` (default 20) and `ANALYZE_PER_DAY` (default 500) for the whole server. Over the cap, `/analyze` returns `429` and `/draft` quietly uses the template.
+AI use is capped at `ANALYZE_PER_MINUTE` (default 20) and `ANALYZE_PER_DAY` (default 500) for the whole server. Over the cap, `/analyze` returns `429`, and `/draft` and `/follow-up` quietly use a plain template.
 
 ### Health
 
-`GET /health` returns `{"ok": true, "photo_privacy": true}`; `photo_privacy` says whether uploads go through the blurring service.
+`GET /health` returns `{"ok": true, "photo_privacy": true, "version": "e9a23fa"}`. `photo_privacy` says whether uploads go through the blurring service; `version` is the git commit the server is running, to check whether a deploy has landed.
 
 ## Errors
 

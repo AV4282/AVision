@@ -10,6 +10,7 @@ AVision never sends anything. The person reviews every result and sends the mess
 |---|---|---|
 | "Fill in the form from this photo" | `POST /analyze` | The work below, with the Foundry agent steering if it keeps up. Takes about 10 seconds |
 | "Post ticket" | `POST /draft` | The same work from what the person typed, plus the photo if there is one. No Foundry agent |
+| Follow-up after a "Still there" vote | `POST /tickets/{id}/follow-up` | Gemini writes a follow-up to the ticket's department; without Gemini, a plain template |
 
 If the photo was already analyzed and the form wasn't changed, posting reuses that draft instead of calling `/draft`.
 
