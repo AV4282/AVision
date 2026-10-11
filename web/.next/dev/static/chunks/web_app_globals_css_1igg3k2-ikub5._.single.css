@@ -1,0 +1,76 @@
+/* [project]/web/app/globals.css [app-client] (css) */
+:root {
+  --lightningcss-light: ;
+  --lightningcss-dark: initial;
+  color-scheme: dark;
+  --asphalt: #14171a;
+  --asphalt-raised: #1d2126;
+  --edge: #7d838b;
+  --paint: #f4f5f2;
+  --paint-soft: #b6bbc2;
+  --lane: #f7c600;
+  --lane-press: #dcae00;
+  --alert: #ff9383;
+  --font-sign: "Overpass Variable", "Arial Narrow", Arial, sans-serif;
+  --font-read: "Atkinson Hyperlegible Next Variable", Verdana, Arial, sans-serif;
+  --radius: 1rem;
+  --gutter: 1.5rem;
+}
+
+*, :before, :after {
+  box-sizing: border-box;
+}
+
+html {
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--asphalt);
+}
+
+body {
+  background: var(--asphalt);
+  min-height: 100dvh;
+  color: var(--paint);
+  font-family: var(--font-read);
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+
+h1, h2, p {
+  margin: 0;
+}
+
+button, input {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--paint);
+  outline-offset: 3px;
+}
+
+.visually-hidden {
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  position: absolute;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, :before, :after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/*# sourceMappingURL=web_app_globals_css_1igg3k2-ikub5._.single.css.map*/

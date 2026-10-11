@@ -1,21 +1,24 @@
 import { useEffect, useState } from "react"
-import { Check, Copy, ExternalLink, Mail, Phone, X } from "lucide-react"
+import { Check, Copy, ExternalLink, Mail, Phone, Send, X } from "lucide-react"
 import type { DraftedReport, OwnerContact } from "./api"
 
-/** What the report agent prepared for the owner of a ticket that was just posted. */
+/** What was prepared for the department a just-posted ticket should go to. */
 export type ReportToSend = {
   contact: OwnerContact
   report: DraftedReport
+  /** Why this department, in plain words. Null when the person picked it themselves. */
+  reason: string | null
 }
 
 /**
- * Shown right after a ticket is posted with the agent's help: the drafted
- * message and the owner's contact details. AVision never sends anything itself;
- * the person copies the message, opens an email, or calls.
+ * Shown right after a ticket is posted: the drafted message, ready to edit,
+ * and a button that opens it in the person's own email, addressed to the
+ * department. AVision never sends anything itself.
  */
 export default function ReportReady({
   contact,
   report,
+  reason,
   onClose,
 }: ReportToSend & { onClose: () => void }) {
   const [subject, setSubject] = useState(report.subject)
@@ -40,8 +43,14 @@ export default function ReportReady({
     }
   }
 
+  // Both links carry whatever is in the boxes right now, edits included.
   const mailto = contact.email
     ? `mailto:${contact.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`
+    : null
+  // For people who read their mail in the browser and have no email app set up.
+  const gmail = contact.email
+    ? `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}` +
+      `&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`
     : null
 
   return (
@@ -74,8 +83,19 @@ export default function ReportReady({
 
         <p className="ready-intro">
           Your ticket is on the map. AVision doesn’t send reports for you, so
-          here is a message you can send yourself. Change anything you like.
+          here is a message to send yourself. Change anything you like first.
         </p>
+
+        <div className="ready-to">
+          <Mail size={16} aria-hidden="true" />
+          <div>
+            <p>
+              <strong>To: {contact.name}</strong>
+              {contact.email && <span> {contact.email}</span>}
+            </p>
+            {reason && <p className="ready-reason">{reason}</p>}
+          </div>
+        </div>
 
         <div className="form-grid">
           <label className="form-field full">
@@ -97,15 +117,20 @@ export default function ReportReady({
         </div>
 
         <div className="ready-actions">
+          {mailto && (
+            <a className="primary-button" href={mailto}>
+              <Send size={15} /> Email {contact.name}
+            </a>
+          )}
+          {gmail && (
+            <a className="secondary-button" href={gmail} target="_blank" rel="noreferrer">
+              <Mail size={15} /> Open in Gmail
+            </a>
+          )}
           <button type="button" className="secondary-button" onClick={copyMessage}>
             {copied ? <Check size={15} /> : <Copy size={15} />}
             {copied ? "Copied" : "Copy message"}
           </button>
-          {mailto && (
-            <a className="secondary-button" href={mailto}>
-              <Mail size={15} /> Open in email
-            </a>
-          )}
           {contact.web && (
             <a
               className="secondary-button"
@@ -131,7 +156,7 @@ export default function ReportReady({
         )}
 
         <div className="report-actions">
-          <button type="button" className="primary-button" onClick={onClose}>
+          <button type="button" className="secondary-button" onClick={onClose}>
             Done
           </button>
         </div>

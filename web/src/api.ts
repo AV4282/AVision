@@ -427,8 +427,24 @@ async function shrinkPhoto(file: File): Promise<Blob> {
   }
 }
 
-/** Uploads a photo and returns its path, ready to use as a ticket's photoUrl. */
-export async function uploadPhoto(file: File): Promise<string> {
+/** A photo the API has stored. */
+export type UploadedPhoto = {
+  /** What to put on the ticket as its photoUrl, e.g. "/uploads/abc.jpg". */
+  path: string
+  /**
+   * How many faces and license plates the server blurred before saving the
+   * photo. Both are null when the server stores photos without checking them.
+   */
+  facesHidden: number | null
+  platesHidden: number | null
+}
+
+/**
+ * Uploads a photo. The server hides faces and license plates before it saves
+ * the picture (when its photo privacy service is running), so what comes back
+ * is the version everyone will see.
+ */
+export async function uploadPhoto(file: File): Promise<UploadedPhoto> {
   const form = new FormData()
   form.append("file", await shrinkPhoto(file), "photo.jpg")
   // No Content-Type header: the browser adds the right one for a form with a file.
@@ -441,14 +457,23 @@ export async function uploadPhoto(file: File): Promise<string> {
         : `Photo upload failed (${res.status})`
     throw new ApiError(res.status, errorMessage(data?.detail) || fallback)
   }
-  const { path } = (await res.json()) as { name: string; path: string }
-  return path
+  const saved = (await res.json()) as {
+    path: string
+    faces_hidden?: number | null
+    plates_hidden?: number | null
+  }
+  return {
+    path: saved.path,
+    facesHidden: saved.faces_hidden ?? null,
+    platesHidden: saved.plates_hidden ?? null,
+  }
 }
 
 // ---------- report agent ----------
 // The agent on the server looks at an uploaded photo and works out the issue,
-// the owner, the address and a drafted report (api/agent.py). Nothing is saved
-// by it: the form shows the result and the person decides what to post.
+// the department to send it to, the address and a drafted report (api/agent.py).
+// Gemini picks the department from what the photo shows and where it is. Nothing
+// is saved by it: the form shows the result and the person decides what to post.
 
 /** How to reach an owner. Always from the server's contacts file, never written by AI. */
 export type OwnerContact = {
@@ -499,12 +524,21 @@ type ApiAnalysis = {
     severity: "low" | "medium" | "high"
     confidence: number
   }
-  owner: { id: ApiOwner; name: string; rule: string; reason: string } | null
+  owner: ApiChosenOwner | null
   contact: OwnerContact | null
   address: string | null
   report: DraftedReport | null
   summary: string
   orchestrator: "foundry_agent" | "foundry_model" | "direct"
+}
+
+/** The department a report goes to, why, and who decided (see api/agent.py). */
+type ApiChosenOwner = {
+  id: ApiOwner
+  name: string
+  rule: string
+  reason: string
+  decided_by: "gemini" | "rules" | "person"
 }
 
 /** Whether the server has photo analysis set up, so the form knows to offer it. */
@@ -545,6 +579,61 @@ export async function analyzePhoto(photoUrl: string, lat: number, lng: number): 
     address: found.address,
     report: found.report,
     usedAgent: found.orchestrator !== "direct",
+  }
+}
+
+/** The department and message the server prepared for a ticket that is being posted. */
+export type TicketDraft = {
+  owner: Owner
+  /** Why that department, in plain words. */
+  ownerReason: string
+  /** "gemini": the AI chose it. "rules": fixed map rules did. "person": picked in the form. */
+  decidedBy: "gemini" | "rules" | "person"
+  contact: OwnerContact
+  report: DraftedReport
+}
+
+/**
+ * Asks the server which department a ticket should go to and for a message to
+ * send it. Gemini decides from the issue and the place; pass `owner` when the
+ * person picked the department themselves. Nothing is saved or sent.
+ * Takes a few seconds, or around 15 with a photo the AI hasn't looked at yet.
+ */
+export async function draftReport(ticket: {
+  title: string
+  issueType: string
+  lat: number
+  lng: number
+  address?: string
+  description?: string
+  /** The path uploadPhoto() returned, when the ticket has a photo. */
+  photoPath?: string
+  owner?: Owner
+}): Promise<TicketDraft> {
+  const photoLinkHere = ticket.photoPath ? photoLink(ticket.photoPath) : null
+  const body = {
+    title: ticket.title,
+    issue_type: ticket.issueType,
+    lat: ticket.lat,
+    lng: ticket.lng,
+    address: ticket.address || null,
+    description: ticket.description || null,
+    photo: ticket.photoPath ? ticket.photoPath.slice(ticket.photoPath.lastIndexOf("/") + 1) : null,
+    // The message mentions the photo, so this has to be a full link.
+    photo_url: photoLinkHere ? new URL(photoLinkHere, window.location.origin).href : null,
+    owner: ticket.owner ? OWNER_TO_API[ticket.owner] : null,
+  }
+  const drafted = await request<{
+    owner: ApiChosenOwner
+    contact: OwnerContact
+    report: DraftedReport
+  }>("POST", "/draft", { body, auth: false })
+  return {
+    owner: OWNER_FROM_API[drafted.owner.id],
+    ownerReason: drafted.owner.reason,
+    decidedBy: drafted.owner.decided_by,
+    contact: drafted.contact,
+    report: drafted.report,
   }
 }
 

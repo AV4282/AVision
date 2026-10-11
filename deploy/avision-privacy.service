@@ -1,0 +1,39 @@
+# Keeps the photo privacy service (photo-privacy/ folder) running on the server.
+# It blurs faces and license plates in every uploaded photo before the ticket
+# API stores it. deploy.sh installs this file only on a server with enough
+# memory (about 2 GB); see "update_privacy" in deploy/deploy.sh.
+#
+# Logs:    journalctl -u avision-privacy -n 50
+# Status:  systemctl status avision-privacy
+
+[Unit]
+Description=AVision photo privacy service (blurs faces and license plates)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# The same locked-down user as the ticket API.
+User=avision
+Group=avision
+WorkingDirectory=/opt/avision/photo-privacy
+# Only reachable from this server; the ticket API sends each new photo here.
+ExecStart=/opt/avision/photo-privacy/.venv/bin/uvicorn photo-cleanse:app --host 127.0.0.1 --port 8001
+# The two detection models (about 320 MB) are downloaded on the first start and
+# kept in /var/lib/avision-privacy, outside the code folder.
+StateDirectory=avision-privacy
+Environment=HOME=/var/lib/avision-privacy
+Environment=HF_HOME=/var/lib/avision-privacy/hf
+# No GEMINI_API_KEY here on purpose: this service only blurs. Photos reach
+# Gemini later, from the ticket API, after they have been blurred.
+# It peaks at about 1.1 GB on a busy photo. The cap means a runaway photo stops
+# this service, never the whole site.
+MemoryMax=1500M
+# The first start waits for the model download.
+TimeoutStartSec=900
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

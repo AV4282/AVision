@@ -199,6 +199,10 @@ class NameIn(BaseModel):
 class Photo(BaseModel):
     name: str  # file name, e.g. "3f2a....jpg"
     path: str  # where this API serves it, e.g. "/uploads/3f2a....jpg"
+    # How many faces and license plates were blurred before the photo was stored.
+    # None when the photo privacy service isn't in use on this server.
+    faces_hidden: int | None = None
+    plates_hidden: int | None = None
 
 
 class AnalyzeIn(BaseModel):
@@ -207,6 +211,30 @@ class AnalyzeIn(BaseModel):
     lng: float = Field(ge=-180, le=180, examples=[-84.3853])
     # The photo's public link, to put in the drafted report. Optional.
     photo_url: str | None = Field(default=None, max_length=1000, pattern=r"^https?://\S+$")
+
+
+class DraftIn(BaseModel):
+    """A ticket that is about to be posted, for POST /draft. Same fields as TicketIn where they overlap."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=120, examples=["Blocked curb ramp"])
+    issue_type: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$", examples=["blocked_curb_ramp"])
+    lat: float = Field(ge=-90, le=90, examples=[33.7531])
+    lng: float = Field(ge=-180, le=180, examples=[-84.3853])
+    address: str | None = Field(default=None, max_length=200, examples=["Courtland St SE & Gilmer St SE"])
+    description: str | None = Field(default=None, max_length=2000, examples=["Scooter parked across the curb ramp"])
+    # The `name` POST /uploads returned, when the ticket has a photo.
+    photo: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}\.jpg$", examples=[None])
+    # The photo's public link, to put in the drafted report.
+    photo_url: str | None = Field(default=None, max_length=1000, pattern=r"^https?://\S+$", examples=[None])
+    # The department the person picked by hand. Leave it out to have it chosen from the issue and the place.
+    owner: Owner | None = Field(default=None, examples=[None])
+
+    @field_validator("address", "description", "photo", "photo_url", mode="before")
+    @classmethod
+    def blank_to_none(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 # ---------- routes ----------
@@ -261,7 +289,8 @@ def caller(
 
 @app.get("/health")
 def health():
-    return {"ok": db.ping()}
+    # photo_privacy: whether uploads go through the face and plate blurring service.
+    return {"ok": db.ping(), "photo_privacy": bool(photos.PRIVACY_URL)}
 
 
 @app.post("/me", response_model=Me)
@@ -389,6 +418,9 @@ def vote(
 def upload_photo(file: UploadFile):
     """Store a ticket photo (form field "file"; JPEG, PNG or WebP).
 
+    Faces and license plates are blurred before the photo is stored, when the
+    photo privacy service is in use (see photos.py); the counts say how many.
+
     Returns where the photo is served. The web app sends `path` as the ticket's
     `photo_url`. A photo no ticket uses is deleted after an hour.
     """
@@ -398,12 +430,23 @@ def upload_photo(file: UploadFile):
     if not data:
         raise HTTPException(400, "The photo file is empty")
     try:
-        name = photos.save_photo(data)
+        saved = photos.save_photo(data)
     except photos.BadPhoto as problem:
         raise HTTPException(400, str(problem))
     except photos.StorageFull:
         raise HTTPException(507, "Photo storage is full. Post the ticket without a photo for now.")
-    return {"name": name, "path": f"/uploads/{name}"}
+    except photos.PrivacyUnavailable:
+        raise HTTPException(
+            503,
+            "The photo couldn't be checked for faces and license plates just now, so it wasn't saved. "
+            "Try again in a minute, or post without a photo.",
+        )
+    return {
+        "name": saved.name,
+        "path": f"/uploads/{saved.name}",
+        "faces_hidden": saved.faces_hidden,
+        "plates_hidden": saved.plates_hidden,
+    }
 
 
 @app.get("/uploads/{name}")
@@ -431,18 +474,26 @@ _recent_analyses: deque[float] = deque()
 _analyses_lock = threading.Lock()
 
 
-def _take_analysis_slot():
-    """Count one analysis, or refuse it when the per-minute or per-day cap is reached."""
+def _analysis_slot() -> str | None:
+    """Count one use of the AI. Returns None if it may go ahead, or why not when a cap is reached."""
     now = time.time()
     with _analyses_lock:
         while _recent_analyses and now - _recent_analyses[0] > 86_400:
             _recent_analyses.popleft()
         last_minute = sum(1 for at in _recent_analyses if now - at < 60)
         if last_minute >= ANALYZE_PER_MINUTE:
-            raise HTTPException(429, "Lots of photos are being analyzed right now. Try again in a minute.")
+            return "Lots of photos are being analyzed right now. Try again in a minute."
         if len(_recent_analyses) >= ANALYZE_PER_DAY:
-            raise HTTPException(429, "Photo analysis has reached today's limit. Fill in the form yourself for now.")
+            return "Photo analysis has reached today's limit. Fill in the form yourself for now."
         _recent_analyses.append(now)
+        return None
+
+
+def _take_analysis_slot():
+    """Count one analysis, or refuse it when the per-minute or per-day cap is reached."""
+    refused = _analysis_slot()
+    if refused:
+        raise HTTPException(429, refused)
 
 
 @app.get("/analyze/status")
@@ -472,3 +523,31 @@ def analyze(body: AnalyzeIn):
         )
     except gemini.GeminiFailed as problem:
         raise HTTPException(502, str(problem))
+
+
+@app.post("/draft")
+def draft(body: DraftIn):
+    """The department and a message to send it, for a ticket that is about to be posted.
+
+    The web app calls this when someone presses "Post ticket", then shows the
+    message for them to edit and send from their own email. Nothing is saved or
+    sent here.
+
+    Gemini picks the department from the issue and what the map says about the
+    spot (unless `owner` says the person picked one), and writes the message.
+    When Gemini isn't set up, is over its cap or fails, fixed map rules pick the
+    department and the message is a plain fill-in one, so this always answers.
+    """
+    path = photos.find(body.photo) if body.photo else None
+    return agent.draft_for_ticket(
+        title=body.title,
+        issue_type=body.issue_type,
+        description=body.description,
+        address=body.address,
+        lat=body.lat,
+        lng=body.lng,
+        photo=path.read_bytes() if path else None,
+        photo_url=body.photo_url if path else None,
+        owner=body.owner,
+        use_ai=gemini.is_configured() and _analysis_slot() is None,
+    )

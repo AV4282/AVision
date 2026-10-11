@@ -2653,11 +2653,52 @@ summary:focus-visible {
   line-height: 1.5;
 }
 
+/* Who the message goes to, and why that department. */
+.ready-to {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid var(--findings-line);
+  border-radius: 10px;
+  color: var(--slate);
+  background: var(--findings-surface);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ready-to svg {
+  margin-top: 1px;
+  flex: none;
+  color: var(--accent);
+}
+
+.ready-to p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ready-to strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.ready-to .ready-reason {
+  margin-top: 3px;
+}
+
 .ready-actions {
   margin-top: 12px;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+/* The send button is the point of this dialog, so it leads the row. */
+.ready-actions .primary-button {
+  min-height: 38px;
 }
 
 .ready-actions a {
@@ -2757,6 +2798,23 @@ summary:focus-visible {
 .field-note {
   color: var(--muted);
   font-size: 11px;
+}
+
+/* Under the photo: what the server hid in it, or why it couldn't be saved. */
+.field-note.photo-checked {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--green-text);
+  font-weight: 600;
+}
+
+.field-note.photo-checked svg {
+  flex: none;
+}
+
+.field-note.photo-problem {
+  color: var(--error);
 }
 
 .form-error {
@@ -2988,4 +3046,339 @@ summary:focus-visible {
   justify-content: flex-end;
   align-items: center;
   gap: 12px;
+}
+
+/* ---------- Welcome screen motion ----------
+   Decoration only. With "reduce motion" switched on in the system settings
+   none of it runs and the page simply appears. Entrances use the "backwards"
+   fill, so once they finish the normal styles (and hover effects) take over. */
+
+.story-icon {
+  position: relative;
+}
+
+.story-word {
+  display: inline-block;
+}
+
+.onboarding-shell .google-button {
+  overflow: hidden;
+}
+
+/* A band of light that crosses the Google button; parked off to the left. */
+.onboarding-shell .google-button::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 32%, rgba(255, 255, 255, 0.3) 50%, transparent 68%);
+  transform: translate3d(-130%, 0, 0);
+}
+
+.onboarding-shell .guest-button:hover {
+  background: var(--hover);
+}
+
+.onboarding-shell .circle-control:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes welcome-rise {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 22px, 0);
+    }
+  }
+
+  @keyframes welcome-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes welcome-slide {
+    from {
+      opacity: 0;
+      transform: translate3d(-10px, 0, 0);
+    }
+  }
+
+  @keyframes welcome-pop {
+    0% {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    65% {
+      opacity: 1;
+      transform: scale(1.12);
+    }
+  }
+
+  /* The pin drops in and settles, like a marker landing on a map. */
+  @keyframes welcome-drop {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, -28px, 0) scale(0.86);
+    }
+    60% {
+      opacity: 1;
+      transform: translate3d(0, 4px, 0) scale(1.03);
+    }
+  }
+
+  @keyframes welcome-word {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 0.55em, 0) rotate(2.5deg);
+      filter: blur(6px);
+    }
+  }
+
+  @keyframes welcome-ping {
+    0% {
+      opacity: 0.6;
+      transform: scale(1);
+    }
+    70%,
+    100% {
+      opacity: 0;
+      transform: scale(1.8);
+    }
+  }
+
+  @keyframes welcome-float {
+    50% {
+      transform: translate3d(0, -7px, 0);
+    }
+  }
+
+  @keyframes welcome-drift {
+    from {
+      transform: rotate(-8deg) scale(1.14) translate3d(0, 0, 0);
+    }
+    to {
+      transform: rotate(-8deg) scale(1.14) translate3d(-46px, -30px, 0);
+    }
+  }
+
+  @keyframes welcome-glow-one {
+    to {
+      transform: translate3d(-40px, 30px, 0) scale(1.1);
+    }
+  }
+
+  @keyframes welcome-glow-two {
+    to {
+      transform: translate3d(34px, -26px, 0) scale(1.14);
+    }
+  }
+
+  @keyframes welcome-scan {
+    0% {
+      opacity: 0;
+      transform: translate3d(-110%, 0, 0);
+    }
+    15%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate3d(110%, 0, 0);
+    }
+  }
+
+  @keyframes welcome-settle {
+    from {
+      transform: scale(1.2);
+    }
+  }
+
+  @keyframes welcome-sheen {
+    to {
+      transform: translate3d(130%, 0, 0);
+    }
+  }
+
+  /* Same as above under a second name, so hovering can start it again. */
+  @keyframes welcome-sheen-hover {
+    to {
+      transform: translate3d(130%, 0, 0);
+    }
+  }
+
+  /* Backdrop: the street lines and the two glows drift slowly, forever. */
+  .story-map-lines {
+    animation: welcome-drift 26s ease-in-out infinite alternate;
+  }
+
+  .story-glow.one {
+    animation: welcome-glow-one 13s ease-in-out infinite alternate;
+  }
+
+  .story-glow.two {
+    animation: welcome-glow-two 16s ease-in-out infinite alternate;
+  }
+
+  .onboarding-header {
+    animation: welcome-fade 0.6s ease backwards;
+  }
+
+  /* Left side: icon, small heading, title word by word, then the text. */
+  .story-icon {
+    animation: welcome-drop 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 0.1s backwards;
+  }
+
+  .story-icon::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 2px solid var(--orange);
+    border-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+    animation: welcome-ping 3s ease-out 1.1s infinite;
+  }
+
+  .story-content .eyebrow {
+    animation: welcome-rise 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.22s backwards;
+  }
+
+  /* Each word's delay is set in App.tsx. */
+  .story-word {
+    animation: welcome-word 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+
+  .story-copy {
+    animation: welcome-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) 0.85s backwards;
+  }
+
+  /* The sample ticket tells the product's story in order: the photo arrives,
+     gets scanned, is tagged, and is routed to its owner. */
+  .story-ticket-card {
+    animation:
+      welcome-rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) 1s backwards,
+      welcome-float 7s ease-in-out 2s infinite;
+  }
+
+  .mini-photo img {
+    animation: welcome-settle 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) 1s backwards;
+  }
+
+  .mini-photo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.6) 50%, transparent 70%);
+    animation: welcome-scan 0.9s ease-in-out 1.55s backwards;
+  }
+
+  .ai-badge {
+    animation: welcome-pop 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) 2.3s backwards;
+  }
+
+  .story-ticket-card > div:nth-child(2) > * {
+    animation: welcome-slide 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) 2.5s backwards;
+  }
+
+  .story-ticket-card > div:nth-child(2) > :nth-child(2) {
+    animation-delay: 2.6s;
+  }
+
+  .story-ticket-card > div:nth-child(2) > :nth-child(3) {
+    animation-delay: 2.7s;
+  }
+
+  .mini-check {
+    animation: welcome-pop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 2.95s backwards;
+  }
+
+  .story-controls {
+    animation: welcome-fade 0.6s ease 1.3s backwards;
+  }
+
+  .story-dot {
+    transition:
+      width 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+      background-color 0.25s ease;
+  }
+
+  /* Right side: the card rises, then its contents follow one after another. */
+  .auth-card {
+    animation: welcome-rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) 0.2s backwards;
+  }
+
+  .auth-card > :not(.auth-message) {
+    animation: welcome-rise 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.95s backwards;
+  }
+
+  .auth-card > .auth-icon {
+    animation-name: welcome-pop;
+    animation-delay: 0.45s;
+  }
+
+  .auth-card > :nth-child(2) { animation-delay: 0.5s; }
+  .auth-card > :nth-child(3) { animation-delay: 0.57s; }
+  .auth-card > :nth-child(4) { animation-delay: 0.64s; }
+  .auth-card > :nth-child(5) { animation-delay: 0.71s; }
+  .auth-card > :nth-child(6) { animation-delay: 0.78s; }
+  .auth-card > :nth-child(7) { animation-delay: 0.85s; }
+  .auth-card > :nth-child(8) { animation-delay: 0.9s; }
+
+  .legal-copy {
+    animation: welcome-fade 0.6s ease 1.2s backwards;
+  }
+
+  /* One pass of light across the Google button once the page has settled. */
+  .onboarding-shell .google-button:not(:disabled)::before {
+    animation: welcome-sheen 1s ease 1.9s backwards;
+  }
+
+  .onboarding-shell .google-button:not(:disabled):hover::before {
+    animation: welcome-sheen-hover 0.8s ease;
+  }
+
+  /* Buttons lift a little under the pointer and their arrows lean forward. */
+  .onboarding-shell :is(.google-button, .guest-button, .circle-control) {
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease,
+      background-color 0.2s ease;
+  }
+
+  .onboarding-shell :is(.google-button, .circle-control, .text-button) svg {
+    transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .onboarding-shell .google-button:not(:disabled):hover {
+    transform: translate3d(0, -2px, 0);
+    box-shadow: 0 14px 28px rgba(0, 57, 166, 0.3);
+  }
+
+  .onboarding-shell .google-button:not(:disabled):active {
+    transform: scale(0.985);
+  }
+
+  .onboarding-shell .google-button:not(:disabled):hover svg {
+    transform: translate3d(5px, 0, 0);
+  }
+
+  .onboarding-shell .guest-button:hover {
+    transform: translate3d(0, -1px, 0);
+  }
+
+  .onboarding-shell .guest-button:active {
+    transform: scale(0.985);
+  }
+
+  .onboarding-shell .circle-control:hover svg {
+    transform: translate3d(3px, 0, 0);
+  }
+
+  .onboarding-shell .text-button:hover svg {
+    transform: translate3d(4px, 0, 0);
+  }
 }

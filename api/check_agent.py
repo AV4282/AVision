@@ -10,8 +10,9 @@ On the server:
 
     cd /opt/avision/api && .venv/bin/python check_agent.py
 
-It prints which settings are present (never their values), then tests Gemini,
-the routing data, the address lookup and Microsoft Foundry in turn.
+It prints which settings are present (never their values), then tests Gemini
+(the photo, the choice of department, the drafted message), the routing data,
+the address lookup, the photo privacy service and Microsoft Foundry in turn.
 """
 
 import io
@@ -75,6 +76,7 @@ def main():
         "FOUNDRY_OPENAI_URL",
         "FOUNDRY_API_KEY",
         "FOUNDRY_REASONING_EFFORT",
+        "PHOTO_PRIVACY_URL",
     ):
         print(f"  {'set    ' if os.getenv(name, '').strip() else 'missing'}  {name}")
     print(f"  Gemini model: {gemini.GEMINI_MODEL}    Foundry model: {agent.FOUNDRY_MODEL}")
@@ -82,7 +84,7 @@ def main():
     photo, photo_name = choose_photo()
     print(f"\nUsing {photo_name}.")
 
-    print("\n1. Gemini (photo analysis)")
+    print("\n1. Gemini (photo analysis, department, message)")
     analysis = None
     if not gemini.is_configured():
         report(False, "GEMINI_API_KEY is missing", "Add it to api/.env. Nothing else can run without it.")
@@ -98,6 +100,29 @@ def main():
         except gemini.GeminiFailed as problem:
             report(False, "Gemini call failed", f"{problem} The exact error is on the line above.")
 
+    if analysis is not None:
+        # A made-up report that only MARTA can fix, at a spot the map rules would also give to MARTA.
+        elevator = {
+            "title": "Station elevator out of service",
+            "issue_type": "broken_elevator",
+            "description": "The elevator from the street to the platform is not working.",
+        }
+        five_points = (33.75387, -84.39157)
+        try:
+            started = time.time()
+            chosen = agent.decide_owner(elevator, *five_points, "Five Points station", None)
+            report(
+                chosen["decided_by"] == "gemini" and chosen["owner"] == "marta",
+                f"Gemini chose the department in {time.time() - started:.1f}s",
+                f"{chosen['contact']['name']} ({chosen['contact']['email']}), decided by {chosen['decided_by']}: "
+                f"{chosen['reason']}",
+            )
+            started = time.time()
+            draft = gemini.draft_report(elevator, "Five Points station", *five_points)
+            report(True, f"Gemini wrote the message in {time.time() - started:.1f}s", f"subject: {draft['subject']}")
+        except gemini.GeminiFailed as problem:
+            report(False, "Gemini call failed", f"{problem} The exact error is on the line above.")
+
     print("\n2. Routing data (no network)")
     library = routing.find_owner(*GSU_LIBRARY)
     five_points = routing.find_owner(33.75387, -84.39157)
@@ -106,6 +131,11 @@ def main():
     report(five_points["owner"] == "marta", "Five Points station goes to MARTA")
     report(midtown["owner"] == "city_of_atlanta", "A Midtown street goes to the City of Atlanta")
     report(all(c.get("phone") or c.get("web") for c in routing.CONTACTS.values()), "Every owner has a contact")
+    report(
+        len(routing.emailable()) >= 2,
+        "Departments reports can be emailed to",
+        ", ".join(f"{c['short_name']} <{c['email']}>" for c in routing.emailable().values()),
+    )
 
     print("\n3. Address lookup (OpenStreetMap)")
     address = geocode.address_for(*GSU_LIBRARY)
@@ -117,7 +147,21 @@ def main():
         f"{road['name']}: {', '.join(road['routes'])}" if road else "No answer.",
     )
 
-    print("\n4. Microsoft Foundry (the agent)")
+    print("\n4. Photo privacy service (blurs faces and license plates)")
+    if not photos.PRIVACY_URL:
+        print("  SKIP  PHOTO_PRIVACY_URL isn't set, so photos are stored without blurring.")
+    else:
+        from PIL import Image
+
+        try:
+            started = time.time()
+            with Image.open(io.BytesIO(test_picture())) as picture:
+                _, faces, plates = photos._hide_faces_and_plates(picture.convert("RGB"))
+            report(True, f"It answered in {time.time() - started:.1f}s", f"on a plain test picture: {faces} faces, {plates} plates")
+        except photos.PrivacyUnavailable:
+            report(False, "It did not answer, so photo uploads are being refused", "The exact error is on the line above. Logs: journalctl -u avision-privacy -n 50")
+
+    print("\n5. Microsoft Foundry (the agent)")
     mode = agent.foundry_mode()
     if mode is None:
         print("  SKIP  No Foundry settings, so the tools run in direct mode. That works, just without the agent.")
