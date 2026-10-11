@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import threading
+import time
 from typing import Literal
 
 from google import genai
@@ -34,7 +35,11 @@ from pydantic import BaseModel, Field, create_model
 log = logging.getLogger("avision.gemini")
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-TIMEOUT_MS = 40_000
+# A normal answer takes 5 to 12 seconds. Past this, give up so the person isn't left waiting.
+TIMEOUT_MS = 25_000
+# A normal answer is a few hundred tokens. The cap stops an answer that has gone
+# wrong (the model repeating itself) from running on. It also covers the model's thinking.
+MAX_OUTPUT_TOKENS = 4096
 # How hard the model thinks before answering. "low" is plenty for this job and
 # takes seconds off every report. Set GEMINI_THINKING_LEVEL="" to use the model's default.
 THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low").strip().lower()
@@ -183,22 +188,32 @@ def _ask(contents, instructions: str, shape: type[BaseModel]):
                 system_instruction=instructions,
                 response_mime_type="application/json",
                 response_schema=shape,
-                temperature=0.2,
+                # No temperature on purpose. Google's guide for Gemini 3 models says to leave it at
+                # the default: lowering it can make the model loop, which shows up here as a
+                # request that never finishes (504 DEADLINE_EXCEEDED).
+                max_output_tokens=MAX_OUTPUT_TOKENS,
                 thinking_config=types.ThinkingConfig(thinking_level=thinking) if thinking else None,
             ),
         )
 
     thinking = THINKING_LEVEL if THINKING_LEVEL and not _thinking_refused else None
+    started = time.monotonic()
     try:
         try:
             reply = send(thinking)
         except Exception as problem:
-            # A model that doesn't take this thinking level says so with a 400. Ask again without it.
-            if not (thinking and "400" in str(problem) and "think" in str(problem).lower()):
+            said = str(problem)
+            if thinking and "400" in said and "think" in said.lower():
+                # A model that doesn't take this thinking level says so with a 400. Ask again without it.
+                log.warning("Gemini refused thinking level %r; using the model's default from now on", thinking)
+                _thinking_refused = True
+                reply = send(None)
+            elif ("503" in said or "500" in said) and time.monotonic() - started < 5:
+                # "Busy, try again" that came back at once: one more try costs the person little.
+                log.warning("Gemini was busy (%s); trying once more", said[:80])
+                reply = send(thinking)
+            else:
                 raise
-            log.warning("Gemini refused thinking level %r; using the model's default from now on", thinking)
-            _thinking_refused = True
-            reply = send(None)
         return shape.model_validate_json(reply.text or "")
     except NotConfigured:
         raise
@@ -219,6 +234,8 @@ def _plain_reason(problem: Exception) -> str:
         )
     if "429" in text or "quota" in text.lower():
         return "Photo analysis is over its usage limit right now. Try again in a minute."
+    if "504" in text or "DEADLINE" in text or "timed out" in text.lower() or "Timeout" in type(problem).__name__:
+        return "The AI took too long to answer. Try again, or fill in the form yourself."
     return "Photo analysis didn't work this time. Try again, or fill in the form yourself."
 
 
