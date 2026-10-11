@@ -26,6 +26,7 @@ export default function AddressField({
   const [active, setActive] = useState(-1) // highlighted row, -1 for none
   const timer = useRef<number | undefined>(undefined)
   const lookup = useRef<AbortController | null>(null)
+  const inputValue = useRef(value)
 
   function cancelLookup() {
     window.clearTimeout(timer.current)
@@ -34,7 +35,18 @@ export default function AddressField({
   }
   useEffect(() => cancelLookup, [])
 
+  // A pin lookup can replace the text while a typed-address request is pending.
+  useEffect(() => {
+    if (value === inputValue.current) return
+    inputValue.current = value
+    cancelLookup()
+    setSuggestions([])
+    setOpen(false)
+    setActive(-1)
+  }, [value])
+
   function typed(text: string) {
+    inputValue.current = text
     onChange(text)
     cancelLookup()
     setActive(-1)
@@ -56,6 +68,7 @@ export default function AddressField({
 
   function pick(suggestion: AddressSuggestion) {
     cancelLookup()
+    inputValue.current = suggestion.label
     onChange(suggestion.label)
     onPick(suggestion)
     setSuggestions([])
