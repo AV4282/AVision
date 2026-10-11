@@ -186,7 +186,7 @@ class Me(BaseModel):
     id: UUID  # the AVision user ID; use this, never the Auth0 ID, to link data
     display_name: str | None
     avatar_url: str | None
-    role: Literal["user", "facilities_staff"]
+    role: Literal["user", "facilities_staff", "admin"]  # admin: granted with admin.py
     created_at: datetime
     # Onboarding answers; None = not answered. onboarded_at None = never saved, so ask.
     is_student: bool | None
@@ -407,15 +407,33 @@ def create_ticket(
 def delete_ticket(
     ticket_id: UUID, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
 ):
-    """Delete a ticket. Only the person who posted it can. Its votes and photo go with it."""
+    """Delete a ticket. Only the person who posted it can, or an admin. Its votes and photo go with it."""
     user_id = caller(authorization, guest_id, required=True)
     try:
-        photo_url = db.delete_ticket(ticket_id, user_id)
+        photo_url = db.delete_ticket(ticket_id, user_id, admin=db.is_admin(user_id))
     except LookupError:
         raise HTTPException(404, "Ticket not found")
     except db.NotYours:
         raise HTTPException(403, "Only the person who posted this ticket can delete it")
     photos.delete(photos.name_in(photo_url))
+
+
+@app.post("/tickets/{ticket_id}/close", response_model=Ticket)
+def close_ticket(ticket_id: UUID, authorization: AuthorizationHeader = None):
+    """Mark a ticket as fixed. Admins only. Returns the updated ticket.
+
+    A later "still there" vote can still reopen it, as for any fixed ticket.
+    """
+    user_id = caller(authorization, None, required=True)
+    if not db.is_admin(user_id):
+        raise HTTPException(403, "Only admins can mark a ticket as fixed")
+    try:
+        ticket = db.close_ticket(ticket_id, user_id)
+    except db.TicketMerged:
+        raise HTTPException(409, "This ticket was merged into another; close that one")
+    if ticket is None:
+        raise HTTPException(404, "Ticket not found")
+    return ticket
 
 
 @app.post("/tickets/{ticket_id}/votes", response_model=Ticket)

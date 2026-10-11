@@ -111,6 +111,15 @@ def user_id_for_sub(auth0_sub):
         ).fetchone()["id"]
 
 
+def is_admin(user_id):
+    """True if this user has the admin role (granted with admin.py)."""
+    if user_id is None:
+        return False
+    with pool.connection() as conn:
+        row = conn.execute("SELECT role = 'admin' AS admin FROM users WHERE id = %s", (user_id,)).fetchone()
+    return bool(row and row["admin"])
+
+
 def is_guest(user_id):
     """True for a guest user, False for anyone else, None if there's no such user."""
     with pool.connection() as conn:
@@ -178,8 +187,8 @@ class NotYours(Exception):
     """The caller didn't post this ticket, so they can't change it."""
 
 
-def delete_ticket(ticket_id, user_id):
-    """Delete a ticket its poster no longer wants, with its votes.
+def delete_ticket(ticket_id, user_id, admin=False):
+    """Delete a ticket, with its votes. Only its poster can, or an admin.
 
     Reports that point at it are kept but unlinked. Returns the ticket's photo_url
     (so the caller can delete the file), or raises LookupError / NotYours.
@@ -190,7 +199,7 @@ def delete_ticket(ticket_id, user_id):
         ).fetchone()
         if row is None:
             raise LookupError(ticket_id)
-        if user_id is None or row["created_by"] != user_id:
+        if not admin and (user_id is None or row["created_by"] != user_id):
             raise NotYours
         conn.execute("DELETE FROM ticket_votes WHERE ticket_id = %s", (ticket_id,))
         conn.execute("UPDATE reports SET ticket_id = NULL WHERE ticket_id = %s", (ticket_id,))
@@ -275,6 +284,26 @@ def create_ticket(ticket, user_id=None):
             ).fetchone()["id"]
         except errors.ForeignKeyViolation:
             raise UnknownUser from None
+        return get_ticket(ticket_id, user_id, conn)
+
+
+def close_ticket(ticket_id, user_id):
+    """Mark a ticket fixed (admins only; the caller checks). Returns it, or None if it doesn't exist.
+
+    Raises TicketMerged for a merged ticket. Votes stay as they are, so a later
+    "still there" vote can reopen it, as for any fixed ticket.
+    """
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT status FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if row["status"] == "merged":
+            raise TicketMerged
+        conn.execute(
+            "UPDATE tickets SET status = 'fixed', updated_at = now() WHERE id = %s", (ticket_id,)
+        )
         return get_ticket(ticket_id, user_id, conn)
 
 

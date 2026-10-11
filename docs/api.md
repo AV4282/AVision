@@ -27,7 +27,7 @@ When reading (`GET /tickets`), a bad token or an unknown guest ID is treated as 
 | POST | `/me/onboarding` | `{is_student, school, takes_marta}`, each may be `null` | The user. `school` is kept only when `is_student` is true |
 | POST | `/me/name` | `{display_name}` (1–80 characters) | The user. Later sign-ins keep this name instead of the Google one |
 
-A user looks like `{id, display_name, avatar_url, role, created_at, is_student, school, takes_marta, onboarded_at}`. `role` is `user` or `facilities_staff`. If `onboarded_at` is `null`, the app asks the onboarding questions.
+A user looks like `{id, display_name, avatar_url, role, created_at, is_student, school, takes_marta, onboarded_at}`. `role` is `user`, `facilities_staff` or `admin`. If `onboarded_at` is `null`, the app asks the onboarding questions.
 
 ### Tickets
 
@@ -36,7 +36,8 @@ A user looks like `{id, display_name, avatar_url, role, created_at, is_student, 
 | GET | `/tickets?status=&owner=` | Anyone | Up to 100 tickets, newest first. Merged tickets are left out |
 | GET | `/tickets/{id}` | Anyone | One ticket, or `404` |
 | POST | `/tickets` | Anyone | Creates a ticket (`201`). The caller, if any, is recorded as its poster |
-| DELETE | `/tickets/{id}` | Poster only | Deletes it with its votes and photo (`204`). Anyone else gets `403` |
+| DELETE | `/tickets/{id}` | Poster or admin | Deletes it with its votes and photo (`204`). Anyone else gets `403` |
+| POST | `/tickets/{id}/close` | Admin only | Marks it `fixed` and returns it. A later still-there vote can reopen it. `403` for non-admins, `409` if merged |
 | POST | `/tickets/{id}/votes` | Guest or signed in | `{"vote": "still_there" \| "fixed"}`. Changing your vote replaces it. Returns the updated ticket; a merged ticket returns `409` |
 
 Creating a ticket:
@@ -91,9 +92,9 @@ Errors are JSON `{"detail": "<plain sentence>"}`, written to be shown to the per
 |---|---|
 | 400 | The photo is empty, unreadable or too many pixels |
 | 401 | Not signed in when required, a bad token, or an unknown guest ID |
-| 403 | Deleting someone else's ticket |
+| 403 | Deleting someone else's ticket, or closing one without being an admin |
 | 404 | No such ticket or photo |
-| 409 | Voting on a merged ticket |
+| 409 | Voting on or closing a merged ticket |
 | 413 | Photo over 12 MB |
 | 422 | A field failed validation (FastAPI's standard shape) |
 | 429 | AI usage cap reached |
