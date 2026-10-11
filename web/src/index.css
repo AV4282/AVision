@@ -716,20 +716,13 @@ summary:focus-visible {
 .report-card {
   margin: 28px 4px 18px;
   padding: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
   border-radius: 14px;
   color: white;
   background: var(--green);
-}
-
-.report-icon {
-  width: 35px;
-  height: 35px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 12px;
-  border-radius: 10px;
-  color: var(--on-orange);
-  background: var(--orange);
 }
 
 .report-card strong {
@@ -737,7 +730,7 @@ summary:focus-visible {
 }
 
 .report-card p {
-  margin: 7px 0 14px;
+  margin: 0;
   color: #cbded7;
   font-size: 11px;
   line-height: 1.5;
