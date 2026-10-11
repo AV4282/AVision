@@ -38,7 +38,7 @@ export default function NotificationPreferencesDialog({ accountId, onClose, open
         <div>
           <p className="eyebrow">ACCOUNT</p>
           <h2 id={`${id}-title`}>Notification preferences</h2>
-          <p id={`${id}-description`}>Choose what appears in your notification bell.</p>
+          <p id={`${id}-description`}>Choose your in-app alerts.</p>
         </div>
         <button ref={closeRef} type="button" className="dialog-close" onClick={onClose} aria-label="Close notification preferences">
           <X size={20} aria-hidden="true" />
@@ -50,14 +50,14 @@ export default function NotificationPreferencesDialog({ accountId, onClose, open
             <label htmlFor={`${id}-email`}>Email notifications</label>
             <input id={`${id}-email`} className="privacy-switch" type="checkbox" role="switch" checked={false} disabled aria-describedby={`${id}-email-help`} />
           </div>
-          <p id={`${id}-email-help`}>Unavailable. AVision does not send notification emails.</p>
+          <p id={`${id}-email-help`}>Email alerts aren’t available.</p>
         </section>
         <section aria-label="In-app notifications">
           <div className="privacy-preference">
             <label htmlFor={`${id}-in-app`}>In-app notifications</label>
             <input id={`${id}-in-app`} className="privacy-switch" type="checkbox" role="switch" checked={inApp} aria-describedby={`${id}-in-app-help`} onChange={(event) => setInApp(event.target.checked)} />
           </div>
-          <p id={`${id}-in-app-help`}>Show ticket activity and unread counts in the bell in this browser.</p>
+          <p id={`${id}-in-app-help`}>Show updates in the notification bell.</p>
         </section>
         <section aria-label="My report updates">
           <div className="privacy-preference">
@@ -66,15 +66,15 @@ export default function NotificationPreferencesDialog({ accountId, onClose, open
           </div>
           <p id={`${id}-reports-help`}>
             {inApp
-              ? "Show votes and status changes on tickets you posted. Updates to tickets you voted on still appear."
-              : "Turn on in-app notifications to show updates. Your choice for tickets you posted is kept."}
+              ? "Votes and status changes on your tickets."
+              : "Enable in-app notifications first."}
           </p>
         </section>
         <p className="privacy-storage" role="status">
           {sessionOnly
-            ? "Browser storage is unavailable. Kept for this account until you reload."
-            : "Saved automatically for this account in this browser only."}
-          {" "}These settings hide notices here; AVision still stores ticket activity, which can appear when you turn them back on.
+            ? "Browser storage unavailable. Saved until reload."
+            : "Saved for this account in this browser."}
+          {" "}Hidden updates reappear when enabled.
         </p>
         <div className="privacy-actions">
           <button type="button" className="secondary-button" onClick={onClose}>Done</button>
