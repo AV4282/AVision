@@ -1,6 +1,7 @@
 // Client for the AVision ticket API (api/ folder).
 // In dev, requests go to /api and Vite proxies them to uvicorn on port 8000.
 // For a deployed build, set VITE_API_URL to the API's full URL.
+import type { MultiPolygon, Polygon } from "geojson"
 
 const API_URL = import.meta.env.VITE_API_URL ?? "/api"
 
@@ -222,8 +223,49 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** What the server sent with the error, when it sent more than a sentence. */
+    public detail?: unknown,
   ) {
     super(message)
+  }
+}
+
+/**
+ * A report the screening turned away, or a pause on posting after too many of those.
+ * The server never posts a ticket in either case.
+ */
+export type ScreeningProblem = {
+  code: "flagged" | "suspended"
+  /** What was flagged: the photo, the words, or both. */
+  what?: "photo" | "text" | "both"
+  /** Why, in a sentence. */
+  message: string
+  /** Flagged attempts so far, and how many lead to a pause. */
+  strikes?: number
+  limit?: number
+  /** When posting works again, if it is paused now. */
+  suspendedUntil: string | null
+}
+
+/** The screening problem behind an error, or null when the error is something else. */
+export function screeningProblem(err: unknown): ScreeningProblem | null {
+  if (!(err instanceof ApiError) || !err.detail || typeof err.detail !== "object") return null
+  const detail = err.detail as {
+    code?: string
+    what?: ScreeningProblem["what"]
+    message?: string
+    strikes?: number
+    limit?: number
+    suspended_until?: string | null
+  }
+  if (detail.code !== "flagged" && detail.code !== "suspended") return null
+  return {
+    code: detail.code,
+    what: detail.what,
+    message: detail.message ?? err.message,
+    strikes: detail.strikes,
+    limit: detail.limit,
+    suspendedUntil: detail.suspended_until ?? null,
   }
 }
 
@@ -231,6 +273,11 @@ export class ApiError extends Error {
 // (e.g. [{ loc: ["body", "photo_url"], msg: "String should match pattern ..." }]).
 function errorMessage(detail: unknown): string | null {
   if (typeof detail === "string") return detail
+  // Screening sends an object: a sentence plus where the person stands.
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const { message } = detail as { message?: unknown }
+    return typeof message === "string" ? message : null
+  }
   if (Array.isArray(detail) && detail.length > 0) {
     const { loc, msg } = detail[0] as { loc?: unknown[]; msg?: string }
     const field = loc?.[loc.length - 1]
@@ -264,7 +311,7 @@ async function request<T>(
   }
   if (!res.ok) {
     const data = await res.json().catch(() => null)
-    throw new ApiError(res.status, errorMessage(data?.detail) || `Request failed (${res.status})`)
+    throw new ApiError(res.status, errorMessage(data?.detail) || `Request failed (${res.status})`, data?.detail)
   }
   if (res.status === 204) return undefined as T // e.g. a delete: nothing to read
   return res.json() as Promise<T>
@@ -577,14 +624,62 @@ async function shrinkPhoto(file: File, maxSide = PHOTO_MAX_SIDE): Promise<Blob> 
  * when the ticket is posted.
  */
 export async function outsideCoverage(lat: number, lng: number): Promise<string | null> {
+  return (await checkSpot(lat, lng)).outside
+}
+
+/** Departments that can't be chosen at a spot, each with the reason. */
+export type BlockedOwners = Partial<Record<Owner, string>>
+
+/**
+ * What the server says about a spot before anything is posted: `outside` is
+ * why it can't be reported at all (null when it can), and `blocked` lists the
+ * departments that can't take it. GSU Facilities and Georgia Tech only take
+ * tickets on their own campus. If the check can't be made this says all is
+ * fine: the server checks again when the ticket is posted.
+ */
+export async function checkSpot(lat: number, lng: number): Promise<{ outside: string | null; blocked: BlockedOwners }> {
   try {
     const res = await fetch(`${API_URL}/coverage?lat=${lat.toFixed(6)}&lng=${lng.toFixed(6)}`)
-    if (!res.ok) return null
-    const area = (await res.json()) as { covered: boolean; reason: string }
-    return area.covered ? null : area.reason
+    if (!res.ok) return { outside: null, blocked: {} }
+    const area = (await res.json()) as {
+      covered: boolean
+      reason: string
+      blocked?: Partial<Record<ApiOwner, string>>
+    }
+    const blocked: BlockedOwners = {}
+    for (const [owner, why] of Object.entries(area.blocked ?? {})) {
+      const name = OWNER_FROM_API[owner as ApiOwner]
+      if (name && why) blocked[name] = why
+    }
+    return { outside: area.covered ? null : area.reason, blocked }
   } catch {
-    return null
+    return { outside: null, blocked: {} }
   }
+}
+
+/** A campus outline: tickets for `owner` can only be placed inside it. */
+export type CampusOutline = {
+  owner: Owner
+  name: string
+  geometry: Polygon | MultiPolygon
+}
+
+let campuses: Promise<CampusOutline[]> | null = null
+
+/** The campus outlines, for the map in the form to draw. Empty when they can't be had. */
+export function campusOutlines(): Promise<CampusOutline[]> {
+  campuses ??= fetch(`${API_URL}/campuses`)
+    .then((res) => (res.ok ? res.json() : { campuses: [] }))
+    .then((data: { campuses: { owner: ApiOwner; name: string; geometry: CampusOutline["geometry"] }[] }) =>
+      data.campuses
+        .filter((campus) => OWNER_FROM_API[campus.owner])
+        .map((campus) => ({ ...campus, owner: OWNER_FROM_API[campus.owner] })),
+    )
+    .catch(() => {
+      campuses = null // try again next time
+      return []
+    })
+  return campuses
 }
 
 /** A photo the API has stored. */
@@ -711,6 +806,15 @@ export async function analysisAvailable(): Promise<boolean> {
   }
 }
 
+/** Where the viewer stands with screening. `suspendedUntil` is set while their posting is paused. */
+export async function screeningStatus(): Promise<{ strikes: number; limit: number; suspendedUntil: string | null }> {
+  const now = await request<{ strikes: number; limit: number; suspended_until: string | null }>(
+    "GET",
+    "/screening/status",
+  )
+  return { strikes: now.strikes, limit: now.limit, suspendedUntil: now.suspended_until }
+}
+
 /**
  * Runs the report agent on a photo that uploadPhoto() already stored.
  * `photoUrl` is the link uploadPhoto() returned. Takes around 10 to 30 seconds.
@@ -730,7 +834,7 @@ export async function analyzePhoto(
     photo_url: fullLink(photoUrl),
     more_photo_urls: morePhotoUrls.map(fullLink),
   }
-  const found = await request<ApiAnalysis>("POST", "/analyze", { body, auth: false })
+  const found = await request<ApiAnalysis>("POST", "/analyze", { body })
   return {
     reportable: found.analysis.is_reportable,
     summary: found.summary,
@@ -796,7 +900,7 @@ export async function draftReport(ticket: {
     owner: ApiChosenOwner
     contact: OwnerContact
     report: DraftedReport
-  }>("POST", "/draft", { body, auth: false })
+  }>("POST", "/draft", { body })
   return {
     owner: OWNER_FROM_API[drafted.owner.id],
     ownerReason: drafted.owner.reason,

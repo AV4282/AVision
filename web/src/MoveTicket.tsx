@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react"
 import { X } from "lucide-react"
 import AddressField from "./AddressField"
-import { moveTicket, NO_ADDRESS, outsideCoverage, OWNERS, type Owner, type Ticket } from "./api"
+import { checkSpot, moveTicket, NO_ADDRESS, OWNERS, type BlockedOwners, type Owner, type Ticket } from "./api"
 import { nearestAddress } from "./geocode"
 import type { ReportLocation } from "./ReportLocationPicker"
 
@@ -40,6 +40,9 @@ export default function MoveTicket({
   const [locationError, setLocationError] = useState<string | null>(null)
   // Why the new spot can't be used, when it is outside the area AVision covers.
   const [outside, setOutside] = useState<string | null>(null)
+  // Departments that can't take this spot: GSU Facilities and Georgia Tech only work on their own campus.
+  const [blocked, setBlocked] = useState<BlockedOwners>({})
+  const [ownerNote, setOwnerNote] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const moved = location.lat !== ticket.lat || location.lng !== ticket.lng
@@ -58,17 +61,30 @@ export default function MoveTicket({
   }, [onClose, saving])
 
   // Say right away if the new spot is outside the area, not after Save.
+  // The same check says which departments can't take the spot.
   useEffect(() => {
     setOutside(null)
-    if (!moved) return
     let current = true
-    outsideCoverage(location.lat, location.lng).then((reason) => {
-      if (current) setOutside(reason)
+    checkSpot(location.lat, location.lng).then((spot) => {
+      if (!current) return
+      // A ticket that stays where it is isn't checked again for being inside Atlanta.
+      setOutside(moved ? spot.outside : null)
+      setBlocked(spot.blocked)
     })
     return () => {
       current = false
     }
   }, [location, moved])
+
+  // A department picked here that can't take the spot is unpicked, with a line saying why.
+  useEffect(() => {
+    if (!ownerChosen || !blocked[owner]) return
+    setOwnerNote(`${blocked[owner]} Move the pin onto campus to choose it.`)
+    setOwner(ticket.owner)
+    setOwnerChosen(false)
+  }, [blocked, owner, ownerChosen, ticket.owner])
+  // The pin left the campus of the ticket's own department: saving hands the ticket on.
+  const handsOn = moved && !ownerChosen && Boolean(blocked[ticket.owner])
 
   // A moved pin gets the nearest address, after a short pause so dragging
   // doesn't ask for one at every step.
@@ -190,22 +206,33 @@ export default function MoveTicket({
             <select
               value={owner}
               onChange={(event) => {
+                setOwnerNote(null)
                 setOwner(event.target.value as Owner)
                 setOwnerChosen(true)
               }}
             >
               {OWNERS.map((name) => (
-                <option key={name} value={name}>
+                <option key={name} value={name} disabled={Boolean(blocked[name]) && name !== ticket.owner}>
                   {name}
-                  {name === ticket.owner ? " (now)" : ""}
+                  {name === ticket.owner ? " (now)" : blocked[name] ? " (on campus only)" : ""}
                 </option>
               ))}
             </select>
-            {!ownerChosen && (
-              <small className="field-note">
-                Moving the pin onto a campus or a MARTA station can change this
-                for you. Choose one here to set it yourself.
+            {ownerNote ? (
+              <small className="field-note" role="status">
+                {ownerNote}
               </small>
+            ) : handsOn ? (
+              <small className="field-note" role="status">
+                {blocked[ticket.owner]} Saving hands this ticket to the department for the new spot.
+              </small>
+            ) : (
+              !ownerChosen && (
+                <small className="field-note">
+                  Moving the pin onto a campus or a MARTA station can change this
+                  for you. Choose one here to set it yourself.
+                </small>
+              )
             )}
           </label>
 

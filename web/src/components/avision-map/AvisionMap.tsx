@@ -392,7 +392,9 @@ export default function AvisionMap({
 
   const [showStations, setShowStations] = useState(true)
 
-  const [softStyle, setSoftStyle] = useState(true)
+  // How the street map underneath is drawn. "dark" is the same map with its
+  // colors turned around, for people who find the light one too bright.
+  const [mapStyle, setMapStyle] = useState<"soft" | "street" | "dark">("soft")
 
   // The legend under the map can be hidden to give the map more room. The
   // choice is remembered in this browser.
@@ -646,7 +648,7 @@ export default function AvisionMap({
 
   return (
     <section
-      className={`avision-map-widget ${softStyle ? "avision-soft-map" : ""}`}
+      className={`avision-map-widget ${mapStyle === "street" ? "" : `avision-${mapStyle}-map`}`}
       style={{ height }}
       aria-label="Avision interactive Atlanta map"
     >
@@ -1117,17 +1119,24 @@ export default function AvisionMap({
         <span className="avision-map-style" aria-label="Map style">
           <button
             type="button"
-            aria-pressed={softStyle}
-            onClick={() => setSoftStyle(true)}
+            aria-pressed={mapStyle === "soft"}
+            onClick={() => setMapStyle("soft")}
           >
             Soft
           </button>
           <button
             type="button"
-            aria-pressed={!softStyle}
-            onClick={() => setSoftStyle(false)}
+            aria-pressed={mapStyle === "street"}
+            onClick={() => setMapStyle("street")}
           >
             Street
+          </button>
+          <button
+            type="button"
+            aria-pressed={mapStyle === "dark"}
+            onClick={() => setMapStyle("dark")}
+          >
+            Dark
           </button>
         </span>
         {/* Styled like the Soft / Street buttons beside it. */}

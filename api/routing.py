@@ -21,6 +21,9 @@ available, so the app keeps routing either way.
     4. On an interstate, US route or state route  -> GDOT
     5. Anywhere else                              -> City of Atlanta (ATL311)
 
+A campus department can only be chosen for a spot on its campus (off_campus()),
+whoever is choosing: the person, Gemini or these rules.
+
 MARTA comes before the campuses because Georgia State station sits inside GSU's
 outline, and a broken station elevator is MARTA's to fix.
 
@@ -57,6 +60,41 @@ MARTA_STATIONS = _load("marta_stations.json")["stations"]
 GSU_CAMPUS = shape(_load("gsu_campus.geojson")["geometry"])
 GEORGIA_TECH_CAMPUS = shape(_load("georgia_tech_campus.geojson")["geometry"])
 ATLANTA = shape(_load("atlanta_city_limits.geojson")["geometry"])
+
+# A campus department only takes tickets on its own campus: GSU Facilities inside
+# GSU's outline, Georgia Tech inside Georgia Tech's. The other departments have
+# no such limit (MARTA's stops and GDOT's roads are all over the city).
+CAMPUS_EDGE_SLACK_M = 30  # a pin this far past the outline still counts; positions are rarely exact
+CAMPUSES = {
+    "gsu_facilities": ("Georgia State's downtown campus", GSU_CAMPUS),
+    "georgia_tech": ("Georgia Tech's campus", GEORGIA_TECH_CAMPUS),
+}
+
+
+def off_campus(owner: str, lat: float, lng: float) -> str | None:
+    """Why `owner` can't take a ticket at this spot, in a sentence, or None when it can."""
+    if owner not in CAMPUSES:
+        return None
+    campus, outline = CAMPUSES[owner]
+    if outline.contains(Point(lng, lat)) or geometry.distance_m(lat, lng, outline) <= CAMPUS_EDGE_SLACK_M:
+        return None
+    return f"This spot is outside {campus}, so it can't go to {CONTACTS[owner]['short_name']}."
+
+
+def blocked_here(lat: float, lng: float) -> dict:
+    """The departments that can't be chosen at this spot, as {owner: why}."""
+    reasons = {owner: off_campus(owner, lat, lng) for owner in CAMPUSES}
+    return {owner: why for owner, why in reasons.items() if why}
+
+
+def campus_outlines() -> list[dict]:
+    """The campus outlines, for the map in the form to draw."""
+    return [
+        {"owner": owner, "name": campus, "geometry": outline.__geo_interface__}
+        for owner, (campus, outline) in CAMPUSES.items()
+        if owner not in UNAVAILABLE
+    ]
+
 
 # Departments this server can't file tickets under yet, so they are never chosen
 # or offered. main.py adds one when the database doesn't accept it (see

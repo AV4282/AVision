@@ -127,6 +127,7 @@ class Job:
     routing: dict | None = None
     address: str | None = None
     draft: dict | None = None
+    screening: dict | None = None  # what was flagged as not a real report, if anything
     failed: bool = False
     timings: dict = field(default_factory=dict)  # where the time went (see work_out)
     ready: threading.Event = field(default_factory=threading.Event)  # set when the work is done or has failed
@@ -200,6 +201,10 @@ def work_out(
     started = time.monotonic()
     place = address or geocode.address_for(lat, lng)
     options = {owner: routing.CONTACTS[owner]} if owner else routing.emailable()
+    if not owner:
+        # A campus department is only on offer for a spot on its campus.
+        blocked = routing.blocked_here(lat, lng)
+        options = {name: contact for name, contact in options.items() if name not in blocked}
     # The road only matters for telling a state route from a city street, which
     # only matters while GDOT can be chosen. Skipping the lookup otherwise saves a second.
     road = geocode.nearest_road(lat, lng) if "gdot" in options and not owner else None
@@ -248,6 +253,9 @@ def work_out(
         "routing": chosen,
         "address": place,
         "draft": found["draft"] if found else None,
+        # What Gemini flagged as plainly not a real report, if it was asked: see
+        # gemini.SCREEN_RULES. None when it wasn't (no AI), so nothing is refused.
+        "screening": found.get("screening") if found else None,
         "timings": timings,
     }
 
@@ -275,6 +283,7 @@ def _prepare(job: Job):
     try:
         found = work_out(lat=job.lat, lng=job.lng, photo=job.photo, must_see_photo=True)
         job.timings = found["timings"]
+        job.screening = found["screening"]
         job.analysis = found["analysis"]
         job.address = found["address"]
         if job.analysis["is_reportable"]:
@@ -392,6 +401,7 @@ def _result(job: Job, orchestrator: str) -> dict:
     tool_calls = list(job.tool_calls) if orchestrator != "direct" else []
     if not analysis["is_reportable"]:
         return {
+            "screening": job.screening,
             "analysis": analysis,
             "owner": None,
             "contact": None,
@@ -405,6 +415,7 @@ def _result(job: Job, orchestrator: str) -> dict:
 
     report = _with_facts(job.draft, job.address, job.lat, job.lng, job.photo_links) if job.draft else None
     return {
+        "screening": job.screening,
         "analysis": analysis,
         "owner": _owner_for_app(job.routing),
         "contact": _contact_for_app(job.routing["contact"]),
@@ -489,6 +500,7 @@ def draft_for_ticket(
         "contact": _contact_for_app(found["routing"]["contact"]),
         "address": found["address"],
         "report": _with_facts(draft, found["address"], lat, lng, photo_links),
+        "screening": found["screening"],
         "written_by": "gemini" if found["draft"] else "template",
         "timings": found["timings"],
     }

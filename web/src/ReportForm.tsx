@@ -7,11 +7,15 @@ import {
   createTicket,
   draftReport,
   MAX_TICKET_PHOTOS,
-  outsideCoverage,
+  checkSpot,
   photoLink,
+  screeningProblem,
+  screeningStatus,
   uploadPhoto,
+  type BlockedOwners,
   type Owner,
   type PhotoAnalysis,
+  type ScreeningProblem,
   type Ticket,
   type TicketDraft,
   type UploadedPhoto,
@@ -81,10 +85,13 @@ type Location = ReportLocation & { accuracy?: number; fromAddress?: boolean }
 export default function ReportForm({
   onClose,
   onCreated,
+  onRejected,
 }: {
   onClose: () => void
   /** `toSend` is the drafted message for the ticket's department. Null only if it couldn't be written. */
   onCreated: (ticket: Ticket, toSend: ReportToSend | null) => void
+  /** Screening turned the report away, or posting is paused. Nothing was posted; the form should close. */
+  onRejected: (problem: ScreeningProblem) => void
 }) {
   const [issueType, setIssueType] = useState<string>(ISSUE_TYPES[0].value)
   const [title, setTitle] = useState<string>(ISSUE_TYPES[0].label)
@@ -126,6 +133,9 @@ export default function ReportForm({
   const [locationError, setLocationError] = useState<string | null>(null)
   // Why this spot can't be reported, when it is outside the area AVision covers.
   const [outside, setOutside] = useState<string | null>(null)
+  // Departments that can't be chosen for this spot, each with the reason.
+  const [blocked, setBlocked] = useState<BlockedOwners>({})
+  const [ownerNote, setOwnerNote] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -180,17 +190,28 @@ export default function ReportForm({
 
   // AVision only takes reports in Atlanta. Say so as soon as a spot outside it
   // is chosen, not after the form has been filled in.
+  // The same check says which departments can't take this spot: GSU Facilities
+  // and Georgia Tech only take tickets on their own campus.
   useEffect(() => {
     setOutside(null)
     if (!location) return
     let current = true
-    outsideCoverage(location.lat, location.lng).then((reason) => {
-      if (current) setOutside(reason)
+    checkSpot(location.lat, location.lng).then((spot) => {
+      if (!current) return
+      setOutside(spot.outside)
+      setBlocked(spot.blocked)
     })
     return () => {
       current = false
     }
   }, [location])
+
+  // A department picked earlier that can't take the new spot is unpicked, with a line saying why.
+  useEffect(() => {
+    if (owner === LET_AVISION_CHOOSE || !blocked[owner]) return
+    setOwnerNote(`${blocked[owner]} AVision will choose the department for this spot.`)
+    setOwner(LET_AVISION_CHOOSE)
+  }, [blocked, owner])
 
   // Offer "fill in from photo" only when the server has it set up.
   useEffect(() => {
@@ -198,6 +219,25 @@ export default function ReportForm({
     analysisAvailable().then((available) => {
       if (current) setCanAnalyze(available)
     })
+    return () => {
+      current = false
+    }
+  }, [])
+
+  // Someone whose posting is paused is told so straight away, not after filling the form in.
+  const reject = useRef(onRejected)
+  reject.current = onRejected
+  useEffect(() => {
+    let current = true
+    screeningStatus()
+      .then((now) => {
+        if (current && now.suspendedUntil) reject.current({
+          code: "suspended",
+          message: "Posting is paused for this account.",
+          suspendedUntil: now.suspendedUntil,
+        })
+      })
+      .catch(() => {}) // can't tell right now: the server checks again when they post
     return () => {
       current = false
     }
@@ -322,7 +362,9 @@ export default function ReportForm({
         if (nearby && !addressEdited.current) setAddress((typed) => (typed.trim() ? typed : nearby))
       }
     } catch (err) {
-      if (revision === analysisRevision.current) setAnalyzeError(
+      const problem = screeningProblem(err)
+      if (problem) onRejected(problem)
+      else if (revision === analysisRevision.current) setAnalyzeError(
         err instanceof Error ? err.message : "Couldn’t analyze the photo. Fill in the form yourself.",
       )
     } finally {
@@ -421,7 +463,11 @@ export default function ReportForm({
             photoPath: photoUrl || undefined,
             morePhotoPaths: morePhotoUrls,
             owner: owner === LET_AVISION_CHOOSE ? undefined : owner,
-          }).catch(() => null), // the ticket still posts; it just has no message to send
+          }).catch((err) => {
+            // Flagged by screening: stop here, nothing is posted.
+            if (screeningProblem(err)) throw err
+            return null // any other trouble: the ticket still posts, it just has no message to send
+          }),
           new Promise<null>((resolve) => window.setTimeout(() => resolve(null), DRAFT_WAIT_MS)),
         ])
         if (drafted) {
@@ -438,6 +484,11 @@ export default function ReportForm({
       const ticket = await createTicket({ ...fields, owner: ticketOwner, photoUrl, morePhotoUrls })
       onCreated(ticket, toSend)
     } catch (err) {
+      const problem = screeningProblem(err)
+      if (problem) {
+        onRejected(problem)
+        return
+      }
       setError(err instanceof Error ? err.message : "Couldn’t create the ticket")
       setSubmitting(false)
     }
@@ -647,16 +698,23 @@ export default function ReportForm({
               value={owner}
               onChange={(event) => {
                 analysisOwner.current = null
+                setOwnerNote(null)
                 setOwner(event.target.value as Owner | typeof LET_AVISION_CHOOSE)
               }}
             >
               <option value={LET_AVISION_CHOOSE}>Let AVision choose (recommended)</option>
               {OWNERS.map((name) => (
-                <option key={name} value={name}>
+                <option key={name} value={name} disabled={Boolean(blocked[name])}>
                   {name}
+                  {blocked[name] ? " (on campus only)" : ""}
                 </option>
               ))}
             </select>
+            {ownerNote && (
+              <small className="field-note" role="status">
+                {ownerNote}
+              </small>
+            )}
           </label>
 
           <label className="form-field full">
