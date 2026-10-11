@@ -335,18 +335,6 @@ summary:focus-visible {
   z-index: 1;
 }
 
-.story-icon {
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 34px;
-  border-radius: 18px;
-  color: var(--on-orange);
-  background: var(--orange);
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16);
-}
-
 .eyebrow {
   margin: 0 0 13px;
   color: var(--accent);
@@ -368,7 +356,7 @@ summary:focus-visible {
 
 .story-copy {
   max-width: 540px;
-  margin: 26px 0 0;
+  margin: 20px 0 0;
   color: #d7e7e1;
   font-size: 18px;
   line-height: 1.65;
@@ -376,7 +364,7 @@ summary:focus-visible {
 
 .story-ticket-card {
   width: min(480px, 100%);
-  margin-top: 58px;
+  margin-top: 40px;
   padding: 12px;
   display: grid;
   grid-template-columns: 104px 1fr auto;
@@ -474,7 +462,7 @@ summary:focus-visible {
 .story-dot.active {
   width: 26px;
   border-radius: 8px;
-  background: var(--orange);
+  background: var(--blue);
 }
 
 .circle-control {
@@ -1978,7 +1966,7 @@ summary:focus-visible {
   }
 
   .onboarding-story {
-    min-height: 610px;
+    min-height: 520px;
     padding: 58px 28px 45px;
   }
 
@@ -2185,10 +2173,6 @@ summary:focus-visible {
     font-size: 11px;
   }
 
-  .story-icon {
-    margin-bottom: 24px;
-  }
-
   .story-content h1 {
     font-size: 36px;
     letter-spacing: -1.6px;
@@ -2200,7 +2184,7 @@ summary:focus-visible {
 
   .story-ticket-card {
     grid-template-columns: 78px 1fr auto;
-    margin-top: 40px;
+    margin-top: 32px;
   }
 
   .auth-card {
