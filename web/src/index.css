@@ -2459,18 +2459,29 @@ summary:focus-visible {
 }
 .report-location-map .leaflet-control-attribution a { color: var(--accent); }
 .report-location-map :focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
-.report-location-map .report-center-pin {
+.report-pin-actions {
   position: absolute;
   z-index: 800;
   bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 10px;
+  right: 10px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.report-location-map .report-pin-actions .secondary-button {
+  flex: 1;
+  max-width: 220px;
+  min-width: 0;
   min-height: 44px;
-  white-space: nowrap;
+  padding: 8px;
+  justify-content: center;
+  white-space: normal;
   color: var(--accent);
   background: var(--surface);
   border-color: var(--control-line);
 }
+.report-pin-actions svg { flex-shrink: 0; }
 .report-location-pin {
   background: transparent;
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
@@ -2597,6 +2608,19 @@ summary:focus-visible {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.location-status { justify-content: flex-start; }
+.location-status > svg { flex-shrink: 0; }
+.location-status.confirmed {
+  color: var(--green-text);
+  background: var(--green-soft);
+}
+.location-status.failed, .location-status.unconfirmed {
+  color: var(--danger-text);
+  background: var(--danger-surface);
+}
+.location-status.pending { color: var(--accent); }
+.location-status p { color: inherit; }
 
 /* ---------- Report agent: "fill in from photo" and what it found ---------- */
 .ai-button {

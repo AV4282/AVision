@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { divIcon, DomEvent, type Marker as LeafletMarker } from "leaflet"
 import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet"
+import { LocateFixed } from "lucide-react"
 import "leaflet/dist/leaflet.css"
 
 export type ReportLocation = { lat: number; lng: number }
@@ -14,12 +15,14 @@ const pinIcon = divIcon({
   iconAnchor: [22, 46],
 })
 
-function PickerBehavior({ location, onChange, disabled }: {
+function PickerBehavior({ location, onChange, disabled, onLocate, locating }: {
   location: ReportLocation | null
   onChange: (location: ReportLocation) => void
   disabled: boolean
+  onLocate: () => void
+  locating: boolean
 }) {
-  const centerButton = useRef<HTMLButtonElement>(null)
+  const actions = useRef<HTMLDivElement>(null)
   const map = useMapEvents({
     click(event) {
       if (!disabled) onChange(event.latlng.wrap())
@@ -27,7 +30,7 @@ function PickerBehavior({ location, onChange, disabled }: {
   })
 
   useEffect(() => {
-    if (centerButton.current) DomEvent.disableClickPropagation(centerButton.current)
+    if (actions.current) DomEvent.disableClickPropagation(actions.current)
   }, [])
 
   useEffect(() => {
@@ -44,16 +47,25 @@ function PickerBehavior({ location, onChange, disabled }: {
   }, [map, location?.lat, location?.lng])
 
   return (
-    <button ref={centerButton} type="button" className="secondary-button report-center-pin" disabled={disabled}
-      onClick={() => onChange(map.getCenter().wrap())}>
-      Place pin at map center
-    </button>
+    <div ref={actions} className="report-pin-actions">
+      <button type="button" className="secondary-button" disabled={disabled}
+        onClick={() => onChange(map.getCenter().wrap())}>
+        Place pin at map center
+      </button>
+      <button type="button" className="secondary-button" disabled={disabled || locating}
+        onClick={onLocate}>
+        <LocateFixed size={16} aria-hidden="true" />
+        {locating ? "Locating…" : "Place pin at my location"}
+      </button>
+    </div>
   )
 }
 
-export default function ReportLocationPicker({ location, onChange, disabled = false }: {
+export default function ReportLocationPicker({ location, onChange, onLocate, locating, disabled = false }: {
   location: ReportLocation | null
   onChange: (location: ReportLocation) => void
+  onLocate: () => void
+  locating: boolean
   disabled?: boolean
 }) {
   const instructionsId = useId()
@@ -71,7 +83,7 @@ export default function ReportLocationPicker({ location, onChange, disabled = fa
           scrollWheelZoom={false} dragging={mouseDragging} touchZoom={false} doubleClickZoom={false}>
           <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={19}
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' />
-          <PickerBehavior location={location} onChange={onChange} disabled={disabled} />
+          <PickerBehavior location={location} onChange={onChange} disabled={disabled} onLocate={onLocate} locating={locating} />
           {location && (
             <Marker ref={marker} position={[location.lat, location.lng]} icon={pinIcon} draggable={!disabled}
               title="Selected report location" alt="Selected report location" eventHandlers={{

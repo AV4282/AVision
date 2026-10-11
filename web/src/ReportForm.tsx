@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { Camera, LocateFixed, Phone, ShieldCheck, Sparkles, TriangleAlert, X } from "lucide-react"
+import { Camera, Check, LoaderCircle, Phone, ShieldCheck, Sparkles, TriangleAlert, X } from "lucide-react"
 import AddressField from "./AddressField"
 import {
   analysisAvailable,
@@ -94,6 +94,7 @@ export default function ReportForm({
   const [location, setLocation] = useState<Location | null>(null)
   const [locating, setLocating] = useState(false)
   const placeLookup = useRef(0) // so a slow, older address lookup can't overwrite a newer one
+  const locationRequest = useRef(0)
   const addressEdited = useRef(false)
   const analysisRevision = useRef(0)
   const analysisOwner = useRef<Owner | null>(null)
@@ -104,6 +105,7 @@ export default function ReportForm({
 
   useEffect(() => () => {
     ++placeLookup.current
+    ++locationRequest.current
     ++analysisRevision.current
   }, [])
 
@@ -130,6 +132,7 @@ export default function ReportForm({
   function confirmLocation(point: Location) {
     if (submitting) return
     ++placeLookup.current
+    ++locationRequest.current
     setLocating(false)
     setError(null)
     setLocationError(null)
@@ -285,21 +288,22 @@ export default function ReportForm({
   }
 
   function useMyLocation() {
+    if (locating || submitting) return
     if (!("geolocation" in navigator)) {
       setLocationError("This browser can’t share its location.")
       return
     }
     setLocating(true)
     setLocationError(null)
-    const lookup = ++placeLookup.current
+    const lookup = ++locationRequest.current
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        if (lookup !== placeLookup.current) return
+        if (lookup !== locationRequest.current) return
         const { latitude, longitude, accuracy } = position.coords
         confirmLocation({ lat: latitude, lng: longitude, accuracy })
       },
       (err) => {
-        if (lookup !== placeLookup.current) return
+        if (lookup !== locationRequest.current) return
         setLocationError(
           err.code === err.PERMISSION_DENIED
             ? "Location permission was denied. Choose a pin or an address suggestion."
@@ -319,6 +323,7 @@ export default function ReportForm({
       return
     }
     ++placeLookup.current
+    ++locationRequest.current
     ++analysisRevision.current
     setLocating(false)
     setSubmitting(true)
@@ -619,28 +624,25 @@ export default function ReportForm({
           </label>
 
           <Suspense fallback={<div className="form-field full report-location-loading" role="status">Loading location map…</div>}>
-            <ReportLocationPicker location={location} onChange={confirmLocation} disabled={submitting} />
+            <ReportLocationPicker location={location} onChange={confirmLocation} onLocate={useMyLocation}
+              locating={locating} disabled={submitting} />
           </Suspense>
 
           <div className="form-field full">
             {addressStatus && <small className="field-note" role="status">{addressStatus}</small>}
-            <div className="location-row">
+            <div className={`location-row location-status ${locating ? "pending" : locationError ? "failed" : location ? "confirmed" : "unconfirmed"}`}
+              role="status" aria-live="polite" aria-atomic="true">
+              {locating ? <LoaderCircle size={20} aria-hidden="true" />
+                : locationError || !location ? <X size={20} aria-hidden="true" />
+                : <Check size={20} aria-hidden="true" />}
               <p>
-                {location
+                {locating ? "Finding your location…"
+                  : locationError ? `${locationError}${location ? " Your selected pin is still confirmed." : ""}`
+                  : location
                   ? `Location confirmed${location.accuracy ? ` (±${Math.round(location.accuracy)} m)` : ""}`
                   : "Confirm the issue’s location before posting."}
               </p>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={useMyLocation}
-                disabled={locating || submitting}
-              >
-                <LocateFixed size={15} />
-                {locating ? "Locating…" : "Use my location"}
-              </button>
             </div>
-            {locationError && <small className="field-note">{locationError}</small>}
             {/* Laptops often guess their position from Wi-Fi and can be blocks off. */}
             {location?.accuracy && location.accuracy > 150 && (
               <small className="field-note">
