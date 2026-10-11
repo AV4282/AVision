@@ -14,7 +14,7 @@ It prints which settings are present (never their values), then tests Gemini
 (the photo, the choice of department, the drafted message), the routing data,
 the address lookup, the photo privacy service and Microsoft Foundry in turn.
 
-It uses two Gemini requests a run (the free allowance is 20 a day), and the
+It uses two AI requests a run (the free allowance is 20 a day), and the
 Foundry agent is tested on its own first, so it can be checked even on a day
 when Gemini's allowance is used up.
 """
@@ -37,6 +37,7 @@ load_dotenv(HERE.parent / ".env")
 logging.basicConfig(level=logging.WARNING, format="      %(name)s: %(message)s")
 
 import agent  # noqa: E402  (after the settings are loaded)
+import claude  # noqa: E402
 import gemini  # noqa: E402
 import geocode  # noqa: E402
 import photos  # noqa: E402
@@ -74,6 +75,7 @@ def main():
     print("Settings found in api/.env (values are never shown):")
     for name in (
         "GEMINI_API_KEY",
+        "ANTHROPIC_API_KEY",
         "FOUNDRY_PROJECT_ENDPOINT",
         "AZURE_TENANT_ID",
         "AZURE_CLIENT_ID",
@@ -85,15 +87,25 @@ def main():
         "PHOTO_PRIVACY_URL",
     ):
         print(f"  {'set    ' if os.getenv(name, '').strip() else 'missing'}  {name}")
-    print(f"  Gemini model: {gemini.GEMINI_MODEL}    Foundry model: {agent.FOUNDRY_MODEL}")
+    print(f"  Gemini model: {gemini.GEMINI_MODEL}    Claude model: {claude.CLAUDE_MODEL}    Foundry model: {agent.FOUNDRY_MODEL}")
+    order = gemini.providers()
+    print(
+        "  AI asked first: " + (order[0].capitalize() if order else "none set up")
+        + (f", with {order[1].capitalize()} as the backup" if len(order) > 1 else "")
+        + "   (set AI_PROVIDER=gemini or claude in api/.env to change the order)"
+    )
 
     photo, photo_name = choose_photo()
     print(f"\nUsing {photo_name}.")
 
-    print("\n1. Gemini (one request: the photo, the department, the message)")
+    print("\n1. The AI: Gemini or Claude (one request: the photo, the department, the message)")
     seen = None
     if not gemini.is_configured():
-        report(False, "GEMINI_API_KEY is missing", "Add it to api/.env. Without it the map rules and a plain message are used.")
+        report(
+            False,
+            "GEMINI_API_KEY and ANTHROPIC_API_KEY are both missing",
+            "Add one to api/.env. Without it the map rules and a plain message are used.",
+        )
     else:
         try:
             started = time.time()
@@ -101,14 +113,15 @@ def main():
             analysis, chosen = seen["analysis"], seen["routing"]
             report(
                 True,
-                f"Gemini answered in {time.time() - started:.1f}s (address lookup included)",
+                f"{((gemini.last_cost() or {}).get('ai') or 'the AI').capitalize()} answered in "
+                f"{time.time() - started:.1f}s (address lookup included)",
                 f"reportable: {analysis['is_reportable']} | {analysis['issue_type']} | {analysis['title']}",
             )
             if analysis["is_reportable"]:
                 print(f"        department: {chosen['contact']['name']} ({chosen['decided_by']}): {chosen['reason']}")
                 print(f"        subject: {seen['draft']['subject'] if seen['draft'] else '(no message written)'}")
         except gemini.GeminiFailed as problem:
-            report(False, "Gemini call failed", f"{problem} The exact error is on the line above.")
+            report(False, "The AI call failed", f"{problem} The exact error is on the line above.")
 
     if seen is not None:
         # A typed report that only MARTA can fix, at a spot the map rules would also give to MARTA.

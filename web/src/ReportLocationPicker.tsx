@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { divIcon, DomEvent, type Marker as LeafletMarker } from "leaflet"
-import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet"
+import { GeoJSON, MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet"
 import { LocateFixed } from "lucide-react"
 import "leaflet/dist/leaflet.css"
+import { campusOutlines, type CampusOutline, type Owner } from "./api"
 
 export type ReportLocation = { lat: number; lng: number }
 
@@ -14,6 +15,13 @@ const pinIcon = divIcon({
   iconSize: [44, 48],
   iconAnchor: [22, 46],
 })
+
+// The campus outlines are drawn on the map, since GSU Facilities and Georgia
+// Tech only take tickets placed inside their own. Colors match the main map's.
+const CAMPUS_COLORS: Partial<Record<Owner, string>> = {
+  "GSU Facilities": "#0039A6",
+  "Georgia Tech": "#8F713D",
+}
 
 function PickerBehavior({ location, onChange, disabled, onLocate, locating }: {
   location: ReportLocation | null
@@ -71,18 +79,37 @@ export default function ReportLocationPicker({ location, onChange, onLocate, loc
   const instructionsId = useId()
   const marker = useRef<LeafletMarker>(null)
   const [mouseDragging] = useState(() => window.matchMedia("(any-pointer: fine)").matches)
+  const [campuses, setCampuses] = useState<CampusOutline[]>([])
+  useEffect(() => {
+    let current = true
+    campusOutlines().then((found) => {
+      if (current) setCampuses(found)
+    })
+    return () => {
+      current = false
+    }
+  }, [])
 
   return (
     <section className="report-location-picker form-field full" aria-label="Drop a Pin" aria-describedby={instructionsId}>
       <span>Drop a Pin <em>required</em></span>
       <small id={instructionsId} className="field-note">
         Click or tap to place a pin, or drag the pin to move it. On touch screens, swipe to scroll.
+        {campuses.length > 0 && " Dashed outlines show the campuses: GSU Facilities and Georgia Tech only take reports inside their own."}
       </small>
       <div className="report-location-frame">
         <MapContainer className="report-location-map" center={location ?? GSU_CAMPUS} zoom={16}
           scrollWheelZoom={false} dragging={mouseDragging} touchZoom={false} doubleClickZoom={false}>
           <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={19}
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' />
+          {campuses.map((campus) => (
+            <GeoJSON key={campus.owner} data={campus.geometry} interactive={false} style={{
+              color: CAMPUS_COLORS[campus.owner] ?? "#334155",
+              weight: 2,
+              dashArray: "6 5",
+              fillOpacity: 0.07,
+            }} />
+          ))}
           <PickerBehavior location={location} onChange={onChange} disabled={disabled} onLocate={onLocate} locating={locating} />
           {location && (
             <Marker ref={marker} position={[location.lat, location.lng]} icon={pinIcon} draggable={!disabled}

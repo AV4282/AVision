@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom"
+import { createStarPattern } from "./star-pattern"
 import {
   Fragment,
   lazy,
@@ -9,6 +10,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react"
 import {
   ArrowRight,
@@ -57,6 +59,7 @@ import {
   watchLive,
   type Member,
   type Notice,
+  type ScreeningProblem,
   type Owner,
   type Status,
   type Ticket,
@@ -67,6 +70,7 @@ import PhotoViewer from "./PhotoViewer"
 import MoreInfoDialog from "./MoreInfoDialog"
 import MoveTicket from "./MoveTicket"
 import ReportForm from "./ReportForm"
+import ScreeningNotice from "./ScreeningNotice"
 import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 import { ThemeToggle } from "./theme"
@@ -383,7 +387,62 @@ function WelcomePhotos() {
   )
 }
 
-function Onboarding({ onContinue }: { onContinue: () => void }) {
+/** What the sample ticket card on the welcome screen shows. */
+type StoryExample = {
+  /** Changes when the card shows something else, so its little story replays. */
+  key: string
+  photo: string
+  alt: string
+  /** The tag on the photo. */
+  tag: string
+  label: string
+  headline: string
+  place: string
+  /** The real ticket behind the card, when it is showing one. */
+  ticketId?: string
+}
+
+/**
+ * Real tickets for the welcome screen's cards: the newest ones that have a
+ * photo and aren't fixed yet, from different departments when possible. They
+ * come from the same live list as the map, so a ticket posted right now shows
+ * up here on its own.
+ */
+function liveExamples(tickets: Ticket[], count: number): StoryExample[] {
+  const candidates = tickets.filter((ticket) => ticket.images.length > 0 && ticket.status !== "Fixed")
+  const picked: Ticket[] = []
+  for (const ticket of candidates) {
+    if (picked.length === count) break
+    if (!picked.some((each) => each.owner === ticket.owner)) picked.push(ticket)
+  }
+  // Not enough different departments: fill up with the next newest.
+  for (const ticket of candidates) {
+    if (picked.length === count) break
+    if (!picked.includes(ticket)) picked.push(ticket)
+  }
+  return picked.map((ticket) => ({
+    key: ticket.id,
+    photo: ticket.image,
+    alt: `Photo of: ${ticket.title}`,
+    tag: ticket.status,
+    label: `ROUTED TO ${ticket.owner.toUpperCase()}`,
+    headline: ticket.title,
+    place: `${ticket.address} · ${ticket.firstReported.toLowerCase()}`,
+    ticketId: ticket.id,
+  }))
+}
+
+function Onboarding({
+  tickets,
+  onContinue,
+  onOpenTicket,
+}: {
+  /** The live ticket list, for the sample cards. Empty until it has loaded. */
+  tickets: Ticket[]
+  onContinue: () => void
+  /** Goes into the app as a guest with this ticket open on the map. */
+  onOpenTicket: (ticketId: string) => void
+}) {
   const auth = useAccount()
   const [step, setStep] = useState(0)
 
@@ -392,35 +451,50 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
       eyebrow: "See it. Share it. Fix it.",
       title: "A more accessible city starts with you.",
       body: "Turn everyday accessibility barriers into mapped, trackable tickets—and help your community follow them through to a fix.",
+      // Shown only when there is no real ticket to show (none yet, or the
+      // server can't be reached).
       example: {
+        key: "sample-1",
         photo: PLACEHOLDER_PHOTO,
         alt: "City sidewalk beside a street",
-        finding: "Possible barrier",
-        owner: "City of Atlanta",
+        tag: "Possible barrier",
+        label: "ROUTED TO",
+        headline: "City of Atlanta",
         place: "Courtland St NE",
-      },
+      } as StoryExample,
     },
     {
       eyebrow: "One photo is enough",
       title: "Report barriers in a few simple steps.",
       body: "Upload a photo, confirm the location, and review the possible barrier. AVision routes your ticket to the right public agency.",
       example: {
+        key: "sample-2",
         photo: `${import.meta.env.BASE_URL}welcome/gsu-library-plaza.jpg`,
         alt: "A brick plaza between buildings on Georgia State's campus",
-        finding: "Possible hazard",
-        owner: "GSU Facilities",
+        tag: "Possible hazard",
+        label: "ROUTED TO",
+        headline: "GSU Facilities",
         place: "Library Plaza",
-      },
+      } as StoryExample,
     },
   ]
   const panel = panels[step]
-  // After the first change of introduction, the example ticket swaps in quickly
-  // instead of replaying its slow first entrance.
+  // Each introduction shows a real ticket from the map when there is one, and
+  // its made-up sample otherwise.
+  const live = useMemo(() => liveExamples(tickets, panels.length), [tickets, panels.length])
+  const example = live[step] ?? panel.example
+  // After the card first changes (another introduction, or a newer ticket
+  // arriving), it swaps in quickly instead of replaying its slow first entrance.
   const [swapped, setSwapped] = useState(false)
+  const firstCard = useRef(example.key)
+  useEffect(() => {
+    if (example.key !== firstCard.current) setSwapped(true)
+  }, [example.key])
   const showStep = (next: number) => {
     setSwapped(true)
     setStep(next)
   }
+  const openExample = example.ticketId ? () => onOpenTicket(example.ticketId!) : undefined
 
   return (
     <main className="onboarding-shell">
@@ -462,23 +536,44 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
             </h1>
             <p className="story-copy">{panel.body}</p>
           </div>
-          {/* Each introduction has its own example ticket. The keys make the
-              photo scan, the tag and the routing play again for the new one. */}
-          <div className={swapped ? "story-ticket-card swapped" : "story-ticket-card"}>
-            <div className="mini-photo" key={`photo-${step}`}>
-              <img src={panel.example.photo} alt={panel.example.alt} />
+          {/* Each introduction has its own ticket card: a real one from the map
+              when there is one. The keys make the photo scan, the tag and the
+              routing play again whenever the card shows a different ticket. */}
+          <div
+            className={`story-ticket-card${swapped ? " swapped" : ""}${openExample ? " live" : ""}`}
+            {...(openExample
+              ? {
+                  role: "button",
+                  tabIndex: 0,
+                  "aria-label": `Live ticket: ${example.headline}. Open it on the map.`,
+                  onClick: openExample,
+                  onKeyDown: (event: ReactKeyboardEvent) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      openExample()
+                    }
+                  },
+                }
+              : {})}
+          >
+            <div className="mini-photo" key={`photo-${example.key}`}>
+              <img src={example.photo} alt={example.alt} />
               <span className="ai-badge">
-                <Sparkles size={12} /> {panel.example.finding}
+                {openExample ? <i className="live-dot" aria-hidden="true" /> : <Sparkles size={12} />}{" "}
+                {example.tag}
               </span>
             </div>
-            <div key={`text-${step}`}>
-              <span className="mini-label">ROUTED TO</span>
-              <strong>{panel.example.owner}</strong>
+            <div key={`text-${example.key}`}>
+              <span className="mini-label">
+                {openExample && <em>LIVE</em>}
+                {example.label}
+              </span>
+              <strong>{example.headline}</strong>
               <span className="mini-address">
-                <MapPin size={13} /> {panel.example.place}
+                <MapPin size={13} /> <span>{example.place}</span>
               </span>
             </div>
-            <CheckCircle2 className="mini-check" size={22} key={`check-${step}`} />
+            <CheckCircle2 className="mini-check" size={22} key={`check-${example.key}`} />
           </div>
           <div className="story-controls">
             <div className="story-dots">
@@ -2215,6 +2310,17 @@ function MobileNav({
 
 export default function App() {
   const auth = useAccount()
+  const accountId = auth.account?.id
+  useEffect(() => {
+    if (!auth.ready) return
+    let current = true
+    createStarPattern().then((pattern) => {
+      if (current) document.documentElement.style.setProperty("--dark-stars", pattern)
+    }).catch(() => {
+      // The CSS background keeps its static pattern if the asset is unavailable.
+    })
+    return () => { current = false }
+  }, [auth.ready, accountId])
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)
@@ -2245,8 +2351,26 @@ export default function App() {
   // The agent's drafted report for a ticket that was just posted, until dismissed.
   const [toSend, setToSend] = useState<ReportToSend | null>(null)
   const closeToSend = useCallback(() => setToSend(null), [])
-  const openReport = useCallback(() => setReportOpen(true), [])
+  // Screening turned a report away, or posting is paused: said in a box of its own.
+  const [screening, setScreening] = useState<ScreeningProblem | null>(null)
+  const closeScreening = useCallback(() => setScreening(null), [])
+  // A pause we already know about, so the form doesn't open just to close again.
+  const pause = useRef<ScreeningProblem | null>(null)
+  const openReport = useCallback(() => {
+    const known = pause.current
+    if (known?.suspendedUntil && new Date(known.suspendedUntil).getTime() > Date.now()) {
+      setScreening({ ...known, code: "suspended" })
+      return
+    }
+    pause.current = null
+    setReportOpen(true)
+  }, [])
   const closeReport = useCallback(() => setReportOpen(false), [])
+  const rejectReport = useCallback((problem: ScreeningProblem) => {
+    if (problem.suspendedUntil) pause.current = problem
+    setReportOpen(false)
+    setScreening(problem)
+  }, [])
   // Onboarding questions: shown once after a first sign-in (until answered or
   // skipped for this visit), and again from "Edit profile".
   const [questionsOpen, setQuestionsOpen] = useState(false)
@@ -2272,7 +2396,16 @@ export default function App() {
   // The welcome screen is for people who haven't chosen yet. Anyone signed in
   // goes straight to the map.
   if (view === "onboarding" && !auth.account) {
-    return <Onboarding onContinue={() => setView("map")} />
+    return (
+      <Onboarding
+        tickets={ticketsState.tickets}
+        onContinue={() => setView("map")}
+        onOpenTicket={(id) => {
+          setSelectedId(id)
+          setView("map")
+        }}
+      />
+    )
   }
   const page = view === "onboarding" ? "map" : view
 
@@ -2369,8 +2502,10 @@ export default function App() {
             setView("map")
             setToSend(drafted && { ...drafted, ticketId: ticket.id })
           }}
+          onRejected={rejectReport}
         />
       )}
+      {screening && <ScreeningNotice problem={screening} onClose={closeScreening} />}
       {toSend && <ReportReady {...toSend} onClose={closeToSend} />}
       {resourcesOpener && (
         <ResourcesDialog

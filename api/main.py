@@ -13,8 +13,10 @@ Callers identify themselves in one of two ways (see caller() below):
 """
 
 import asyncio
+import hashlib
 import logging
 import os
+import re
 import signal
 import threading
 import time
@@ -25,7 +27,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import FastAPI, Header, HTTPException, UploadFile
+from fastapi import FastAPI, Header, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -167,6 +169,87 @@ def require_covered(lat: float, lng: float):
     area = routing.coverage(lat, lng)
     if not area["covered"]:
         raise HTTPException(422, area["reason"])
+
+
+def require_owner_fits(owner: str, lat: float, lng: float):
+    """Refuse a campus department for a spot off its campus (see routing.off_campus)."""
+    why = routing.off_campus(owner, lat, lng)
+    if why:
+        raise HTTPException(422, f"{why} Move the pin onto campus or choose another department.")
+
+
+# ---------- screening ----------
+# A report that plainly isn't one (a cartoon for a photo, a joke or abuse for the
+# words) is refused, and the attempt counts against the person: see
+# gemini.SCREEN_RULES for what is flagged and db.flag_attempt for the counting.
+# Only the AI can judge that, so when it isn't available nothing is flagged.
+def _photo_key(photo: str | None) -> str | None:
+    """The key for a stored photo, from its file name or from a path or link ending in it."""
+    name = re.search(r"([0-9a-f]{32}\.jpg)$", photo or "")
+    return f"photo:{name.group(1)}" if name else None
+
+
+def _text_key(user_id, title: str | None, description: str | None) -> str | None:
+    """One key per person per wording, so the same words tried again are known."""
+    words = " ".join(f"{title or ''} | {description or ''}".lower().split())
+    if not words.strip(" |"):
+        return None
+    return "text:" + hashlib.sha256(f"{user_id}|{words}".encode()).hexdigest()[:40]
+
+
+def require_good_standing(user_id):
+    """Refuse someone whose posting is paused, saying until when."""
+    until = db.standing(user_id)["suspended_until"]
+    if until is not None:
+        raise HTTPException(
+            403,
+            {
+                "code": "suspended",
+                "message": "Posting is paused for this account because several reports were flagged "
+                "as not real. Browsing and voting still work.",
+                "suspended_until": until.isoformat(),
+            },
+        )
+
+
+def _refuse_flagged(what: str, reason: str | None, user_id, keys: dict):
+    """Count the attempt and refuse the report, telling the person why and where they stand."""
+    now = db.flag_attempt(user_id, keys, reason)
+    until = now["suspended_until"]
+    raise HTTPException(
+        422,
+        {
+            "code": "flagged",
+            "what": what,
+            "message": reason
+            or ("That photo doesn't look like a real report." if what == "photo" else "That doesn't read like a real report."),
+            "strikes": now["strikes"],
+            "limit": now["limit"],
+            "suspended_until": until.isoformat() if until else None,
+        },
+    )
+
+
+def screen(result: dict, user_id, photo: str | None, title: str | None, description: str | None):
+    """Refuse what the AI flagged in `result` (from agent.py). Does nothing when all is fine."""
+    verdict = result.get("screening") or {}
+    what = verdict.get("flagged") or "none"
+    if what == "none":
+        return
+    keys = {}
+    if what in ("photo", "both") and _photo_key(photo):
+        keys[_photo_key(photo)] = "photo"
+    if what in ("text", "both") and _text_key(user_id, title, description):
+        keys[_text_key(user_id, title, description)] = "text"
+    if keys:
+        _refuse_flagged(what, verdict.get("reason"), user_id, keys)
+
+
+def refuse_known_flagged(user_id, photo: str | None, title: str | None, description: str | None):
+    """Refuse a photo or wording that was flagged before, without asking the AI again."""
+    before = db.flagged_reason([_photo_key(photo), _text_key(user_id, title, description)])
+    if before:
+        _refuse_flagged(before["what"], before["reason"], user_id, {})
 
 
 # ---------- models ----------
@@ -478,9 +561,18 @@ def coverage(lat: float, lng: float):
     """Whether AVision takes reports at a position, so the form can say so before anything is posted."""
     if not (-90 <= lat <= 90 and -180 <= lng <= 180):
         raise HTTPException(422, "That isn't a position on the map.")
+    # `blocked` lists the departments that can't be chosen here: a campus one, off its campus.
+    blocked = routing.blocked_here(lat, lng)
     if ALLOW_OUTSIDE:
-        return {"covered": True, "reason": "Reports are being taken everywhere."}
-    return routing.coverage(lat, lng)
+        return {"covered": True, "reason": "Reports are being taken everywhere.", "blocked": blocked}
+    return {**routing.coverage(lat, lng), "blocked": blocked}
+
+
+@app.get("/campuses")
+def campuses(response: Response):
+    """The campus outlines. GSU Facilities and Georgia Tech only take tickets inside their own."""
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return {"campuses": routing.campus_outlines(), "slack_m": routing.CAMPUS_EDGE_SLACK_M}
 
 
 @app.post("/guests", response_model=Guest, status_code=201)
@@ -521,8 +613,12 @@ def create_ticket(
     require_covered(body.lat, body.lng)
     if body.owner in routing.UNAVAILABLE:
         raise HTTPException(422, "That department isn't set up on this server yet. Choose another one.")
+    require_owner_fits(body.owner, body.lat, body.lng)
+    user_id = caller(authorization, guest_id)
+    require_good_standing(user_id)
+    refuse_known_flagged(user_id, body.photo_url, body.title, body.description)
     try:
-        ticket = db.create_ticket(body.model_dump(), caller(authorization, guest_id))
+        ticket = db.create_ticket(body.model_dump(), user_id)
     except db.UnknownUser:
         raise HTTPException(401, "Unknown X-User-Id; get a new one from POST /guests")
     live.publish("ticket_created", ticket["id"])
@@ -614,11 +710,14 @@ def move_ticket(
     if body.owner:
         if body.owner in routing.UNAVAILABLE:
             raise HTTPException(422, "That department isn't set up on this server yet. Choose another one.")
+        require_owner_fits(body.owner, body.lat, body.lng)
         new_owner = body.owner
     elif moved:
         by_old_spot = routing.find_owner(before["lat"], before["lng"])["owner"]
         by_new_spot = routing.find_owner(body.lat, body.lng)["owner"]
-        if before["owner"] == by_old_spot and by_new_spot != by_old_spot:
+        # Also when the pin leaves the campus of the ticket's department, which can't keep it then.
+        left_campus = routing.off_campus(before["owner"], body.lat, body.lng) is not None
+        if (before["owner"] == by_old_spot and by_new_spot != by_old_spot) or left_campus:
             new_owner = by_new_spot
     # A spot that didn't move keeps its address unless a new one was typed.
     address = body.address or (geocode.address_for(body.lat, body.lng) if moved else before["address"])
@@ -851,12 +950,22 @@ def analyze_status():
     return {
         "available": gemini.is_configured(),
         "orchestrator": agent.foundry_mode() or "direct",
-        "model": gemini.GEMINI_MODEL,
+        "model": gemini.model_name(),
     }
 
 
+@app.get("/screening/status")
+def screening_status(authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None):
+    """Where the caller stands with screening: flagged attempts so far, the limit, and any pause."""
+    now = db.standing(caller(authorization, guest_id, strict=False))
+    until = now["suspended_until"]
+    return {**now, "suspended_until": until.isoformat() if until else None}
+
+
 @app.post("/analyze")
-def analyze(body: AnalyzeIn):
+def analyze(
+    body: AnalyzeIn, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
+):
     """Run the report agent on an uploaded photo (see agent.py).
 
     Send the `name` that POST /uploads returned, plus the position. Returns the
@@ -864,15 +973,18 @@ def analyze(body: AnalyzeIn):
     details, the address and a drafted report. Nothing is saved: the person
     reviews the result, then the web app creates the ticket as usual.
     """
+    user_id = caller(authorization, guest_id, strict=False)
+    require_good_standing(user_id)
     require_covered(body.lat, body.lng)
     path = photos.find(body.photo)
     if path is None:
         raise HTTPException(404, "Photo not found. Upload it first with POST /uploads.")
+    refuse_known_flagged(user_id, body.photo, None, None)
     if not gemini.is_configured():
         raise HTTPException(503, "Photo analysis isn't set up on this server yet.")
     _take_analysis_slot()
     try:
-        return agent.run(
+        result = agent.run(
             agent.Job(
                 photo=path.read_bytes(),
                 lat=body.lat,
@@ -882,10 +994,12 @@ def analyze(body: AnalyzeIn):
         )
     except gemini.GeminiFailed as problem:
         raise HTTPException(502, str(problem))
+    screen(result, user_id, body.photo, None, None)
+    return result
 
 
 @app.post("/draft")
-def draft(body: DraftIn):
+def draft(body: DraftIn, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None):
     """The department and a message to send it, for a ticket that is about to be posted.
 
     The web app calls this when someone presses "Post ticket", then shows the
@@ -897,9 +1011,14 @@ def draft(body: DraftIn):
     When Gemini isn't set up, is over its cap or fails, fixed map rules pick the
     department and the message is a plain fill-in one, so this always answers.
     """
+    user_id = caller(authorization, guest_id, strict=False)
+    require_good_standing(user_id)
     require_covered(body.lat, body.lng)
+    if body.owner:
+        require_owner_fits(body.owner, body.lat, body.lng)
     path = photos.find(body.photo) if body.photo else None
-    return agent.draft_for_ticket(
+    refuse_known_flagged(user_id, body.photo if path else None, body.title, body.description)
+    result = agent.draft_for_ticket(
         title=body.title,
         issue_type=body.issue_type,
         description=body.description,
@@ -911,6 +1030,9 @@ def draft(body: DraftIn):
         owner=body.owner,
         use_ai=gemini.is_configured() and _analysis_slot() is None,
     )
+    # The report is screened before the person is handed a message to send.
+    screen(result, user_id, body.photo if path else None, body.title, body.description)
+    return result
 
 
 class FollowUpIn(BaseModel):

@@ -46,6 +46,11 @@ HAS_NOTIFICATIONS = False
 # report count simply stays as it is.
 HAS_TICKET_REPORTS = False
 
+# Screening of new reports keeps its counts in the database (sql/008_screening.sql).
+# True once that is known to be there. Without it, flagged reports are still
+# refused, but nothing is counted and nobody is ever paused.
+HAS_SCREENING = False
+
 # tickets.owner only accepts 'georgia_tech' once sql/006_georgia_tech.sql has run.
 # Until it is known to, nothing is routed to Georgia Tech (see main.py's lifespan).
 HAS_GEORGIA_TECH = False
@@ -59,7 +64,7 @@ def ensure_schema():
     isn't allowed to), the API carries on without that feature: one photo per
     ticket, no notifications, or no Georgia Tech tickets.
     """
-    global HAS_MORE_PHOTOS, HAS_NOTIFICATIONS, HAS_GEORGIA_TECH, HAS_TICKET_REPORTS
+    global HAS_MORE_PHOTOS, HAS_NOTIFICATIONS, HAS_GEORGIA_TECH, HAS_TICKET_REPORTS, HAS_SCREENING
     with pool.connection() as conn:
         for name in (
             "004_admin.sql",
@@ -67,6 +72,7 @@ def ensure_schema():
             "005_notifications.sql",
             "006_georgia_tech.sql",
             "007_ticket_reports.sql",
+            "008_screening.sql",
         ):
             try:
                 conn.execute((HERE / "sql" / name).read_text(encoding="utf-8"))
@@ -86,6 +92,13 @@ def ensure_schema():
             conn.execute(
                 """SELECT 1 FROM information_schema.tables
                    WHERE table_schema = current_schema() AND table_name = 'notifications'"""
+            ).fetchone()
+            is not None
+        )
+        HAS_SCREENING = (
+            conn.execute(
+                """SELECT 1 FROM information_schema.tables
+                   WHERE table_schema = current_schema() AND table_name = 'flagged_attempts'"""
             ).fetchone()
             is not None
         )
@@ -274,6 +287,20 @@ def claim_guest(member_id, guest_id):
             "UPDATE ticket_votes SET user_id = %s WHERE user_id = %s", (member_id, guest_id)
         ).rowcount
         conn.execute("UPDATE reports SET user_id = %s WHERE user_id = %s", (member_id, guest_id))
+        if HAS_SCREENING:
+            # Flagged attempts follow the person, so signing in doesn't wipe them.
+            conn.execute(
+                """UPDATE users m SET
+                       flagged_count = m.flagged_count + g.flagged_count,
+                       suspended_until = nullif(greatest(coalesce(m.suspended_until, '-infinity'),
+                                                         coalesce(g.suspended_until, '-infinity')),
+                                                '-infinity')
+                   FROM users g WHERE m.id = %s AND g.id = %s""",
+                (member_id, guest_id),
+            )
+            conn.execute(
+                "UPDATE flagged_attempts SET user_id = %s WHERE user_id = %s", (member_id, guest_id)
+            )
         if HAS_TICKET_REPORTS:
             # Reports the guest sent become the member's, once per ticket.
             conn.execute(
@@ -471,6 +498,79 @@ def move_ticket(ticket_id, user_id, lat, lng, address, owner=None, admin=False):
             _notify(conn, _TELL_VOTERS, ticket_id, user_id, kind)
             _notify(conn, _TELL_POSTER, ticket_id, user_id, kind)
         return get_ticket(ticket_id, user_id, conn)
+
+
+# ---------- screening ----------
+# A report that plainly isn't one is refused (see gemini.SCREEN_RULES). This many
+# flagged attempts pause the person's posting for this long, then the count restarts.
+FLAG_LIMIT = int(os.getenv("FLAG_LIMIT", "5"))
+SUSPENSION_HOURS = int(os.getenv("SUSPENSION_HOURS", "24"))
+
+
+def standing(user_id, conn=None):
+    """Where a person stands with screening: {"strikes", "limit", "suspended_until"}.
+
+    suspended_until is None unless they are paused right now.
+    """
+    clean = {"strikes": 0, "limit": FLAG_LIMIT, "suspended_until": None}
+    if not HAS_SCREENING or user_id is None:
+        return clean
+    query = """SELECT flagged_count,
+                      CASE WHEN suspended_until > now() THEN suspended_until END AS suspended_until
+               FROM users WHERE id = %s"""
+    if conn is not None:
+        row = conn.execute(query, (user_id,)).fetchone()
+    else:
+        with pool.connection() as own:
+            row = own.execute(query, (user_id,)).fetchone()
+    if row is None:
+        return clean
+    return {"strikes": row["flagged_count"], "limit": FLAG_LIMIT, "suspended_until": row["suspended_until"]}
+
+
+def flag_attempt(user_id, keys, reason):
+    """Write down a flagged attempt and return the person's standing afterwards.
+
+    `keys` is {key: "photo" | "text"} for what was flagged. One attempt is one
+    strike however many things were wrong with it, and something already written
+    down (the same photo tried again, say) is not counted twice. The strike that
+    reaches the limit pauses the person and starts their count again.
+    """
+    if not HAS_SCREENING:
+        return standing(user_id)
+    with pool.connection() as conn:
+        new = 0
+        for key, what in keys.items():
+            new += conn.execute(
+                """INSERT INTO flagged_attempts (key, user_id, what, reason) VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (key) DO NOTHING""",
+                (key, user_id, what, reason),
+            ).rowcount
+        if new and user_id is not None:
+            conn.execute(
+                """UPDATE users SET
+                       suspended_until = CASE WHEN flagged_count + 1 >= %(limit)s
+                                              THEN now() + make_interval(hours => %(hours)s)
+                                              ELSE suspended_until END,
+                       flagged_count = CASE WHEN flagged_count + 1 >= %(limit)s THEN 0
+                                            ELSE flagged_count + 1 END
+                   WHERE id = %(id)s""",
+                {"id": user_id, "limit": FLAG_LIMIT, "hours": SUSPENSION_HOURS},
+            )
+        return standing(user_id, conn)
+
+
+def flagged_reason(keys):
+    """Why one of these was flagged before, or None if none of them was."""
+    keys = [key for key in keys if key]
+    if not HAS_SCREENING or not keys:
+        return None
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT what, reason FROM flagged_attempts WHERE key = ANY(%s) ORDER BY flagged_at LIMIT 1",
+            (keys,),
+        ).fetchone()
+    return row
 
 
 def record_report(ticket_id, user_id):

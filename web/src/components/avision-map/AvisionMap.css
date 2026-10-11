@@ -197,6 +197,13 @@
 .avision-soft-map .leaflet-tile {
   filter: saturate(0.5) brightness(1.04) contrast(0.96);
 }
+/* Dark: the same street tiles with light and dark swapped, colors kept the right way round. */
+.avision-dark-map .leaflet-tile {
+  filter: invert(1) hue-rotate(180deg) saturate(0.55) brightness(0.92) contrast(0.92);
+}
+.avision-dark-map .leaflet-container {
+  background: #1c2430;
+}
 .avision-map-widget .leaflet-control-attribution {
   background: #fff;
   font-size: 12px;

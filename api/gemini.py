@@ -13,6 +13,12 @@ three) and cheap (the free allowance is counted per request).
 Both ask for a fixed JSON shape (a response schema), so the answer can be used
 directly instead of being picked out of free text.
 
+Claude can do the same job (claude.py): same instructions, same answer shape.
+Which one is asked is decided in _ask(): Claude first when ANTHROPIC_API_KEY is
+set, otherwise Gemini, and whichever is left is the backup if the first fails.
+Set AI_PROVIDER=gemini (or claude) in api/.env to choose the first one yourself.
+Where an answer says "gemini" (decided_by, written_by), read it as "the AI".
+
 Three rules are built into the prompts and checked again in code:
   - Findings are "possible" issues or barriers, never legal violations.
   - Gemini can only choose a department from the list it is given
@@ -32,6 +38,8 @@ from typing import Literal
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, create_model
+
+import claude
 
 log = logging.getLogger("avision.gemini")
 
@@ -61,11 +69,13 @@ IssueType = Literal[
 
 
 class NotConfigured(Exception):
-    """GEMINI_API_KEY isn't set."""
+    """No AI is set up: neither GEMINI_API_KEY nor ANTHROPIC_API_KEY is set."""
 
 
 class GeminiFailed(Exception):
-    """Gemini didn't give a usable answer. The message is safe to show the user."""
+    """The AI (Gemini or Claude) didn't give a usable answer. The message is safe to show the user."""
+
+    timed_out = False  # set on one that failed by taking too long
 
 
 class Analysis(BaseModel):
@@ -104,6 +114,20 @@ LOOK_RULES = """Looking at the photo. Describe only what is visible.
 - Never read out or mention license plates, faces, names or phone numbers that appear in the photo.
 - If the photo does not show a reportable problem, set is_reportable to false and say what it shows instead."""
 
+SCREEN_RULES = """Screening comes first. AVision sends real reports to real departments, so decide whether \
+this is a sincere attempt to report a real problem.
+- Flag the photo when it plainly is not a photo of a real place or thing that could be reported: a cartoon, \
+drawing or meme, a screenshot, a video game, a selfie or portrait of a person, food, a pet, a blank or black \
+image. A real photo of a street, sidewalk, building, station or vehicle is fine, even when no problem can be \
+seen in it.
+- Flag the words when the title or details plainly are not a report: a joke, random letters or nonsense, an \
+insult, threat or slur, sexual content, advertising, or something that has nothing to do with a street, \
+building or transit problem. Short, clumsy or misspelled but sincere words are fine.
+- Flag only what is obvious. When unsure, do not flag.
+- flagged says what was flagged, or "none". flag_reason is one plain sentence for the person saying what was \
+wrong with it, without repeating anything offensive. Leave flag_reason empty when nothing is flagged.
+- When something is flagged, still fill in the other fields, briefly."""
+
 CHOOSE_RULES = """Choosing the department. You are given what the map says about the spot and the departments \
 you may choose from, with what each one looks after.
 - Use both the problem and the place. The department that owns the spot is the one that fixes it.
@@ -133,8 +157,10 @@ INTRODUCTION = """You work for AVision, a site where people in Atlanta report ev
 ramp, a broken elevator, a cracked sidewalk, a dead streetlight, a pothole and so on) so the right department \
 can fix them."""
 
-PHOTO_INSTRUCTIONS = f"""{INTRODUCTION} For one new report you do three things in a single answer: look at \
-its photo, choose the department it goes to, and write the report.
+PHOTO_INSTRUCTIONS = f"""{INTRODUCTION} For one new report you do four things in a single answer: screen it, \
+look at its photo, choose the department it goes to, and write the report.
+
+{SCREEN_RULES}
 
 {LOOK_RULES}
 
@@ -156,8 +182,10 @@ wants to follow up with the department about it. You write that follow-up for th
 - Ask what is planned and when, politely. Do not complain or blame.
 - Start the subject with "Follow-up:"."""
 
-TEXT_INSTRUCTIONS = f"""{INTRODUCTION} For one new report, described in the person's own words, you do two \
-things in a single answer: choose the department it goes to, and write the report.
+TEXT_INSTRUCTIONS = f"""{INTRODUCTION} For one new report, described in the person's own words, you do three \
+things in a single answer: screen it, choose the department it goes to, and write the report.
+
+{SCREEN_RULES}
 
 {CHOOSE_RULES}
 
@@ -183,8 +211,31 @@ def _client() -> genai.Client:
         return _shared_client
 
 
-def is_configured() -> bool:
+def _gemini_configured() -> bool:
     return bool(os.getenv("GEMINI_API_KEY", "").strip())
+
+
+# After an AI times out it is left out for this long, so the next reports don't each wait on it too.
+PAUSE_AFTER_TIMEOUT_SECONDS = 60
+_paused_until = {"claude": 0.0, "gemini": 0.0}
+
+
+def providers() -> list[str]:
+    """The AIs that are set up, in the order they are asked: the first, then the backup."""
+    ready = [name for name, there in (("claude", claude.is_configured()), ("gemini", _gemini_configured())) if there]
+    first = os.getenv("AI_PROVIDER", "").strip().lower()
+    return sorted(ready, key=lambda name: name != first) if first in ready else ready
+
+
+def is_configured() -> bool:
+    """Whether any AI is set up (Gemini or Claude)."""
+    return bool(providers())
+
+
+def model_name() -> str:
+    """The model that answers first, for status pages. Empty when no AI is set up."""
+    first = (providers() or [""])[0]
+    return {"claude": claude.CLAUDE_MODEL, "gemini": GEMINI_MODEL}.get(first, "")
 
 
 _thinking_refused = False  # set if the model turns the thinking setting down, so it isn't sent again
@@ -200,17 +251,61 @@ def _note_cost(reply, seconds: float):
         "seconds": round(seconds, 1),
         "thinking_tokens": getattr(used, "thoughts_token_count", None),
         "answer_tokens": getattr(used, "candidates_token_count", None),
+        "ai": "gemini",
+        "model": GEMINI_MODEL,
     }
 
 
 def last_cost() -> dict | None:
-    """What the latest Gemini request made from this thread took, or None if there wasn't one."""
+    """What the latest AI request made from this thread took, or None if there wasn't one."""
     return getattr(_latest, "cost", None)
 
 
 def _ask(contents, instructions: str, shape: type[BaseModel]):
+    """One AI request that must come back in the given JSON shape.
+
+    `contents` is what to show it: text, or a list of text and photos (as
+    (bytes, mime type)). The first AI that is set up is asked; if it fails and
+    another is set up, that one is asked instead, so one being down or out of
+    allowance doesn't stop reports.
+    """
+    order = providers()
+    if not order:
+        raise NotConfigured
+    # One that just timed out sits this one out, unless it is all there is.
+    awake = [name for name in order if time.monotonic() >= _paused_until[name]] or order
+    failed = None
+    for name in awake:
+        try:
+            return _ask_claude(contents, instructions, shape) if name == "claude" else _ask_gemini(contents, instructions, shape)
+        except GeminiFailed as problem:
+            failed = problem
+            if getattr(problem, "timed_out", False):
+                _paused_until[name] = time.monotonic() + PAUSE_AFTER_TIMEOUT_SECONDS
+            if name != awake[-1]:
+                log.warning("%s couldn't answer (%s); asking the backup AI", name.capitalize(), problem)
+    raise failed
+
+
+def _ask_claude(contents, instructions: str, shape: type[BaseModel]):
+    try:
+        answer, cost = claude.ask(contents if isinstance(contents, list) else [contents], instructions, shape)
+    except claude.ClaudeFailed as problem:
+        failed = GeminiFailed(str(problem))
+        failed.timed_out = problem.timed_out
+        raise failed from problem
+    _latest.cost = {**cost, "ai": "claude", "model": claude.CLAUDE_MODEL}
+    return answer
+
+
+def _ask_gemini(contents, instructions: str, shape: type[BaseModel]):
     """One Gemini request that must come back in the given JSON shape."""
     global _thinking_refused
+    if isinstance(contents, list):
+        contents = [
+            part if isinstance(part, str) else types.Part.from_bytes(data=part[0], mime_type=part[1])
+            for part in contents
+        ]
 
     def send(thinking: str | None):
         return _client().models.generate_content(
@@ -253,7 +348,9 @@ def _ask(contents, instructions: str, shape: type[BaseModel]):
     except Exception as problem:  # network, quota, bad key, blocked photo, or JSON that doesn't fit
         # The real cause goes to the server log (journalctl -u avision-api); the user gets plain words.
         log.warning("Gemini call failed: %s: %s", type(problem).__name__, problem)
-        raise GeminiFailed(_plain_reason(problem)) from problem
+        failed = GeminiFailed(_plain_reason(problem))
+        failed.timed_out = "took too long" in str(failed)
+        raise failed from problem
 
 
 def _plain_reason(problem: Exception) -> str:
@@ -273,12 +370,24 @@ def _plain_reason(problem: Exception) -> str:
 
 
 def _answer_shape(departments: dict, with_photo: bool) -> type[BaseModel]:
-    """The JSON shape for one report: the findings (photo only), the department, then the message.
+    """The JSON shape for one report: screening, the findings (photo only), the department, then the message.
 
     Built per request because the department ids come from data/contacts.json.
     The response schema allows no other id, and any other fails validation.
     The fields are in the order the work is done, since the model fills them in order.
     """
+    kinds = ("none", "photo", "text", "both") if with_photo else ("none", "text")
+    screening = {
+        "flagged": (
+            Literal[kinds],
+            Field(description="What plainly is not a sincere report, if anything. Usually 'none'."),
+        ),
+        "flag_reason": (
+            str,
+            Field(description="One plain sentence for the person on what was wrong. Empty when flagged is 'none'."),
+        ),
+    }
+    seen = {name: (field.annotation, field) for name, field in Analysis.model_fields.items()} if with_photo else {}
     choice = {
         "owner": (Literal[tuple(departments)], Field(description="The id of the department this report should go to.")),
         "reason": (
@@ -287,7 +396,7 @@ def _answer_shape(departments: dict, with_photo: bool) -> type[BaseModel]:
         ),
     }
     message = {name: (field.annotation, field) for name, field in Draft.model_fields.items()}
-    return create_model("ReportAnswer", __base__=Analysis if with_photo else None, **choice, **message)
+    return create_model("ReportAnswer", **screening, **seen, **choice, **message)
 
 
 def _place_and_departments(location: list[str], departments: dict, suggestion: str | None) -> str:
@@ -317,13 +426,14 @@ def report_from_photo(
     if anything (see _issue_lines).
 
     Returns {"analysis": <the Analysis fields>, "owner": <id>, "reason": <sentence>,
-    "draft": <the Draft fields, or None when there is nothing to report>}.
+    "draft": <the Draft fields, or None when there is nothing to report>,
+    "screening": {"flagged": "none" | "photo" | "text" | "both", "reason": <sentence>}}.
     """
     asked = "Here is the photo for a new report.\n\n" + _place_and_departments(location, departments, suggestion)
     if typed and typed.get("title"):
         asked += "\n\nWhat the person reporting it wrote\n" + "\n".join(_issue_lines(typed))
     answer = _ask(
-        [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), asked],
+        [(jpeg, "image/jpeg"), asked],
         PHOTO_INSTRUCTIONS,
         _answer_shape(departments, with_photo=True),
     ).model_dump()
@@ -340,7 +450,7 @@ def report_from_text(issue: dict, location: list[str], departments: dict, sugges
     """The department and the message for a report with no photo, in one request.
 
     `issue` is what the person wrote (see _issue_lines); the rest is as in
-    report_from_photo(). Returns {"owner", "reason", "draft"}.
+    report_from_photo(). Returns {"owner", "reason", "draft", "screening"}.
     """
     asked = (
         "A new report, in the person's own words\n" + "\n".join(_issue_lines(issue))
@@ -368,7 +478,12 @@ def follow_up_message(issue: dict, place: str, first_reported: str, confirmation
 
 def _choice_and_draft(answer: dict) -> dict:
     draft = {key: _strip_contacts(answer[key]) for key in Draft.model_fields}
+    flagged = answer.get("flagged") or "none"
     return {
+        "screening": {
+            "flagged": flagged,
+            "reason": _strip_contacts(answer.get("flag_reason") or "")[:240] if flagged != "none" else "",
+        },
         "owner": answer["owner"],
         "reason": _strip_contacts(answer["reason"])[:300],
         # A message with nothing in it is no message (the photo showed nothing to report).
