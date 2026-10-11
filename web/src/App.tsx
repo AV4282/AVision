@@ -64,6 +64,7 @@ import ReportForm from "./ReportForm"
 import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 import { ThemeToggle } from "./theme"
+import PrivacyDialog from "./PrivacyDialog"
 import ResourcesDialog from "./ResourcesDialog"
 
 import { mapOwner, ticketMarker } from "./ticket-map"
@@ -1597,6 +1598,8 @@ function ProfileView({
     }
   }
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
+  const [privacyOpener, setPrivacyOpener] = useState<HTMLButtonElement | null>(null)
+  const closePrivacy = useCallback(() => setPrivacyOpener(null), [])
   const joined = member
     ? new Date(member.joinedAt).toLocaleDateString(undefined, {
         month: "long",
@@ -1821,7 +1824,7 @@ function ProfileView({
               <Bell size={17} /> Notification preferences{" "}
               <ArrowRight size={16} />
             </button>
-            <button>
+            <button type="button" aria-haspopup="dialog" onClick={(event) => setPrivacyOpener(event.currentTarget)}>
               <ShieldCheck size={17} /> Privacy & security{" "}
               <ArrowRight size={16} />
             </button>
@@ -1837,6 +1840,9 @@ function ProfileView({
           </div>
         </aside>
       </div>
+      {privacyOpener && (
+        <PrivacyDialog key={account?.id ?? "guest"} onClose={closePrivacy} opener={privacyOpener} />
+      )}
     </section>
   )
 }
