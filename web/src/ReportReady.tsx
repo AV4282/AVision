@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 import { Check, Copy, ExternalLink, Mail, Phone, Send, X } from "lucide-react"
 import type { DraftedReport, OwnerContact } from "./api"
+import { useAccount } from "./auth"
+import { useReportNamePreference } from "./report-preferences"
 
 /** What was prepared for the department a just-posted ticket should go to. */
 export type ReportToSend = {
@@ -24,8 +26,14 @@ export default function ReportReady({
   kind = "new",
   onClose,
 }: ReportToSend & { onClose: () => void }) {
+  const { account } = useAccount()
+  const { includeName } = useReportNamePreference(account?.id ?? null)
   const [subject, setSubject] = useState(report.subject)
-  const [message, setMessage] = useState(report.message)
+  // Snapshot at preparation: later preference changes must not rewrite an edited message.
+  const [message, setMessage] = useState(() => {
+    const name = account?.name.trim()
+    return includeName && name ? `${report.message}\n\n${name}` : report.message
+  })
   const [copied, setCopied] = useState(false)
 
   // Escape closes this box only. It can sit on top of an open ticket, which

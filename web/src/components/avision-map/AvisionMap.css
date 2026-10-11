@@ -395,7 +395,7 @@
 .avision-map-widget .avision-legend-owner-gt,
 .avision-map-widget .avision-legend-owner-unknown { color: white; }
 
-/* Ticket filters: the menu beside Layers, and the line that says what is shown. */
+/* Ticket filters: the menu beside Layers, and its "Show all" button. */
 .avision-map-filter-menu label small {
   margin-left: auto;
   padding: 0 7px;
@@ -411,25 +411,14 @@
   border-radius: 7px;
   background: none;
 }
-.avision-map-filter-note {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  padding: 7px 12px;
-  border-top: 1px solid #E5EEE9;
-  flex-shrink: 0;
-  background: #EEF4FB;
-  font-size: 13px;
-}
-.avision-map-filter-note button {
-  min-height: 32px;
-  padding: 4px 12px;
+/* Beside Filters while some tickets are hidden */
+.avision-map-show-all {
+  padding: 6px 12px;
   border: 1px solid #334155;
   border-radius: 7px;
-  background: #FAFBF8;
+  background: none;
   font-weight: 700;
+  cursor: pointer;
 }
 .avision-sr-only {
   position: absolute;
@@ -439,16 +428,11 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-:root[data-theme="dark"] .avision-map-filter-note {
-  border-color: var(--line);
-  color: var(--ink);
-  background: var(--surface-subtle);
-}
 :root[data-theme="dark"] .avision-map-filter-menu label small {
   color: var(--ink);
   background: var(--control-surface);
 }
-:root[data-theme="dark"] :is(.avision-map-filter-note button, .avision-map-filter-menu .avision-map-filter-all) {
+:root[data-theme="dark"] :is(.avision-map-show-all, .avision-map-filter-menu .avision-map-filter-all) {
   border-color: var(--control-line);
   color: var(--ink);
   background: var(--surface);
