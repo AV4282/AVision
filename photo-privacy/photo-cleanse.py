@@ -42,6 +42,13 @@ FACE_SCALES = (2560, 960, 480, 240)
 FACE_MAX_UPSCALE = float(os.getenv("FACE_MAX_UPSCALE", "2.0"))
 FACE_LARGE_PX = 64            # faces at least this wide (in the original image) need the higher score
 FACE_LARGE_THRESHOLD = float(os.getenv("FACE_LARGE_THRESHOLD", "0.6"))
+# Faces narrower than this (in the original image) are left alone: at that size
+# nobody can be recognized, and most "faces" that small are specks, not people.
+FACE_MIN_PX = float(os.getenv("FACE_MIN_PX", "10"))
+# The widths, in the scanned picture's pixels, at which the face model is dependable.
+FACE_GOOD_PX = (14, 280)
+# A sharper pass only has to agree this weakly to back up a face found in a blurrier one.
+FACE_CONFIRM_THRESHOLD = 0.3
 
 
 @asynccontextmanager
@@ -96,29 +103,40 @@ def detect_faces(img):
     import numpy as np
 
     model = face_model_path()
-    scored, seen = [], set()
+    found, scales = [], []  # every detection as (score, box, the scale it was found at)
     for max_side in FACE_SCALES:
         scale = min(FACE_MAX_UPSCALE, max_side / max(img.size))
         size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
-        if size in seen:
+        if scale in scales:
             continue  # small images collapse to the same size at several scales
-        seen.add(size)
+        scales.append(scale)
         small = img if size == img.size else img.resize(size)
         bgr = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2BGR)
-        detector = cv2.FaceDetectorYN.create(model, "", size, FACE_THRESHOLD, 0.3, 5000)
+        detector = cv2.FaceDetectorYN.create(
+            model, "", size, min(FACE_THRESHOLD, FACE_CONFIRM_THRESHOLD), 0.3, 5000
+        )
         _, faces = detector.detect(bgr)
         if faces is None:
             continue
         for row in faces:
             x, y, w, h = (float(v) / scale for v in row[:4])
-            scored.append((float(row[-1]), (x, y, x + w, y + h)))
+            found.append((float(row[-1]), (x, y, x + w, y + h), scale))
 
     # The same face is usually found at more than one scale; keep the best box for each.
     # Small faces are allowed a low score. Bigger ones must score well in at least one
     # pass, which removes large false boxes on things that are not faces.
     boxes = []
-    for score, box in sorted(scored, reverse=True):
-        if box[2] - box[0] >= FACE_LARGE_PX and score < FACE_LARGE_THRESHOLD:
+    for score, box, scale in sorted(found, reverse=True):
+        width = box[2] - box[0]
+        if score < FACE_THRESHOLD or width < FACE_MIN_PX:
+            continue
+        if width >= FACE_LARGE_PX and score < FACE_LARGE_THRESHOLD:
+            continue
+        # Shrinking a picture makes round things (a wheel, a road sign) look like faces.
+        # A real face found in a shrunken pass is found again in a sharper one, where it
+        # is a size the model handles well. If no sharper pass saw it, it isn't a face.
+        sharper = [s for s in scales if s > scale and FACE_GOOD_PX[0] <= width * s <= FACE_GOOD_PX[1]]
+        if sharper and not any(s in sharper and _iou(box, other) >= 0.3 for _, other, s in found):
             continue
         if all(_iou(box, kept) < 0.4 for kept in boxes):
             boxes.append(box)
