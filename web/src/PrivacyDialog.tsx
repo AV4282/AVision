@@ -58,34 +58,33 @@ export default function PrivacyDialog({ onClose, opener }: {
             />
           </div>
           <p id={helperId}>
-            Adds your profile name to newly prepared report text, including follow-ups.
-            It does not change previous reports or public attribution. Names you type
-            yourself are kept. You can review and edit each message before sending.
+            Adds your profile name to new report messages and follow-ups. Previous
+            reports and public attribution stay unchanged. Names you type are kept.
+            Review and edit before sending.
           </p>
           <p className="privacy-storage" role="status">
             {!account
-              ? "Sign in to include your profile name. Guest reports have no profile name added."
+              ? "Sign in to add your profile name to reports."
               : sessionOnly
-                ? "Browser storage is unavailable. This choice applies to this account for this visit only."
-                : "Saved automatically for this account in this browser only. Other accounts have separate preferences."}
+                ? "Browser storage is unavailable. Kept for this account until you reload."
+                : "Saved for this account in this browser only."}
           </p>
         </section>
         <section aria-labelledby={`${titleId}-photos`}>
           <h3 id={`${titleId}-photos`}><Camera size={18} aria-hidden="true" /> Photo privacy</h3>
           <p>
-            Ticket photos are re-saved without hidden metadata such as GPS details.
-            When the server’s photo protection service is enabled, it blurs detected
-            faces and license plates before storage; uploads are refused if that
-            service fails. If it is not enabled, photos are stored without that blurring.
+            Ticket photos are saved without hidden metadata such as GPS details.
+            When enabled, photo protection blurs detected faces and license plates
+            before storage and rejects uploads if it fails. Without it, photos aren’t blurred.
           </p>
           <p>
-            Detection can miss details. Tickets and their photos are public, so review
-            the stored photo before posting. This does not guarantee complete anonymization.
+            Ticket photos are public. Detection can miss details, so review the
+            stored photo before posting. Complete anonymization isn’t guaranteed.
           </p>
         </section>
         <section aria-labelledby={`${titleId}-session`}>
           <h3 id={`${titleId}-session`}><ShieldCheck size={18} aria-hidden="true" /> Sign-in status</h3>
-          <p>{account ? "You are signed in." : "You are browsing as a guest. There is no signed-in session to sign out of."}</p>
+          <p>{account ? "You are signed in." : "You’re browsing as a guest. No account is signed in."}</p>
           {account && (
             <button type="button" className="secondary-button privacy-sign-out" onClick={signOut}>
               <LogOut size={17} aria-hidden="true" /> Sign out
