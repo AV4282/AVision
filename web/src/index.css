@@ -3850,6 +3850,23 @@ summary:focus-visible {
   cursor: pointer;
 }
 
+/* Under a fixed ticket, where its poster's Edit and Delete buttons used to be. */
+.ticket-locked {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ticket-locked svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--green);
+}
+
 /* On a ticket being edited: puts this photo first, the one shown on the map. */
 .photo-make-main {
   position: absolute;

@@ -1066,6 +1066,21 @@ export async function editTicket(ticketId: string, changes: TicketChanges): Prom
 }
 
 /**
+ * The web address of one ticket's own page, e.g. "https://site/?ticket=<id>".
+ * This is the one link in the messages people send to departments: the page
+ * shows the ticket with all of its photos.
+ */
+export function ticketLink(ticketId: string): string {
+  return new URL(`${import.meta.env.BASE_URL}?ticket=${ticketId}`, window.location.origin).href
+}
+
+/** The ticket a link like that points at, when the page was opened from one. */
+export function linkedTicket(): string | null {
+  const id = new URLSearchParams(window.location.search).get("ticket")
+  return id && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : null
+}
+
+/**
  * The stored path ("/uploads/abc.jpg") behind one of a ticket's photos, or null
  * for a picture that isn't one of our uploads (some of the first test tickets).
  */

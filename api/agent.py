@@ -449,11 +449,10 @@ def _with_facts(draft: dict, address: str | None, lat: float, lng: float, photo_
     """
     place = f"{address} ({lat:.5f}, {lng:.5f})" if address else f"{lat:.5f}, {lng:.5f}"
     facts = [f"Location: {place}"]
-    if photo_links and len(photo_links) == 1:
-        facts.append(f"Photo: {photo_links[0]}")
-    elif photo_links:
-        facts.append("Photos:")
-        facts.extend(photo_links)
+    # No photo links here. The message carries one link, to the ticket's own page,
+    # where every photo is. The web app adds it above the last line once the
+    # ticket exists and has an address of its own (ReportReady.tsx), which it
+    # doesn't yet when this is written. `photo_links` is still accepted, unused.
     facts.append("Sent with AVision, a community reporting site for Atlanta.")
     return {
         "subject": draft["subject"],

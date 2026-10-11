@@ -131,6 +131,10 @@ class TicketMerged(Exception):
     """The ticket was merged into another and no longer takes votes."""
 
 
+class TicketFixed(Exception):
+    """The ticket is marked fixed, so only an admin can change or delete it."""
+
+
 def ping():
     with pool.connection() as conn:
         return conn.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
@@ -338,18 +342,21 @@ def delete_ticket(ticket_id, user_id, admin=False):
     """Delete a ticket, with its votes. Only its poster can, or an admin.
 
     Reports that point at it are kept but unlinked. Returns the ticket's photos
-    (so the caller can delete the files), or raises LookupError / NotYours.
+    (so the caller can delete the files), or raises LookupError / NotYours /
+    TicketFixed (a fixed ticket is kept as it is; only an admin can delete it).
     """
     more = "more_photos" if HAS_MORE_PHOTOS else "'{}'::text[] AS more_photos"
     with pool.connection() as conn:
         row = conn.execute(
-            f"SELECT created_by, photo_url, {more} FROM tickets WHERE id = %s FOR UPDATE",
+            f"SELECT created_by, status, photo_url, {more} FROM tickets WHERE id = %s FOR UPDATE",
             (ticket_id,),
         ).fetchone()
         if row is None:
             raise LookupError(ticket_id)
         if not admin and (user_id is None or row["created_by"] != user_id):
             raise NotYours
+        if row["status"] == "fixed" and not admin:
+            raise TicketFixed
         # Tell the people who voted on it, while the votes still say who they are,
         # and the poster too when it was an admin who removed it.
         _notify(conn, _TELL_VOTERS, ticket_id, user_id, "removed", keep_link=False)
@@ -480,6 +487,8 @@ def move_ticket(ticket_id, user_id, lat, lng, address, owner=None, admin=False):
             raise NotYours
         if row["status"] == "merged":
             raise TicketMerged
+        if row["status"] == "fixed" and not admin:
+            raise TicketFixed
         conn.execute(
             """UPDATE tickets
                SET lat = %(lat)s, lng = %(lng)s, address = %(address)s,
@@ -522,6 +531,8 @@ def edit_ticket(ticket_id, user_id, changes, admin=False):
             raise NotYours
         if row["status"] == "merged":
             raise TicketMerged
+        if row["status"] == "fixed" and not admin:
+            raise TicketFixed
         had = [url for url in (row["photo_url"], *row["more_photos"]) if url]
         new = {
             "lat": changes.get("lat", row["lat"]),

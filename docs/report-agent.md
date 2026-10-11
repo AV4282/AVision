@@ -28,7 +28,7 @@ Each report takes an address lookup, some map math and **one AI request**:
    - **Chooses the department** from the map facts and the departments in `api/data/contacts.json` that have an email (GSU Facilities, Georgia Tech, City of Atlanta or MARTA), with a one-sentence reason. Any other answer is refused. A campus department is only on the list when the spot is on its campus.
    - **Writes the report:** a subject, a 60–120 word message and a short phone script.
 
-Python then adds the location, photo link and a signature line under the message, so those facts are always correct. Identical requests are answered from memory (the last 200 are kept).
+Python then adds the location and a closing line under the message, so those facts are always correct. The message has no photo links: once the ticket is posted, the web app adds one link, to the ticket's own page (`/?ticket=<id>`), where all the photos are. Identical requests are answered from memory (the last 200 are kept).
 
 ## Screening
 

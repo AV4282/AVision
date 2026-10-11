@@ -66,6 +66,10 @@ ATLANTA = shape(_load("atlanta_city_limits.geojson")["geometry"])
 # housing on Piedmont Ave, the outlying buildings, the Convocation Center and
 # Center Parc Stadium are all in it. The file's "source" says exactly how it was made.
 #
+# Georgia Tech's outline (data/georgia_tech_campus.geojson) is made the same way:
+# the main campus with Tech Square, plus the research areas south of Tech Parkway
+# and on 14th St and the few Georgia Tech buildings outside those.
+#
 # A campus department only takes tickets on its own campus: GSU Facilities inside
 # GSU's outline, Georgia Tech inside Georgia Tech's. The other departments have
 # no such limit (MARTA's stops and GDOT's roads are all over the city).

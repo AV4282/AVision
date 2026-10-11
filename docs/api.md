@@ -36,7 +36,7 @@ A user looks like `{id, display_name, avatar_url, role, created_at, is_student, 
 | GET | `/tickets?status=&owner=` | Anyone | Up to 100 tickets, newest first. Merged tickets are left out |
 | GET | `/tickets/{id}` | Anyone | One ticket, or `404` |
 | POST | `/tickets` | Anyone | Creates a ticket (`201`). The caller, if any, is recorded as its poster |
-| DELETE | `/tickets/{id}` | Poster or admin | Deletes it with its votes and photo (`204`). Anyone else gets `403` |
+| DELETE | `/tickets/{id}` | Poster or admin | Deletes it with its votes and photo (`204`). Anyone else gets `403`. A ticket marked `fixed` can only be deleted, edited or moved by an admin (`409` for its poster) |
 | POST | `/tickets/{id}/edit` | Poster or admin | Changes anything about a ticket. Send only what is changing: `title`, `issue_type`, `description` (`""` clears it), `photos` (every photo it should have afterwards, main one first, as `/uploads/...` paths; up to 5), `lat` + `lng`, `address`, `owner`. New words and a new main photo are screened like a new report (`422` with `code: "flagged"`). A campus department needs a spot on its campus. Photos taken off are deleted. Returns the updated ticket |
 | POST | `/tickets/{id}/location` | Poster or admin | The older, narrower version of `/edit`: `{lat, lng, address?, owner?}` only |
 | POST | `/tickets/{id}/reports` | Guest or signed in | Counts the caller as having sent a report about the ticket (once each). Returns the updated ticket |

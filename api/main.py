@@ -637,6 +637,8 @@ def delete_ticket(
         raise HTTPException(404, "Ticket not found")
     except db.NotYours:
         raise HTTPException(403, "Only the person who posted this ticket can delete it")
+    except db.TicketFixed:
+        raise HTTPException(409, "This ticket is marked fixed, so it can no longer be changed. Only an admin can change it now.")
     live.publish("ticket_deleted", ticket_id)
     for photo_url in photo_urls:
         photos.delete(photos.name_in(photo_url))
@@ -746,6 +748,8 @@ def move_ticket(
         raise HTTPException(403, "Only the person who posted this ticket can change it")
     except db.TicketMerged:
         raise HTTPException(409, "This ticket was merged into another; change that one")
+    except db.TicketFixed:
+        raise HTTPException(409, "This ticket is marked fixed, so it can no longer be changed. Only an admin can change it now.")
     live.publish("ticket_changed", ticket_id)
     return ticket
 
@@ -798,6 +802,8 @@ def edit_ticket(
         raise HTTPException(404, "Ticket not found")
     if not allowed:
         raise HTTPException(403, "Only the person who posted this ticket can change it")
+    if before["status"] == "fixed" and not db.is_admin(user_id):
+        raise HTTPException(409, "This ticket is marked fixed, so it can no longer be changed. Only an admin can change it now.")
     sent = body.model_fields_set
     changes: dict = {}
 
@@ -864,6 +870,8 @@ def edit_ticket(
         raise HTTPException(403, "Only the person who posted this ticket can change it")
     except db.TicketMerged:
         raise HTTPException(409, "This ticket was merged into another; change that one")
+    except db.TicketFixed:
+        raise HTTPException(409, "This ticket is marked fixed, so it can no longer be changed. Only an admin can change it now.")
     # A photo that came off the ticket is deleted, unless something else still shows it.
     if dropped:
         in_use = db.photo_names_in_use()

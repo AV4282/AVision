@@ -27,6 +27,7 @@ import {
 } from "./map-config"
 
 import type {
+  AvisionMapCampus,
   AvisionMapProps,
   MapCoordinates,
   NeighborhoodData,
@@ -135,6 +136,11 @@ const NO_MARKERS = Object.freeze([])
 // The owners a ticket filter can switch on and off. "Owner unknown" is not one:
 // every ticket has an owner, the mark is only for data the map can't place.
 const FILTER_OWNERS = ISSUE_OWNERS.filter((owner) => owner.id !== "unknown")
+
+const NO_CAMPUSES: readonly AvisionMapCampus[] = []
+
+// The statuses the Filters menu can switch on and off.
+const FILTER_STATUSES: readonly AvisionMapStatus[] = ["open", "likely_fixed", "fixed"]
 
 function IssueMarker({
   marker,
@@ -341,7 +347,15 @@ export default function AvisionMap({
 
   onShownOwnersChange,
 
+  shownStatuses,
+
+  statusCounts,
+
+  onShownStatusesChange,
+
   filterNote,
+
+  campuses = NO_CAMPUSES,
 
   onMarkerSelect,
 
@@ -387,6 +401,9 @@ export default function AvisionMap({
   const [showCity, setShowCity] = useState(false)
 
   const [showGsu, setShowGsu] = useState(false)
+
+  // The campus outlines switched on under Layers, by id.
+  const [shownCampuses, setShownCampuses] = useState<readonly string[]>([])
 
   const [showNeighborhoods, setShowNeighborhoods] = useState(false)
 
@@ -619,11 +636,36 @@ export default function AvisionMap({
     ? FILTER_OWNERS.filter((owner) => filters.shown.includes(owner.id))
     : FILTER_OWNERS
 
-  const filtered = shownFilterOwners.length < FILTER_OWNERS.length
+  // The same for status: open, likely fixed, fixed.
+  const statusFilters =
+    shownStatuses && onShownStatusesChange
+      ? { shown: shownStatuses, change: onShownStatusesChange }
+      : null
 
-  const hiddenTickets = FILTER_OWNERS.filter(
-    (owner) => !shownFilterOwners.includes(owner),
-  ).reduce((sum, owner) => sum + (ownerCounts?.[owner.id] ?? 0), 0)
+  const shownFilterStatuses = statusFilters
+    ? FILTER_STATUSES.filter((status) => statusFilters.shown.includes(status))
+    : FILTER_STATUSES
+
+  const filtered =
+    shownFilterOwners.length < FILTER_OWNERS.length ||
+    shownFilterStatuses.length < FILTER_STATUSES.length
+
+  // Every ticket there is, less the ones on the map now.
+  const hiddenTickets = Math.max(
+    0,
+    FILTER_OWNERS.reduce((sum, owner) => sum + (ownerCounts?.[owner.id] ?? 0), 0) -
+      markers.length,
+  )
+
+  function toggleStatus(status: AvisionMapStatus, show: boolean) {
+    if (!statusFilters) return
+
+    statusFilters.change(
+      FILTER_STATUSES.filter((each) =>
+        each === status ? show : statusFilters.shown.includes(each),
+      ),
+    )
+  }
 
   function toggleOwner(id: AvisionMapOwner, show: boolean) {
     if (!filters) return
@@ -635,8 +677,11 @@ export default function AvisionMap({
     )
   }
 
-  const showAllOwners = () =>
+  const showAllOwners = () => {
     filters?.change(FILTER_OWNERS.map((owner) => owner.id))
+
+    statusFilters?.change([...FILTER_STATUSES])
+  }
 
   function focusArea(bounds: MapBounds) {
     setSelectedNeighborhood(null)
@@ -843,6 +888,21 @@ export default function AvisionMap({
               interactive={false}
             />
           )}
+          {campuses
+            .filter((campus) => shownCampuses.includes(campus.id))
+            .map((campus) => (
+              <GeoJSON
+                key={`campus-${campus.id}`}
+                data={campus.geometry}
+                style={{
+                  color: campus.color,
+                  weight: 2.2,
+                  dashArray: "7 5",
+                  fillOpacity: 0.08,
+                }}
+                interactive={false}
+              />
+            ))}
           {showStations &&
             stations.map((station) => (
               <Marker
@@ -974,7 +1034,9 @@ export default function AvisionMap({
             <summary>
               Filters{" "}
               <span>
-                {shownFilterOwners.length}/{FILTER_OWNERS.length}
+                {shownFilterOwners.length +
+                  (statusFilters ? shownFilterStatuses.length : 0)}
+                /{FILTER_OWNERS.length + (statusFilters ? FILTER_STATUSES.length : 0)}
               </span>
             </summary>
             <fieldset className="avision-map-layer-list">
@@ -1002,6 +1064,43 @@ export default function AvisionMap({
                   </small>
                 </label>
               ))}
+              {statusFilters && (
+                <div
+                  className="avision-map-filter-group"
+                  role="group"
+                  aria-label="Show tickets that are"
+                >
+                  <span className="avision-map-filter-heading" aria-hidden="true">
+                    Show tickets that are
+                  </span>
+                  {FILTER_STATUSES.map((status) => (
+                    <label key={status}>
+                      <input
+                        type="checkbox"
+                        checked={statusFilters.shown.includes(status)}
+                        onChange={(event) =>
+                          toggleStatus(status, event.target.checked)
+                        }
+                      />
+                      <span
+                        className={`avision-legend-status avision-issue-status-${status}`}
+                        aria-hidden="true"
+                      >
+                        {status === "fixed"
+                          ? "✓"
+                          : status === "likely_fixed"
+                            ? "◷"
+                            : "!"}
+                      </span>
+                      {ISSUE_STATUS_LABELS[status]}
+                      <small>
+                        {statusCounts?.[status] ?? 0}
+                        <span className="avision-sr-only"> tickets</span>
+                      </small>
+                    </label>
+                  ))}
+                </div>
+              )}
               <button
                 type="button"
                 className="avision-map-filter-all"
@@ -1050,7 +1149,9 @@ export default function AvisionMap({
                   showBoundary,
                   showStations,
                   showNeighborhoods,
-                ].filter(Boolean).length
+                ].filter(Boolean).length +
+                  campuses.filter((campus) => shownCampuses.includes(campus.id))
+                    .length
               }
             </span>
           </summary>
@@ -1083,6 +1184,22 @@ export default function AvisionMap({
               />
               GSU building references
             </label>
+            {campuses.map((campus) => (
+              <label key={campus.id}>
+                <input
+                  type="checkbox"
+                  checked={shownCampuses.includes(campus.id)}
+                  onChange={(event) =>
+                    setShownCampuses((shown) =>
+                      event.target.checked
+                        ? [...shown, campus.id]
+                        : shown.filter((id) => id !== campus.id),
+                    )
+                  }
+                />
+                {campus.label}
+              </label>
+            ))}
             <label>
               <input
                 type="checkbox"
@@ -1113,6 +1230,8 @@ export default function AvisionMap({
               Reference layers do not assign ticket responsibility. The pilot
               outline is illustrative; GSU points are addresses. I-285 is a
               highway, not the city boundary.
+              {campuses.length > 0 &&
+                " A campus outline shows where that campus's department takes tickets."}
             </p>
           </fieldset>
         </details>
