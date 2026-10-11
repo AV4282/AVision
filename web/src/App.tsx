@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom"
+import { createStarPattern } from "./star-pattern"
 import {
   Fragment,
   lazy,
@@ -2215,6 +2216,17 @@ function MobileNav({
 
 export default function App() {
   const auth = useAccount()
+  const accountId = auth.account?.id
+  useEffect(() => {
+    if (!auth.ready) return
+    let current = true
+    createStarPattern().then((pattern) => {
+      if (current) document.documentElement.style.setProperty("--dark-stars", pattern)
+    }).catch(() => {
+      // The CSS background keeps its static pattern if the asset is unavailable.
+    })
+    return () => { current = false }
+  }, [auth.ready, accountId])
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)

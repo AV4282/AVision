@@ -144,6 +144,18 @@ h2 {
   --shadow: 0 16px 42px rgba(3, 9, 18, 0.32);
 }
 
+/* Only the page canvas gets stars; content surfaces cover the decoration. */
+:root[data-theme="dark"] .app-main {
+  background-image: linear-gradient(var(--page), var(--page)), var(--dark-stars, url("/dark-stars.svg"));
+  background-size: 100% 74px, 960px 760px;
+  background-repeat: no-repeat, repeat;
+}
+
+/* These text groups otherwise sit directly on the transparent page canvas. */
+:root[data-theme="dark"] :is(.page-heading > div, .profile-summary) {
+  background-color: var(--page);
+}
+
 .onboarding-actions {
   display: flex;
   align-items: center;
@@ -2482,6 +2494,10 @@ summary:focus-visible {
 }
 
 @media (max-width: 800px) {
+  :root[data-theme="dark"] .app-main {
+    background-size: 100% 68px, 960px 760px;
+  }
+
   .onboarding-header {
     height: 68px;
   }
