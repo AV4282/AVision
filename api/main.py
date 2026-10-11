@@ -909,13 +909,19 @@ def vote(
     authorization: AuthorizationHeader = None,
     guest_id: UserIdHeader = None,
 ):
-    """Cast or change the caller's vote. Returns the ticket with new counts and status."""
+    """Cast or change the caller's vote. Returns the ticket with new counts and status.
+
+    A ticket marked fixed is closed to votes (`409`), except an admin's.
+    """
+    user_id = caller(authorization, guest_id, required=True)
     try:
-        ticket = db.cast_vote(ticket_id, caller(authorization, guest_id, required=True), body.vote)
+        ticket = db.cast_vote(ticket_id, user_id, body.vote, admin=db.is_admin(user_id))
     except db.UnknownUser:
         raise HTTPException(401, "Unknown X-User-Id; get a new one from POST /guests")
     except db.TicketMerged:
         raise HTTPException(409, "This ticket was merged into another; vote on that one")
+    except db.TicketFixed:
+        raise HTTPException(409, "This ticket is marked fixed, so voting is closed. Only an admin can reopen it.")
     if ticket is None:
         raise HTTPException(404, "Ticket not found")
     live.publish("ticket_changed", ticket_id)

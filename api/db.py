@@ -711,8 +711,11 @@ def close_ticket(ticket_id, user_id):
         return get_ticket(ticket_id, user_id, conn)
 
 
-def cast_vote(ticket_id, user_id, vote):
+def cast_vote(ticket_id, user_id, vote, admin=False):
     """Record or change the user's vote, then recompute the ticket's status.
+
+    A ticket marked fixed takes no more votes, except from an admin, whose
+    still-there vote is how it gets reopened (raises TicketFixed otherwise).
 
     Returns the updated ticket, or None if it doesn't exist. Runs in one transaction,
     and locks the ticket row so two votes at once can't compute the status from stale counts.
@@ -725,6 +728,8 @@ def cast_vote(ticket_id, user_id, vote):
             return None
         if row["status"] == "merged":
             raise TicketMerged
+        if row["status"] == "fixed" and not admin:
+            raise TicketFixed
         status_before = row["status"]
         earlier = conn.execute(
             "SELECT vote FROM ticket_votes WHERE ticket_id = %s AND user_id = %s",
