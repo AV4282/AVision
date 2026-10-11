@@ -808,14 +808,87 @@ summary:focus-visible {
   cursor: pointer;
 }
 
-.sidebar-user {
+/* The account row at the bottom of the sidebar. Pressing it opens a small menu above it. */
+.sidebar-account {
   margin-top: 15px;
-  padding: 15px 5px 0;
+  padding-top: 9px;
+  position: relative;
+  border-top: 1px solid var(--line);
+}
+
+.sidebar-user {
+  width: 100%;
+  padding: 6px 5px;
   display: grid;
   grid-template-columns: 34px 1fr auto;
   align-items: center;
   gap: 9px;
-  border-top: 1px solid var(--line);
+  border: 0;
+  border-radius: 9px;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-user:hover,
+.sidebar-user[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+.sidebar-user > svg {
+  transition: transform 0.15s ease;
+}
+
+.sidebar-user > svg.turned {
+  transform: rotate(180deg);
+}
+
+.account-menu {
+  padding: 5px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+}
+
+.account-menu button {
+  min-height: 38px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--ink);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-menu button:hover {
+  background: var(--hover);
+}
+
+.account-menu button.leaving {
+  color: var(--sign-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-user > svg {
+    transition: none;
+  }
 }
 
 .avatar,
@@ -880,23 +953,23 @@ summary:focus-visible {
   opacity: 0.6;
 }
 
-.sidebar-user div:nth-child(2) {
+.sidebar-user .who {
   min-width: 0;
 }
 
-.sidebar-user strong,
-.sidebar-user span {
+.sidebar-user .who strong,
+.sidebar-user .who small {
   display: block;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.sidebar-user strong {
+.sidebar-user .who strong {
   font-size: 11px;
 }
 
-.sidebar-user span {
+.sidebar-user .who small {
   margin-top: 2px;
   color: var(--muted);
   font-size: 9px;
@@ -960,6 +1033,135 @@ summary:focus-visible {
   background: var(--surface);
 }
 
+/* The bell, its count, and the list that drops down from it. */
+.notice-wrap {
+  position: relative;
+}
+
+.notice-count {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--surface);
+  border-radius: 9px;
+  color: white;
+  background: var(--blue);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.notice-panel {
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(480px, calc(100vh - 100px));
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 60;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+}
+
+.notice-panel h2 {
+  margin: 0;
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.notice-empty {
+  margin: 0;
+  padding: 18px 16px 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.notice-panel ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notice-panel li + li {
+  border-top: 1px solid var(--line);
+}
+
+.notice-panel li > button,
+.notice-panel li > div {
+  width: 100%;
+  padding: 11px 16px 12px;
+  display: grid;
+  gap: 3px;
+  border: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+
+.notice-panel li > button {
+  cursor: pointer;
+}
+
+.notice-panel li > button:hover {
+  background: var(--hover);
+}
+
+.notice-panel li.new > button,
+.notice-panel li.new > div {
+  background: var(--surface-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.notice-panel strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.notice-panel li span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.notice-panel small {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.notice-panel small em {
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: white;
+  background: var(--blue);
+  font-style: normal;
+  font-weight: 700;
+}
+
+/* On a phone the list spans the screen instead of hanging off the bell. */
+@media (max-width: 520px) {
+  .notice-panel {
+    width: auto;
+    position: fixed;
+    top: 64px;
+    left: 12px;
+    right: 12px;
+  }
+}
+
 .notification-dot {
   width: 6px;
   height: 6px;
@@ -989,6 +1191,7 @@ summary:focus-visible {
 .list-search input::placeholder { color: var(--slate); }
 .owner-city { background-color: #0039A6; color: white; }
 .owner-gsu { background-color: #97CAEB; color: #334155; }
+.owner-gt { background-color: #8F713D; color: white; } /* Georgia Tech's Dark Gold */
 .owner-marta { background-color: #FDBE43; color: #334155; }
 .owner-gdot { background-color: #F4A261; color: #334155; }
 
@@ -1694,7 +1897,44 @@ summary:focus-visible {
 }
 
 .empty-state svg {
+  margin-inline: auto; /* icons are blocks here, so text-align alone leaves them at the left */
   color: var(--accent);
+}
+
+/* The empty lists on the profile page: an icon in a soft circle, a line of
+   help, and a button for the obvious next step. */
+.profile-empty {
+  min-height: 340px;
+  padding: 44px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-empty .empty-icon {
+  width: 60px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface-subtle);
+}
+
+.profile-empty h3 {
+  margin: 16px 0 6px;
+  font-size: 16px;
+}
+
+.profile-empty p {
+  max-width: 340px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.profile-empty button {
+  margin-top: 18px;
 }
 
 .empty-state h3 {
@@ -2515,6 +2755,236 @@ summary:focus-visible {
   box-shadow: var(--shadow);
 }
 
+/* ---------- Help & resources ---------- */
+.resources-dialog {
+  width: min(860px, calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.resources-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.resources-dialog::backdrop {
+  background: var(--modal-scrim);
+}
+
+.resources-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.resources-header .eyebrow {
+  margin: 0 0 6px;
+}
+
+.resources-header h2 {
+  margin: 0;
+  font: 800 26px/1.25 "Manrope", sans-serif;
+  letter-spacing: -0.6px;
+}
+
+.resources-header p:last-child {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.resources-header .dialog-close {
+  width: 44px;
+  height: 44px;
+  border-color: var(--control-line);
+}
+
+.resources-body {
+  min-height: 0;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.resources-emergency {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--warning-line);
+  border-radius: 10px;
+  color: var(--warning-text);
+  background: var(--orange-soft);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.resources-emergency a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.resources-guidance {
+  margin: 14px 0 20px;
+  color: var(--slate);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.resources-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.resource-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+
+.resource-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.resource-heading > div {
+  min-width: 0;
+}
+
+.resource-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--blue-soft);
+}
+
+.resource-heading h3 {
+  margin: 0;
+  font: 800 17px/1.3 "Manrope", sans-serif;
+}
+
+.resource-heading p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.resource-description {
+  margin: 16px 0;
+  color: var(--slate);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.resource-links {
+  display: grid;
+  gap: 8px;
+}
+
+.resource-links a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 9px;
+  color: var(--accent);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.resource-links a > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.resource-links svg,
+.resources-emergency svg {
+  flex-shrink: 0;
+}
+
+.resource-link-label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.resource-phone-note {
+  margin: -2px 0 4px;
+  padding-inline: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.resource-links a:hover,
+.resources-header .dialog-close:hover {
+  background: var(--hover);
+}
+
+.resources-dialog :is(a, button):focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 600px) {
+  .resources-dialog {
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border-radius: 14px;
+  }
+
+  .resources-header {
+    padding: 18px 16px;
+  }
+
+  .resources-header h2 {
+    font-size: 22px;
+  }
+
+  .resources-body {
+    padding: 16px;
+  }
+
+  .resources-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .resource-card {
+    padding: 16px;
+  }
+}
+
 .report-header {
   margin-bottom: 14px;
   display: flex;
@@ -3233,6 +3703,14 @@ summary:focus-visible {
   margin: -4px 0 16px;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* A line under a question saying what AVision covers. */
+.choice-note {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .choice-group {

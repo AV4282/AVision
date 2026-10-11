@@ -16,6 +16,7 @@ import {
   ATLANTA_VIEW,
   CORRIDOR_VIEW,
   GSU_VIEW,
+  GEORGIA_TECH_VIEW,
   CORRIDOR_STATIONS,
   PILOT_OUTLINE,
   ISSUE_OWNERS,
@@ -33,6 +34,7 @@ import type {
   SourceInfo,
   AvisionMapStatus,
   AvisionMapMarker,
+  AvisionMapOwner,
 } from "./types"
 
 import {
@@ -130,6 +132,16 @@ type SearchResult = {
 }
 
 const NO_MARKERS = Object.freeze([])
+
+// The owners a ticket filter can switch on and off. "Owner unknown" is not one:
+// every ticket has an owner, the mark is only for data the map can't place.
+const FILTER_OWNERS = ISSUE_OWNERS.filter((owner) => owner.id !== "unknown")
+
+/** "GSU Facilities", "GSU Facilities and MARTA", "GSU Facilities, MARTA and GDOT". */
+function listed(names: string[]): string {
+  if (names.length < 2) return names.join("")
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+}
 
 function IssueMarker({
   marker,
@@ -242,11 +254,18 @@ function MapBehavior({
 }) {
   const map = useMap()
 
+  // Where the map is on its way to, until it gets there. If the map changes
+  // size mid-move (a filter note appearing above it, say), the move is finished
+  // in one step instead of being stopped part-way.
+  const heading = useRef<Focus | null>(null)
+
   useEffect(() => {
     map.invalidateSize()
 
     const animate = !window.matchMedia("(prefers-reduced-motion: reduce)")
       .matches
+
+    heading.current = focus
 
     if (focus.bounds)
       map.fitBounds(focus.bounds, { padding: [24, 24], maxZoom: 16, animate })
@@ -261,9 +280,21 @@ function MapBehavior({
     const observer = new ResizeObserver(() => {
       const center = map.getCenter()
 
+      const target = heading.current
+
       map.invalidateSize({ pan: false })
 
-      map.setView(center, map.getZoom(), { animate: false })
+      if (target?.point)
+        map.setView([target.point.latitude, target.point.longitude], 17, {
+          animate: false,
+        })
+      else if (target?.bounds)
+        map.fitBounds(target.bounds, {
+          padding: [24, 24],
+          maxZoom: 16,
+          animate: false,
+        })
+      else map.setView(center, map.getZoom(), { animate: false })
     })
 
     observer.observe(map.getContainer())
@@ -277,6 +308,8 @@ function MapBehavior({
     },
 
     moveend() {
+      heading.current = null // arrived; from here the person's own panning is kept
+
       const bounds = map.getBounds()
 
       onBounds([
@@ -308,6 +341,14 @@ export default function AvisionMap({
   focusPoint,
 
   initialArea = "atlanta",
+
+  shownOwners,
+
+  ownerCounts,
+
+  onShownOwnersChange,
+
+  filterNote,
 
   onMarkerSelect,
 
@@ -632,6 +673,35 @@ export default function AvisionMap({
     setQuery("")
   }
 
+  // Ticket filters, when the page asked for them.
+  const filters =
+    shownOwners && onShownOwnersChange
+      ? { shown: shownOwners, change: onShownOwnersChange }
+      : null
+
+  const shownFilterOwners = filters
+    ? FILTER_OWNERS.filter((owner) => filters.shown.includes(owner.id))
+    : FILTER_OWNERS
+
+  const filtered = shownFilterOwners.length < FILTER_OWNERS.length
+
+  const hiddenTickets = FILTER_OWNERS.filter(
+    (owner) => !shownFilterOwners.includes(owner),
+  ).reduce((sum, owner) => sum + (ownerCounts?.[owner.id] ?? 0), 0)
+
+  function toggleOwner(id: AvisionMapOwner, show: boolean) {
+    if (!filters) return
+
+    filters.change(
+      FILTER_OWNERS.map((owner) => owner.id).filter((each) =>
+        each === id ? show : filters.shown.includes(each),
+      ),
+    )
+  }
+
+  const showAllOwners = () =>
+    filters?.change(FILTER_OWNERS.map((owner) => owner.id))
+
   function focusArea(bounds: MapBounds) {
     setSelectedNeighborhood(null)
 
@@ -742,8 +812,28 @@ export default function AvisionMap({
           <button type="button" onClick={() => focusArea(GSU_VIEW)}>
             GSU
           </button>
+          <button type="button" onClick={() => focusArea(GEORGIA_TECH_VIEW)}>
+            Georgia Tech
+          </button>
         </nav>
       </div>
+      {filters && filtered && (
+        <div className="avision-map-filter-note" role="status">
+          <span>
+            {shownFilterOwners.length === 0
+              ? "All tickets are hidden. Switch some on in Filters."
+              : `Showing ${listed(shownFilterOwners.map((owner) => owner.label))} tickets${
+                  filterNote ? `, ${filterNote}` : ""
+                }.`}
+            {hiddenTickets > 0 &&
+              shownFilterOwners.length > 0 &&
+              ` ${hiddenTickets} other ${hiddenTickets === 1 ? "ticket is" : "tickets are"} hidden.`}
+          </span>
+          <button type="button" onClick={showAllOwners}>
+            Show all
+          </button>
+        </div>
+      )}
       <div className="avision-map-canvas">
         <MapContainer
           bounds={initialBounds}
@@ -910,7 +1000,7 @@ export default function AvisionMap({
           </div>
         )}
       </div>
-      {showLegend && visibleMarkers.length > 0 && (
+      {showLegend && (visibleMarkers.length > 0 || filtered) && (
         <div
           id="avision-map-legend"
           className="avision-map-legend"
@@ -921,7 +1011,7 @@ export default function AvisionMap({
           {ISSUE_OWNERS.map((owner) => (
             <span className="avision-map-legend-item" key={owner.id}>
               <span
-                className="avision-map-legend-dot"
+                className={`avision-map-legend-dot avision-legend-owner-${owner.id}`}
                 style={{ backgroundColor: owner.color }}
                 aria-hidden="true"
               >
@@ -951,6 +1041,65 @@ export default function AvisionMap({
         </div>
       )}
       <div className="avision-map-options" aria-label="Map layers">
+        {filters && (
+          <details
+            className="avision-map-layer-menu avision-map-filter-menu"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.currentTarget.open = false
+
+                event.currentTarget.querySelector("summary")?.focus()
+              }
+            }}
+          >
+            <summary>
+              Filters{" "}
+              <span>
+                {shownFilterOwners.length}/{FILTER_OWNERS.length}
+              </span>
+            </summary>
+            <fieldset className="avision-map-layer-list">
+              <legend>Show tickets for</legend>
+              {FILTER_OWNERS.map((owner) => (
+                <label key={owner.id}>
+                  <input
+                    type="checkbox"
+                    checked={filters.shown.includes(owner.id)}
+                    onChange={(event) =>
+                      toggleOwner(owner.id, event.target.checked)
+                    }
+                  />
+                  <span
+                    className={`avision-map-legend-dot avision-legend-owner-${owner.id}`}
+                    style={{ backgroundColor: owner.color }}
+                    aria-hidden="true"
+                  >
+                    {owner.symbol}
+                  </span>
+                  {owner.label}
+                  <small>
+                    {ownerCounts?.[owner.id] ?? 0}
+                    <span className="avision-sr-only"> tickets</span>
+                  </small>
+                </label>
+              ))}
+              <button
+                type="button"
+                className="avision-map-filter-all"
+                onClick={showAllOwners}
+                disabled={!filtered}
+              >
+                Show all
+              </button>
+              {filterNote && filtered && (
+                <p>
+                  These were {filterNote}. Change them here any time, or edit
+                  your profile to change what you start with.
+                </p>
+              )}
+            </fieldset>
+          </details>
+        )}
         <details
           className="avision-map-layer-menu"
           onKeyDown={(event) => {

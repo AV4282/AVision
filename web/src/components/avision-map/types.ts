@@ -12,7 +12,7 @@ export type MapCoordinates = {
   longitude: number
 }
 
-export type AvisionMapOwner = "gsu" | "city" | "marta" | "gdot" | "unknown"
+export type AvisionMapOwner = "gsu" | "gt" | "city" | "marta" | "gdot" | "unknown"
 
 export type AvisionMapStatus = "open" | "likely_fixed" | "fixed" | "merged"
 
@@ -42,6 +42,24 @@ export type AvisionMapProps = {
   focusPoint?: MapCoordinates | null
 
   initialArea?: "atlanta" | "corridor" | "gsu"
+
+  /**
+   * Ticket filters. Given together with onShownOwnersChange, the map offers a
+   * "Filters" menu with a switch per owner. The page does the filtering itself:
+   * `markers` should hold only the tickets of the owners listed here.
+   */
+
+  shownOwners?: readonly AvisionMapOwner[]
+
+  /** How many tickets each owner has, shown beside its switch. */
+
+  ownerCounts?: Partial<Record<AvisionMapOwner, number>>
+
+  onShownOwnersChange?: (owners: AvisionMapOwner[]) => void
+
+  /** Why the filters are set as they are, e.g. "picked from your profile". */
+
+  filterNote?: string | null
 
   onMarkerSelect?: (marker: AvisionMapMarker) => void
 

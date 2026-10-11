@@ -14,6 +14,19 @@
       "source": "https://facilities.gsu.edu/about-us/contact-us/",
       "checked": "2026-10-10"
     },
+    "georgia_tech": {
+      "name": "Georgia Tech Infrastructure and Sustainability Customer Service Center",
+      "short_name": "Georgia Tech",
+      "handles": "Buildings and grounds that belong to Georgia Tech (the Georgia Institute of Technology): classrooms, hallways, doors, elevators, restrooms, lighting, plazas and walkways on campus. Not student housing rooms.",
+      "phone": "404-385-6000",
+      "phone_note": "Customer Service Center. After hours, urgent problems go to Georgia Tech Police at 404-894-2500.",
+      "email": "iscustomerserv@gatech.edu",
+      "web": "https://facilities.gatech.edu/building-maintenance/request-service",
+      "web_label": "Georgia Tech maintenance request",
+      "hours": "Normal working hours, 8 a.m. to 4 p.m.",
+      "source": "https://facilities.gatech.edu/node/8873",
+      "checked": "2026-10-11"
+    },
     "city_of_atlanta": {
       "name": "ATL311 (City of Atlanta)",
       "short_name": "City of Atlanta",

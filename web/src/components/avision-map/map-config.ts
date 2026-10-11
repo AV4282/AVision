@@ -13,6 +13,8 @@ export const ISSUE_OWNERS: readonly {
 }[] = [
   { id: "gsu", label: "GSU Facilities", color: "#97CAEB", symbol: "G" },
 
+  { id: "gt", label: "Georgia Tech", color: "#8F713D", symbol: "T" },
+
   {
     id: "city",
 
@@ -58,6 +60,12 @@ export const GSU_VIEW: MapBounds = [
   [33.7475, -84.393],
 
   [33.762, -84.378],
+]
+
+export const GEORGIA_TECH_VIEW: MapBounds = [
+  [33.7685, -84.4075],
+
+  [33.7835, -84.3858],
 ]
 
 export const CORRIDOR_STATIONS = [
