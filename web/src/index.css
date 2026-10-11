@@ -144,15 +144,114 @@ h2 {
   --shadow: 0 16px 42px rgba(3, 9, 18, 0.32);
 }
 
-/* Only the page canvas gets stars; content surfaces cover the decoration. */
-:root[data-theme="dark"] .app-main {
-  background-image: linear-gradient(var(--page), var(--page)), var(--dark-stars, url("/dark-stars.svg"));
-  background-size: 100% 74px, 960px 760px;
-  background-repeat: no-repeat, repeat;
+/* ---------- Page backdrop: stars in dark mode, leaves in light (Backdrop.tsx) ---------- */
+/* Only the bare page shows it; cards, the map and the header cover it. */
+.app-main {
+  position: relative;
+  isolation: isolate; /* keeps the backdrop behind this page's content, and in front of nothing else */
+  --header-height: 74px;
 }
 
-/* These text groups otherwise sit directly on the transparent page canvas. */
-:root[data-theme="dark"] :is(.page-heading > div, .profile-summary) {
+/* One screen tall and it stays put while the page scrolls, like a sky. */
+.app-backdrop {
+  position: sticky;
+  top: 0;
+  z-index: -1;
+  flex-shrink: 0;
+  height: 100vh;
+  height: 100dvh;
+  margin-bottom: -100vh;
+  margin-bottom: -100dvh;
+  overflow: hidden;
+  pointer-events: none;
+  clip-path: inset(var(--header-height) 0 0 0); /* nothing behind the see-through header */
+}
+
+/* Stars belong to the dark theme, leaves to the light one. */
+:root:not([data-theme="dark"]) .backdrop-star,
+:root[data-theme="dark"] .backdrop-leaf {
+  display: none !important;
+}
+
+.backdrop-star {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 4px currentColor; /* a little glow */
+  opacity: var(--low);
+}
+
+/* The larger ones: a four-point sparkle with a soft glow. */
+.backdrop-star.sparkle {
+  border-radius: 0;
+  box-shadow: none; /* the cut-out shape would hide it */
+  clip-path: polygon(50% 0, 58% 42%, 100% 50%, 58% 58%, 50% 100%, 42% 58%, 0 50%, 42% 42%);
+}
+
+.backdrop-leaf {
+  position: absolute;
+  display: block;
+}
+
+.backdrop-leaf svg {
+  display: block;
+  width: 100%;
+  rotate: var(--turn);
+}
+
+.backdrop-leaf.falling {
+  top: -40px;
+  display: none; /* only shown when it can move (below) */
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Mostly dim, with a short bright moment: that is what reads as a twinkle. */
+  .backdrop-star {
+    animation: star-twinkle 4s ease-in-out infinite;
+  }
+
+  @keyframes star-twinkle {
+    0%,
+    55%,
+    100% {
+      opacity: var(--low);
+      scale: 0.75;
+    }
+    75% {
+      opacity: var(--peak);
+      scale: 1.25;
+    }
+  }
+
+  .backdrop-leaf svg {
+    animation: leaf-sway var(--sway) ease-in-out infinite alternate;
+  }
+
+  @keyframes leaf-sway {
+    from {
+      rotate: calc(var(--turn) - var(--swing));
+      translate: -6px 0;
+    }
+    to {
+      rotate: calc(var(--turn) + var(--swing));
+      translate: 6px 0;
+    }
+  }
+
+  .backdrop-leaf.falling {
+    display: block;
+    animation: leaf-fall 20s linear infinite;
+  }
+
+  @keyframes leaf-fall {
+    to {
+      translate: var(--drift) calc(100vh + 80px);
+    }
+  }
+}
+
+/* These text groups otherwise sit directly on the bare page, with the backdrop behind the words. */
+:is(.page-heading > div, .profile-summary) {
   background-color: var(--page);
 }
 
@@ -2549,8 +2648,8 @@ summary:focus-visible {
 }
 
 @media (max-width: 800px) {
-  :root[data-theme="dark"] .app-main {
-    background-size: 100% 68px, 960px 760px;
+  .app-main {
+    --header-height: 68px;
   }
 
   .onboarding-header {
@@ -3749,6 +3848,28 @@ summary:focus-visible {
   color: var(--ink);
   background: var(--surface);
   cursor: pointer;
+}
+
+/* On a ticket being edited: puts this photo first, the one shown on the map. */
+.photo-make-main {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.72);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.photo-make-main:hover,
+.photo-make-main:focus-visible {
+  background: var(--accent);
 }
 
 .photo-main {

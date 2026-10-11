@@ -1,5 +1,4 @@
 import { createPortal } from "react-dom"
-import { createStarPattern } from "./star-pattern"
 import {
   Fragment,
   lazy,
@@ -69,6 +68,7 @@ import { useAccount } from "./auth"
 import PhotoViewer from "./PhotoViewer"
 import MoreInfoDialog from "./MoreInfoDialog"
 import MoveTicket from "./MoveTicket"
+import Backdrop from "./Backdrop"
 import ReportForm from "./ReportForm"
 import ScreeningNotice from "./ScreeningNotice"
 import OnboardingQuestions from "./OnboardingQuestions"
@@ -857,6 +857,10 @@ function noticeText(notice: Notice): string {
       return notice.yours
         ? "Your ticket was sent to a different department by an admin."
         : "A ticket you voted on was sent to a different department."
+    case "edited":
+      return notice.yours
+        ? "Your ticket's details or photos were changed by an admin."
+        : "A ticket you voted on had its details or photos changed."
     case "reopened":
       return "Your ticket was reopened. Someone says it is still there."
     case "removed":
@@ -1177,7 +1181,7 @@ function TicketDetail({
     }
   }
 
-  // Fixing the ticket's spot or department after posting. `moveNote` says how it went.
+  // Editing the ticket after posting: its words, photos, spot or department. `moveNote` says how it went.
   const [moving, setMoving] = useState(false)
   const [moveNote, setMoveNote] = useState<string | null>(null)
 
@@ -2310,17 +2314,6 @@ function MobileNav({
 
 export default function App() {
   const auth = useAccount()
-  const accountId = auth.account?.id
-  useEffect(() => {
-    if (!auth.ready) return
-    let current = true
-    createStarPattern().then((pattern) => {
-      if (current) document.documentElement.style.setProperty("--dark-stars", pattern)
-    }).catch(() => {
-      // The CSS background keeps its static pattern if the asset is unavailable.
-    })
-    return () => { current = false }
-  }, [auth.ready, accountId])
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)
@@ -2432,6 +2425,7 @@ export default function App() {
         onMoreInfo={setMoreInfoOpener}
       />
       <main className="app-main">
+        <Backdrop />
         <AppHeader
           title={title}
           subtitle={subtitle}

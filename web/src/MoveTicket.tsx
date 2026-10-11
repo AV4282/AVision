@@ -1,18 +1,47 @@
-import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react"
-import { X } from "lucide-react"
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react"
+import { Camera, X } from "lucide-react"
 import AddressField from "./AddressField"
-import { checkSpot, moveTicket, NO_ADDRESS, OWNERS, type BlockedOwners, type Owner, type Ticket } from "./api"
+import {
+  checkSpot,
+  editTicket,
+  ISSUE_TYPES,
+  MAX_TICKET_PHOTOS,
+  NO_ADDRESS,
+  OWNERS,
+  photoLink,
+  photoPath,
+  screeningProblem,
+  uploadPhoto,
+  type BlockedOwners,
+  type Owner,
+  type Ticket,
+  type TicketChanges,
+} from "./api"
 import { nearestAddress } from "./geocode"
+import PhotoViewer from "./PhotoViewer"
 import type { ReportLocation } from "./ReportLocationPicker"
 
 const ReportLocationPicker = lazy(() => import("./ReportLocationPicker"))
 
+// One of the ticket's photos while it is being edited: one it already had, or
+// one just added, which is uploaded straight away.
+type EditPhoto = {
+  id: number
+  /** Its stored path, once it has one. Null while a new photo uploads, or if that failed. */
+  path: string | null
+  /** What to show: the stored photo, or the chosen file until it is stored. */
+  shown: string
+  error: string | null
+}
+
 /**
- * Lets a ticket's poster (or an admin) fix it after posting: put the pin
- * somewhere else, for when it went in the wrong spot, and/or send the ticket to
- * a different department. The same pin map as the report form: tap the map,
- * drag the pin, use the device's location, or pick an address. Nothing changes
- * until Save.
+ * Lets a ticket's poster (or an admin) change anything about it after posting:
+ * the title, the type of issue, the details, the photos (add or remove, up to
+ * five), the department, and where the pin is. The same pin map as the report
+ * form: tap the map, drag the pin, use the device's location, or pick an
+ * address. Nothing changes until Save, and only what was changed is sent.
+ *
+ * New words and a new main photo are screened by the server like a new report.
  */
 export default function MoveTicket({
   ticket,
@@ -24,6 +53,20 @@ export default function MoveTicket({
   /** Called with the updated ticket once the changes are saved. */
   onMoved: (ticket: Ticket) => void
 }) {
+  const [title, setTitle] = useState(ticket.title)
+  const [issueType, setIssueType] = useState(ticket.issueType)
+  const [description, setDescription] = useState(ticket.description)
+  // The photos, main one first. A ticket whose pictures aren't uploads of ours
+  // (some early test tickets) keeps them as they are.
+  const startPaths = ticket.images.map(photoPath)
+  const photosLocked = startPaths.some((path) => path === null)
+  const nextPhotoId = useRef(ticket.images.length)
+  const [photos, setPhotos] = useState<EditPhoto[]>(() =>
+    ticket.images.map((link, id) => ({ id, path: photoPath(link), shown: link, error: null })),
+  )
+  const [viewingPhoto, setViewingPhoto] = useState<number | null>(null)
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   const [location, setLocation] = useState<ReportLocation>({ lat: ticket.lat, lng: ticket.lng })
   const startAddress = ticket.address === NO_ADDRESS ? "" : ticket.address
   const [address, setAddress] = useState(startAddress)
@@ -46,7 +89,75 @@ export default function MoveTicket({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const moved = location.lat !== ticket.lat || location.lng !== ticket.lng
-  const changed = moved || owner !== ticket.owner || address.trim() !== startAddress.trim()
+  const uploading = photos.some((photo) => photo.path === null && !photo.error)
+  const failedPhoto = photos.some((photo) => photo.error)
+  const photosChanged =
+    !photosLocked && photos.map((photo) => photo.path).join("|") !== startPaths.join("|")
+  const wordsChanged =
+    title.trim() !== ticket.title || issueType !== ticket.issueType || description.trim() !== ticket.description
+  const changed =
+    wordsChanged || photosChanged || moved || owner !== ticket.owner || address.trim() !== startAddress.trim()
+  const viewed = photos.find((photo) => photo.id === viewingPhoto)
+  // The ticket's own type stays on the list even if it isn't one of the usual ones.
+  const knownType = ISSUE_TYPES.some((type) => type.value === ticket.issueType)
+
+  // Local previews of added photos are released when the box closes.
+  const photosNow = useRef(photos)
+  photosNow.current = photos
+  useEffect(
+    () => () =>
+      photosNow.current.forEach((photo) => {
+        if (photo.shown.startsWith("blob:")) URL.revokeObjectURL(photo.shown)
+      }),
+    [],
+  )
+
+  // Added photos upload at once (and get faces and plates blurred), so Save has nothing to wait for.
+  function addPhotos(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = "" // so the same file can be picked again
+    const room = MAX_TICKET_PHOTOS - photos.length
+    setPhotoNotice(
+      files.length > room
+        ? `A ticket can have ${MAX_TICKET_PHOTOS} photos, so only the first ${room} ${room === 1 ? "was" : "were"} added.`
+        : null,
+    )
+    for (const file of files.slice(0, room)) {
+      const id = nextPhotoId.current++
+      const preview = URL.createObjectURL(file)
+      setPhotos((now) => [...now, { id, path: null, shown: preview, error: null }])
+      uploadPhoto(file)
+        .then((stored) =>
+          setPhotos((now) =>
+            now.map((photo) =>
+              photo.id === id ? { ...photo, path: stored.path, shown: photoLink(stored.path) ?? preview } : photo,
+            ),
+          ),
+        )
+        .catch((err) =>
+          setPhotos((now) =>
+            now.map((photo) =>
+              photo.id === id
+                ? { ...photo, error: err instanceof Error ? err.message : "That photo couldn’t be saved." }
+                : photo,
+            ),
+          ),
+        )
+    }
+  }
+
+  function removePhoto(id: number) {
+    setPhotoNotice(null)
+    setPhotos((now) => now.filter((photo) => photo.id !== id))
+  }
+
+  // The first photo is the one on the map and in lists.
+  function makeMain(id: number) {
+    setPhotos((now) => {
+      const chosen = now.find((photo) => photo.id === id)
+      return chosen ? [chosen, ...now.filter((photo) => photo.id !== id)] : now
+    })
+  }
 
   // Escape closes this box only. It sits on top of the open ticket, which also
   // listens for Escape, so the key is caught first and goes no further.
@@ -54,11 +165,13 @@ export default function MoveTicket({
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
       event.stopImmediatePropagation()
-      if (!saving) onClose()
+      // With a photo open, Escape closes just the photo.
+      if (viewingPhoto !== null) setViewingPhoto(null)
+      else if (!saving) onClose()
     }
     window.addEventListener("keydown", onKey, true)
     return () => window.removeEventListener("keydown", onKey, true)
-  }, [onClose, saving])
+  }, [onClose, saving, viewingPhoto])
 
   // Say right away if the new spot is outside the area, not after Save.
   // The same check says which departments can't take the spot.
@@ -146,20 +259,42 @@ export default function MoveTicket({
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (saving || !changed || outside) return
+    if (saving || !changed || outside || uploading || failedPhoto) return
+    if (!title.trim()) {
+      setError("Give the ticket a title.")
+      return
+    }
     setSaving(true)
     setError(null)
+    // Only what was changed is sent, so nothing else is touched.
+    const changes: TicketChanges = {}
+    if (title.trim() !== ticket.title) changes.title = title.trim()
+    if (issueType !== ticket.issueType) changes.issueType = issueType
+    if (description.trim() !== ticket.description) changes.description = description.trim()
+    if (photosChanged) changes.photos = photos.map((photo) => photo.path).filter((path): path is string => path !== null)
+    if (moved) {
+      changes.lat = Number(location.lat.toFixed(6))
+      changes.lng = Number(location.lng.toFixed(6))
+    }
+    if (address.trim() && (moved || address.trim() !== startAddress.trim())) changes.address = address.trim()
+    if (ownerChosen) changes.owner = owner
     try {
-      onMoved(
-        await moveTicket(ticket.id, {
-          lat: Number(location.lat.toFixed(6)),
-          lng: Number(location.lng.toFixed(6)),
-          address: address.trim(),
-          owner: ownerChosen ? owner : undefined,
-        }),
-      )
+      onMoved(await editTicket(ticket.id, changes))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn’t save the changes")
+      // Screening turned the new words or main photo away: say why, and leave the box open to fix it.
+      const problem = screeningProblem(err)
+      setError(
+        problem?.code === "flagged"
+          ? `Not saved. ${problem.message}` +
+              (problem.suspendedUntil
+                ? " That was one flagged attempt too many, so posting is paused for a day."
+                : problem.strikes && problem.limit
+                  ? ` Flagged attempt ${problem.strikes} of ${problem.limit}.`
+                  : "")
+          : err instanceof Error
+            ? err.message
+            : "Couldn’t save the changes",
+      )
       setSaving(false)
     }
   }
@@ -181,7 +316,7 @@ export default function MoveTicket({
         <div className="report-header">
           <div>
             <p className="eyebrow">EDIT TICKET</p>
-            <h2 id="move-ticket-title">Fix the location or department</h2>
+            <h2 id="move-ticket-title">Edit your ticket</h2>
           </div>
           <button
             type="button"
@@ -195,13 +330,35 @@ export default function MoveTicket({
         </div>
 
         <p className="ready-intro">
-          Change which department this goes to, or put the pin where the issue
-          really is: tap the map, drag the pin, or pick an address. Nothing
+          Change the title, details, photos, department or location. Nothing
           changes until you save.
         </p>
 
         <fieldset className="form-grid report-fields" disabled={saving}>
           <label className="form-field full">
+            <span>Title</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              maxLength={120}
+              required
+              placeholder="Short name for the issue"
+            />
+          </label>
+
+          <label className="form-field">
+            <span>What’s the issue?</span>
+            <select value={issueType} onChange={(event) => setIssueType(event.target.value)}>
+              {!knownType && <option value={ticket.issueType}>{ticket.issueType.replace(/_/g, " ")}</option>}
+              {ISSUE_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="form-field">
             <span>Who should fix it?</span>
             <select
               value={owner}
@@ -235,6 +392,95 @@ export default function MoveTicket({
               )
             )}
           </label>
+
+          <label className="form-field full">
+            <span>
+              Details <em>optional</em>
+            </span>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              maxLength={2000}
+              rows={3}
+              placeholder="What is wrong, and where exactly?"
+            />
+          </label>
+
+          <div className="form-field full">
+            <span>
+              Photos <em>optional, up to {MAX_TICKET_PHOTOS}</em>
+            </span>
+            {photosLocked ? (
+              <small className="field-note">This ticket’s pictures can’t be changed here.</small>
+            ) : (
+              <>
+                <div className="photo-tiles">
+                  {photos.map((photo, index) => (
+                    <div
+                      className={`photo-tile${photo.error ? " failed" : ""}${photo.path ? "" : " waiting"}`}
+                      key={photo.id}
+                    >
+                      <button
+                        type="button"
+                        className="photo-thumb"
+                        onClick={() => setViewingPhoto(photo.id)}
+                        aria-label={`View photo ${index + 1}${photo.error ? ", which could not be saved" : ""}`}
+                      >
+                        <img src={photo.shown} alt="" />
+                      </button>
+                      {index === 0 && photos.length > 1 && <span className="photo-main">Main</span>}
+                      {index > 0 && photo.path && (
+                        <button type="button" className="photo-make-main" onClick={() => makeMain(photo.id)}>
+                          Set main
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="photo-remove"
+                        onClick={() => removePhoto(photo.id)}
+                        aria-label={`Remove photo ${index + 1}`}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                  {/* On a phone this offers the camera as well as the photo library. */}
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    onChange={addPhotos}
+                    hidden
+                  />
+                  {photos.length < MAX_TICKET_PHOTOS && (
+                    <button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}>
+                      <Camera size={15} />
+                      {photos.length === 0 ? "Add photos" : "Add another"}
+                    </button>
+                  )}
+                </div>
+                {viewed && <PhotoViewer src={viewed.shown} alt="Photo on this ticket" onClose={() => setViewingPhoto(null)} />}
+                <small className="field-note" role="status">
+                  {uploading
+                    ? "Saving the new photo… Faces and license plates are blurred first."
+                    : "The first photo is the one shown on the map. Removed photos are deleted when you save."}
+                </small>
+                {photos
+                  .filter((photo) => photo.error)
+                  .map((photo) => (
+                    <small className="field-note photo-problem" role="alert" key={photo.id}>
+                      {photo.error?.replace(/\.?$/, ".")} Remove that photo to save.
+                    </small>
+                  ))}
+                {photoNotice && (
+                  <small className="field-note photo-problem" role="alert">
+                    {photoNotice}
+                  </small>
+                )}
+              </>
+            )}
+          </div>
 
           <label className="form-field full">
             <span>
@@ -295,8 +541,12 @@ export default function MoveTicket({
           <button type="button" className="text-button" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button type="submit" className="primary-button" disabled={saving || !changed || outside !== null}>
-            {saving ? "Saving…" : changed ? "Save changes" : "Nothing changed yet"}
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={saving || !changed || outside !== null || uploading || failedPhoto}
+          >
+            {saving ? "Saving…" : uploading ? "Saving photo…" : changed ? "Save changes" : "Nothing changed yet"}
           </button>
         </div>
       </form>

@@ -681,6 +681,32 @@ class MoveIn(BaseModel):
         return None if isinstance(value, str) and not value.strip() else value
 
 
+def _new_place(before: dict, lat: float, lng: float, owner: str | None, address: str | None):
+    """Check a ticket's new spot and department, and work out what they mean.
+
+    Returns (the department to switch to, or None to keep it; the address to show).
+    Raises the 422s for a spot outside the area or a department that can't take it.
+    """
+    moved = (before["lat"], before["lng"]) != (lat, lng)
+    if moved:
+        require_covered(lat, lng)
+    new_owner = None
+    if owner:
+        if owner in routing.UNAVAILABLE:
+            raise HTTPException(422, "That department isn't set up on this server yet. Choose another one.")
+        require_owner_fits(owner, lat, lng)
+        new_owner = owner
+    elif moved:
+        by_old_spot = routing.find_owner(before["lat"], before["lng"])["owner"]
+        by_new_spot = routing.find_owner(lat, lng)["owner"]
+        # Also when the pin leaves the campus of the ticket's department, which can't keep it then.
+        left_campus = routing.off_campus(before["owner"], lat, lng) is not None
+        if (before["owner"] == by_old_spot and by_new_spot != by_old_spot) or left_campus:
+            new_owner = by_new_spot
+    # A spot that didn't move keeps its address unless a new one was typed.
+    return new_owner, address or (geocode.address_for(lat, lng) if moved else before["address"])
+
+
 @app.post("/tickets/{ticket_id}/location", response_model=Ticket)
 def move_ticket(
     ticket_id: UUID,
@@ -703,24 +729,7 @@ def move_ticket(
     before = db.get_ticket(ticket_id)
     if before is None:
         raise HTTPException(404, "Ticket not found")
-    moved = (before["lat"], before["lng"]) != (body.lat, body.lng)
-    if moved:
-        require_covered(body.lat, body.lng)
-    new_owner = None
-    if body.owner:
-        if body.owner in routing.UNAVAILABLE:
-            raise HTTPException(422, "That department isn't set up on this server yet. Choose another one.")
-        require_owner_fits(body.owner, body.lat, body.lng)
-        new_owner = body.owner
-    elif moved:
-        by_old_spot = routing.find_owner(before["lat"], before["lng"])["owner"]
-        by_new_spot = routing.find_owner(body.lat, body.lng)["owner"]
-        # Also when the pin leaves the campus of the ticket's department, which can't keep it then.
-        left_campus = routing.off_campus(before["owner"], body.lat, body.lng) is not None
-        if (before["owner"] == by_old_spot and by_new_spot != by_old_spot) or left_campus:
-            new_owner = by_new_spot
-    # A spot that didn't move keeps its address unless a new one was typed.
-    address = body.address or (geocode.address_for(body.lat, body.lng) if moved else before["address"])
+    new_owner, address = _new_place(before, body.lat, body.lng, body.owner, body.address)
     try:
         ticket = db.move_ticket(
             ticket_id,
@@ -737,6 +746,131 @@ def move_ticket(
         raise HTTPException(403, "Only the person who posted this ticket can change it")
     except db.TicketMerged:
         raise HTTPException(409, "This ticket was merged into another; change that one")
+    live.publish("ticket_changed", ticket_id)
+    return ticket
+
+
+class EditIn(BaseModel):
+    """What to change on a ticket. Send only the fields that are changing."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=120, examples=["Blocked curb ramp"])
+    issue_type: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{1,40}$", examples=["blocked_curb_ramp"])
+    # Send "" to clear it.
+    description: str | None = Field(default=None, max_length=2000)
+    # Every photo the ticket should have afterwards, the main one first: paths from
+    # POST /uploads. Leave out to keep the photos as they are; send [] to remove them all.
+    photos: list[PhotoPath] | None = Field(default=None, max_length=MAX_TICKET_PHOTOS)
+    # A new spot (both, or neither), the address to show, and the department, as in /location.
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+    address: str | None = Field(default=None, max_length=200)
+    owner: Owner | None = Field(default=None, examples=[None])
+
+    @model_validator(mode="after")
+    def tidy(self):
+        if (self.lat is None) != (self.lng is None):
+            raise ValueError("Send lat and lng together")
+        if self.photos is not None:
+            self.photos = list(dict.fromkeys(self.photos))  # the same photo twice is one photo
+        return self
+
+
+@app.post("/tickets/{ticket_id}/edit", response_model=Ticket)
+def edit_ticket(
+    ticket_id: UUID,
+    body: EditIn,
+    authorization: AuthorizationHeader = None,
+    guest_id: UserIdHeader = None,
+):
+    """Change anything about a ticket: its title, type, details, photos, spot or department.
+
+    Only its poster can, or an admin. Only the fields that are sent change. The
+    spot and department follow the same rules as /location. New words and a new
+    main photo are screened like a new report (see `screen`), so a ticket can't
+    be turned into something that would have been refused.
+    """
+    user_id = caller(authorization, guest_id, required=True)
+    before = db.get_ticket(ticket_id)
+    allowed = db.may_change(ticket_id, user_id)
+    if before is None or allowed is None:
+        raise HTTPException(404, "Ticket not found")
+    if not allowed:
+        raise HTTPException(403, "Only the person who posted this ticket can change it")
+    sent = body.model_fields_set
+    changes: dict = {}
+
+    # Where it is, and who it goes to.
+    lat, lng = (body.lat, body.lng) if body.lat is not None else (before["lat"], before["lng"])
+    if body.lat is not None or body.owner or (body.address and "address" in sent):
+        new_owner, address = _new_place(before, lat, lng, body.owner, body.address if "address" in sent else None)
+        changes.update(lat=lat, lng=lng, address=address)
+        if new_owner:
+            changes["owner"] = new_owner
+
+    # The words.
+    if "title" in sent and body.title is not None:
+        changes["title"] = body.title
+    if "issue_type" in sent and body.issue_type is not None:
+        changes["issue_type"] = body.issue_type
+    if "description" in sent:
+        changes["description"] = body.description or None
+    title = changes.get("title", before["title"])
+    description = changes.get("description", before["description"])
+    words_changed = any(
+        field in changes and changes[field] != before[field] for field in ("title", "issue_type", "description")
+    )
+
+    # The photos. One that wasn't on the ticket has to be a stored upload.
+    had = list(before["photo_urls"])
+    new_main = None
+    if body.photos is not None and body.photos != had:
+        for photo in body.photos:
+            if photo not in had and photos.find(photos.name_in(photo)) is None:
+                raise HTTPException(422, "One of those photos isn't on the server any more. Add it again.")
+        changes["photos"] = body.photos
+        if body.photos and body.photos[0] not in had:
+            new_main = body.photos[0]
+
+    # New words or a new main photo are screened like a new report.
+    if words_changed or "photos" in changes:
+        require_good_standing(user_id)
+    if words_changed or new_main:
+        now = changes["photos"] if "photos" in changes else had
+        path = photos.find(photos.name_in(now[0])) if now else None  # the main photo, for the AI to look at
+        refuse_known_flagged(user_id, new_main, title, description)
+        if gemini.is_configured() and _analysis_slot() is None:
+            result = agent.draft_for_ticket(
+                title=title,
+                issue_type=changes.get("issue_type", before["issue_type"]),
+                description=description,
+                address=changes.get("address", before["address"]),
+                lat=lat,
+                lng=lng,
+                photo=path.read_bytes() if path else None,
+                photo_links=[],
+                owner=changes.get("owner", before["owner"]),
+            )
+            screen(result, user_id, new_main, title if words_changed else None, description if words_changed else None)
+
+    if not changes:
+        return before
+    try:
+        ticket, dropped = db.edit_ticket(ticket_id, user_id, changes, admin=db.is_admin(user_id))
+    except LookupError:
+        raise HTTPException(404, "Ticket not found")
+    except db.NotYours:
+        raise HTTPException(403, "Only the person who posted this ticket can change it")
+    except db.TicketMerged:
+        raise HTTPException(409, "This ticket was merged into another; change that one")
+    # A photo that came off the ticket is deleted, unless something else still shows it.
+    if dropped:
+        in_use = db.photo_names_in_use()
+        for photo in dropped:
+            name = photos.name_in(photo)
+            if name and name not in in_use:
+                photos.delete(name)
     live.publish("ticket_changed", ticket_id)
     return ticket
 
