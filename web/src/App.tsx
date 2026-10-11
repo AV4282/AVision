@@ -1,5 +1,4 @@
 import { createPortal } from "react-dom"
-import { createStarPattern } from "./star-pattern"
 import {
   Fragment,
   lazy,
@@ -47,7 +46,9 @@ import {
   closeTicket,
   deleteTicket,
   followUpReport,
+  campusOutlines,
   getTicket,
+  linkedTicket,
   listNotices,
   listTickets,
   markNoticesRead,
@@ -69,6 +70,7 @@ import { useAccount } from "./auth"
 import PhotoViewer from "./PhotoViewer"
 import MoreInfoDialog from "./MoreInfoDialog"
 import MoveTicket from "./MoveTicket"
+import Backdrop from "./Backdrop"
 import ReportForm from "./ReportForm"
 import ScreeningNotice from "./ScreeningNotice"
 import OnboardingQuestions from "./OnboardingQuestions"
@@ -79,9 +81,9 @@ import NotificationPreferencesDialog from "./NotificationPreferencesDialog"
 import { useNotificationPreferences } from "./notification-preferences"
 import ResourcesDialog from "./ResourcesDialog"
 
-import { mapOwner, ticketMarker } from "./ticket-map"
+import { mapOwner, mapStatus, ticketMarker } from "./ticket-map"
 import { WELCOME_PHOTOS } from "./welcome-photos"
-import type { AvisionMapOwner } from "./components/avision-map/types"
+import type { AvisionMapCampus, AvisionMapOwner, AvisionMapStatus } from "./components/avision-map/types"
 const AvisionMap = lazy(() => import("./components/avision-map/AvisionMap"))
 type View = "onboarding" | "map" | "issues" | "profile"
 
@@ -859,6 +861,10 @@ function noticeText(notice: Notice): string {
       return notice.yours
         ? "Your ticket was sent to a different department by an admin."
         : "A ticket you voted on was sent to a different department."
+    case "edited":
+      return notice.yours
+        ? "Your ticket's details or photos were changed by an admin."
+        : "A ticket you voted on had its details or photos changed."
     case "reopened":
       return "Your ticket was reopened. Someone says it is still there."
     case "removed":
@@ -1179,7 +1185,7 @@ function TicketDetail({
     }
   }
 
-  // Fixing the ticket's spot or department after posting. `moveNote` says how it went.
+  // Editing the ticket after posting: its words, photos, spot or department. `moveNote` says how it went.
   const [moving, setMoving] = useState(false)
   const [moveNote, setMoveNote] = useState<string | null>(null)
 
@@ -1412,7 +1418,14 @@ function TicketDetail({
           {ticket.firstReported.toLowerCase()} · Updated{" "}
           {ticket.time.toLowerCase()}
         </p>
-        {(ticket.mine || isAdmin) && (
+        {/* A fixed ticket is kept as it is: only an admin can still change or delete it. */}
+        {ticket.mine && !isAdmin && ticket.status === "Fixed" && (
+          <p className="ticket-locked" role="note">
+            <CheckCircle2 size={14} aria-hidden="true" /> This ticket is marked fixed, so it can no longer be edited
+            or deleted.
+          </p>
+        )}
+        {(isAdmin || (ticket.mine && ticket.status !== "Fixed")) && (
           <div className="delete-ticket">
             {!confirmingDelete ? (
               <div className="ticket-actions">
@@ -1579,7 +1592,13 @@ function ownersForProfile(member: Member | null): Owner[] | null {
 
 type OwnerFilter = {
   shown: readonly Owner[]
+  /** The person's own change in Filters. Remembered for their next visit. */
   setShown: (owners: Owner[]) => void
+  /** Which statuses are shown: open, likely fixed, fixed. Remembered the same way. */
+  statuses: readonly Status[]
+  setStatuses: (statuses: Status[]) => void
+  /** Switches a ticket's department and status on so it can be seen, for this visit only. */
+  reveal: (ticket: Ticket) => void
   /** Why the filter is set as it is, while it is still the profile's own choice. */
   note: string | null
 }
@@ -1592,6 +1611,41 @@ type OwnerFilter = {
  *
  * Lives in App, not the map page, so a choice survives a visit to another page.
  */
+// The map filter a person last chose, kept in this browser under their own
+// name (or "guest"). It is stored with the profile answers it was chosen
+// under: if those have changed since, it no longer applies.
+const FILTER_KEY = "avision.mapFilter."
+const STATUSES: Status[] = ["Open", "Likely fixed", "Fixed"]
+
+type KeptFilter = { shown: Owner[]; statuses: Status[] }
+
+function rememberedFilter(person: string, profileKey: string): KeptFilter | null {
+  try {
+    const kept = JSON.parse(localStorage.getItem(FILTER_KEY + person) ?? "null") as {
+      shown?: unknown
+      statuses?: unknown
+      profile?: unknown
+    } | null
+    if (!kept || kept.profile !== profileKey || !Array.isArray(kept.shown)) return null
+    const listed = (values: unknown) => (Array.isArray(values) ? (values as unknown[]) : null)
+    return {
+      shown: OWNERS.filter((owner) => listed(kept.shown)!.includes(owner)),
+      // Kept before statuses could be filtered: all of them.
+      statuses: listed(kept.statuses) ? STATUSES.filter((status) => listed(kept.statuses)!.includes(status)) : STATUSES,
+    }
+  } catch {
+    return null // storage is blocked or holds something else: start from the profile
+  }
+}
+
+function rememberFilter(person: string, profileKey: string, shown: readonly Owner[], statuses: readonly Status[]) {
+  try {
+    localStorage.setItem(FILTER_KEY + person, JSON.stringify({ shown, statuses, profile: profileKey }))
+  } catch {
+    // not kept this time; the filter still works for this visit
+  }
+}
+
 function useOwnerFilter(
   member: Member | null,
   tickets: Ticket[],
@@ -1601,30 +1655,63 @@ function useOwnerFilter(
     () => ownersForProfile(member),
     [member?.id, member?.isStudent, member?.school, member?.takesMarta],
   )
-  const [shown, setShown] = useState<readonly Owner[]>(fromProfile ?? OWNERS)
-
-  // New answers (a first sign-in, an edited profile, signing out) set the filter again.
+  // The profile only sets the filter the first time. After that, whatever the
+  // person switches on or off is remembered in this browser, per person, and
+  // comes back on every visit. New profile answers start it over from the profile.
+  const person = member?.id ?? "guest"
   const profileKey = fromProfile ? fromProfile.join("|") : ""
+  const [shown, setShownNow] = useState<readonly Owner[]>(
+    () => rememberedFilter(person, profileKey)?.shown ?? fromProfile ?? OWNERS,
+  )
+  const [statuses, setStatusesNow] = useState<readonly Status[]>(
+    () => rememberedFilter(person, profileKey)?.statuses ?? STATUSES,
+  )
   useEffect(() => {
-    setShown(fromProfile ?? OWNERS)
-  }, [profileKey])
+    const kept = rememberedFilter(person, profileKey)
+    setShownNow(kept?.shown ?? fromProfile ?? OWNERS)
+    setStatusesNow(kept?.statuses ?? STATUSES)
+  }, [person, profileKey])
+
+  // A change made in the map's Filters is the person's own choice, so it is kept.
+  const now = useRef({ shown, statuses })
+  now.current = { shown, statuses }
+  const setShown = useCallback(
+    (owners: readonly Owner[]) => {
+      setShownNow(owners)
+      rememberFilter(person, profileKey, owners, now.current.statuses)
+    },
+    [person, profileKey],
+  )
+  const setStatuses = useCallback(
+    (wanted: readonly Status[]) => {
+      setStatusesNow(wanted)
+      rememberFilter(person, profileKey, now.current.shown, wanted)
+    },
+    [person, profileKey],
+  )
+
+  // Shown for this visit only: it isn't the person changing their filter, so it isn't remembered.
+  const reveal = useCallback((ticket: Ticket) => {
+    setShownNow((owners) => (owners.includes(ticket.owner) ? owners : [...owners, ticket.owner]))
+    setStatusesNow((wanted) => (wanted.includes(ticket.status) ? wanted : [...wanted, ticket.status]))
+  }, [])
 
   // A ticket picked from a list, or one just posted, has to be on the map:
-  // switch its department on. Once per pick, so it can be switched off again.
+  // switch its department and status on. Once per pick, so they can be switched off again.
   const revealed = useRef<string | null>(null)
   useEffect(() => {
     if (!selectedId || revealed.current === selectedId) return
     const picked = tickets.find((ticket) => ticket.id === selectedId)
     if (!picked) return // not loaded yet; this runs again when it is
     revealed.current = selectedId
-    setShown((owners) => (owners.includes(picked.owner) ? owners : [...owners, picked.owner]))
-  }, [selectedId, tickets])
+    reveal(picked)
+  }, [selectedId, tickets, reveal])
 
   const untouched =
     fromProfile !== null &&
     fromProfile.length === shown.length &&
     fromProfile.every((owner) => shown.includes(owner))
-  return { shown, setShown, note: untouched ? "picked from your profile" : null }
+  return { shown, setShown, statuses, setStatuses, reveal, note: untouched ? "picked from your profile" : null }
 }
 
 function MapView({
@@ -1642,10 +1729,13 @@ function MapView({
 }) {
   const [showDetail, setShowDetail] = useState(true)
   const mapPage = useRef<HTMLElement>(null)
-  // Only the tickets of the departments switched on in the map's Filters.
+  // Only the tickets of the departments and statuses switched on in the map's Filters.
   const tickets = useMemo(
-    () => state.tickets.filter((ticket) => filter.shown.includes(ticket.owner)),
-    [state.tickets, filter.shown],
+    () =>
+      state.tickets.filter(
+        (ticket) => filter.shown.includes(ticket.owner) && filter.statuses.includes(ticket.status),
+      ),
+    [state.tickets, filter.shown, filter.statuses],
   )
   const selected =
     tickets.find((ticket) => ticket.id === selectedId) ?? tickets[0] ?? null
@@ -1657,6 +1747,34 @@ function MapView({
     for (const ticket of state.tickets) {
       const owner = mapOwner(ticket.owner)
       counts[owner] = (counts[owner] ?? 0) + 1
+    }
+    return counts
+  }, [state.tickets])
+  // The campus outlines, offered under the map's Layers.
+  const [campuses, setCampuses] = useState<AvisionMapCampus[]>([])
+  useEffect(() => {
+    let current = true
+    campusOutlines().then((found) => {
+      if (!current) return
+      setCampuses(
+        found.map((campus) => ({
+          id: mapOwner(campus.owner),
+          label: `${campus.owner === "GSU Facilities" ? "GSU" : campus.owner} campus outline`,
+          color: campus.owner === "Georgia Tech" ? "#8F713D" : "#0039A6",
+          geometry: campus.geometry,
+        })),
+      )
+    })
+    return () => {
+      current = false
+    }
+  }, [])
+  const shownStatuses = useMemo(() => filter.statuses.map(mapStatus), [filter.statuses])
+  const statusCounts = useMemo(() => {
+    const counts: Partial<Record<AvisionMapStatus, number>> = {}
+    for (const ticket of state.tickets) {
+      const status = mapStatus(ticket.status)
+      counts[status] = (counts[status] ?? 0) + 1
     }
     return counts
   }, [state.tickets])
@@ -1706,6 +1824,12 @@ function MapView({
             onShownOwnersChange={(owners) =>
               filter.setShown(OWNERS.filter((owner) => owners.includes(mapOwner(owner))))
             }
+            campuses={campuses}
+            shownStatuses={shownStatuses}
+            statusCounts={statusCounts}
+            onShownStatusesChange={(wanted) =>
+              filter.setStatuses(STATUSES.filter((status) => wanted.includes(mapStatus(status))))
+            }
             selectedMarkerId={selected?.id ?? null}
             focusPoint={focusPoint}
             onMarkerSelect={(marker) => {
@@ -1746,7 +1870,7 @@ function MapView({
             state.replaceTicket(updated)
             // Moving a ticket can change its department. Keep it on the map
             // even if that department was switched off in Filters.
-            if (!filter.shown.includes(updated.owner)) filter.setShown([...filter.shown, updated.owner])
+            filter.reveal(updated)
           }}
           onViewFull={() => onOpen(selected.id)}
           onDeleted={state.removeTicket}
@@ -2312,17 +2436,6 @@ function MobileNav({
 
 export default function App() {
   const auth = useAccount()
-  const accountId = auth.account?.id
-  useEffect(() => {
-    if (!auth.ready) return
-    let current = true
-    createStarPattern().then((pattern) => {
-      if (current) document.documentElement.style.setProperty("--dark-stars", pattern)
-    }).catch(() => {
-      // The CSS background keeps its static pattern if the asset is unavailable.
-    })
-    return () => { current = false }
-  }, [auth.ready, accountId])
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)
@@ -2340,6 +2453,23 @@ export default function App() {
   const [openId, setOpenId] = useState<string | null>(null)
   const ticketsState = useTickets()
   const live = useLiveTickets(ticketsState)
+  // Opened from a link to one ticket (the link in the messages people send to
+  // departments): go straight to that ticket, past the welcome screen. It is
+  // fetched on its own in case it is older than the list goes back. Then the
+  // link comes off the address bar, so a refresh doesn't open it again.
+  const upsertLinked = ticketsState.upsertTicket
+  useEffect(() => {
+    const id = linkedTicket()
+    if (!id) return
+    window.history.replaceState({}, document.title, window.location.pathname)
+    setView((now) => (now === "onboarding" ? "map" : now))
+    setSelectedId(id)
+    setOpenId(id)
+    const gone = () => setOpenId((now) => (now === id ? null : now)) // deleted since: just the map
+    getTicket(id)
+      .then((ticket) => (ticket ? upsertLinked(ticket) : gone()))
+      .catch(gone)
+  }, [upsertLinked])
   // Once a sign-in is confirmed, reload: "yours" and your votes now come from the account.
   const memberId = auth.member?.id
   const reloadTickets = ticketsState.reload
@@ -2434,6 +2564,7 @@ export default function App() {
         onMoreInfo={setMoreInfoOpener}
       />
       <main className="app-main">
+        <Backdrop />
         <AppHeader
           title={title}
           subtitle={subtitle}

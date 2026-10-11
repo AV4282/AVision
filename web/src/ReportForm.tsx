@@ -6,6 +6,7 @@ import {
   analyzePhoto,
   createTicket,
   draftReport,
+  ISSUE_TYPES,
   MAX_TICKET_PHOTOS,
   checkSpot,
   photoLink,
@@ -26,18 +27,6 @@ import type { ReportToSend } from "./ReportReady"
 import type { ReportLocation } from "./ReportLocationPicker"
 
 const ReportLocationPicker = lazy(() => import("./ReportLocationPicker"))
-
-// Same snake_case values as reports.issue_type, so tickets and reports line up.
-const ISSUE_TYPES = [
-  { value: "blocked_curb_ramp", label: "Blocked curb ramp" },
-  { value: "missing_curb_cut", label: "Missing curb ramp" },
-  { value: "damaged_sidewalk", label: "Damaged sidewalk" },
-  { value: "broken_elevator", label: "Broken elevator" },
-  { value: "broken_escalator", label: "Broken escalator" },
-  { value: "damaged_tactile_paving", label: "Damaged tactile paving" },
-  { value: "missing_crosswalk_signal", label: "Missing crosswalk signal" },
-  { value: "other", label: "Something else" },
-] as const
 
 // The department is chosen on the server when the ticket is posted, by Gemini,
 // from the issue and the place (api/agent.py). These are for picking one by hand.

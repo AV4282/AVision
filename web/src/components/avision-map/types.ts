@@ -26,6 +26,16 @@ export type AvisionMapMarker = MapCoordinates & {
   status?: AvisionMapStatus
 }
 
+
+/** A campus outline the map can draw as a reference layer. */
+export type AvisionMapCampus = {
+  id: string
+  /** Its switch under Layers, e.g. "Georgia Tech campus outline". */
+  label: string
+  color: string
+  geometry: Polygon | MultiPolygon
+}
+
 export type AvisionMapProps = {
   height?: number | string
 
@@ -57,9 +67,30 @@ export type AvisionMapProps = {
 
   onShownOwnersChange?: (owners: AvisionMapOwner[]) => void
 
+  /**
+   * The same for a ticket's status (open, likely fixed, fixed). Given together
+   * with onShownStatusesChange, the Filters menu also has a switch per status.
+   * Again the page filters `markers` itself.
+   */
+
+  shownStatuses?: readonly AvisionMapStatus[]
+
+  /** How many tickets have each status, shown beside its switch. */
+
+  statusCounts?: Partial<Record<AvisionMapStatus, number>>
+
+  onShownStatusesChange?: (statuses: AvisionMapStatus[]) => void
+
   /** Why the filters are set as they are, e.g. "picked from your profile". */
 
   filterNote?: string | null
+
+  /**
+   * Campus outlines to offer under Layers, each with its own switch (off to
+   * start with). A campus department only takes tickets inside its outline.
+   */
+
+  campuses?: readonly AvisionMapCampus[]
 
   onMarkerSelect?: (marker: AvisionMapMarker) => void
 

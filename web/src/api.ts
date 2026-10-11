@@ -46,6 +46,7 @@ export type Ticket = {
   myVote: VoteChoice | null
   /** True when this browser's user reported the ticket. */
   mine: boolean // the viewer posted it, so they can delete it
+  issueType: string // snake_case, e.g. "blocked_curb_ramp"
   /** The main photo, or a stock picture when the ticket has none. */
   image: string
   /** Every photo on the ticket (up to 5), main one first. Empty when it has none. */
@@ -70,6 +71,18 @@ export type NewTicket = {
 
 /** The most photos one ticket can have. */
 export const MAX_TICKET_PHOTOS = 5
+
+/** The "What's the issue?" choices, in the report form and when a ticket is edited. */
+export const ISSUE_TYPES = [
+  { value: "blocked_curb_ramp", label: "Blocked curb ramp" },
+  { value: "missing_curb_cut", label: "Missing curb ramp" },
+  { value: "damaged_sidewalk", label: "Damaged sidewalk" },
+  { value: "broken_elevator", label: "Broken elevator" },
+  { value: "broken_escalator", label: "Broken escalator" },
+  { value: "damaged_tactile_paving", label: "Damaged tactile paving" },
+  { value: "missing_crosswalk_signal", label: "Missing crosswalk signal" },
+  { value: "other", label: "Something else" },
+] as const
 
 // ---------- API shapes and mapping ----------
 
@@ -159,6 +172,7 @@ function toTicket(t: ApiTicket): Ticket {
     fixed: t.fixed,
     myVote: t.my_vote,
     mine: t.created_by_me === true,
+    issueType: t.issue_type,
     image: images[0] ?? PLACEHOLDER_PHOTO,
     images,
     lat: t.lat,
@@ -917,7 +931,7 @@ export async function draftReport(ticket: {
  */
 export type Notice = {
   id: string
-  /** still_there, marked_fixed, likely_fixed, fixed, reopened, reported, moved, rerouted or removed. */
+  /** still_there, marked_fixed, likely_fixed, fixed, reopened, reported, moved, rerouted, edited or removed. */
   kind: string
   /** True when the viewer posted the ticket, false when they voted on it. */
   yours: boolean
@@ -1014,6 +1028,64 @@ export async function moveTicket(
     owner: to.owner ? OWNER_TO_API[to.owner] : null,
   }
   return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/location`, { body }))
+}
+
+/** What to change on a ticket. A field left out stays as it is. */
+export type TicketChanges = {
+  title?: string
+  issueType?: string
+  /** An empty string clears it. */
+  description?: string
+  /** Every photo the ticket should have afterwards, main one first, as paths from uploadPhoto(). */
+  photos?: string[]
+  /** A new spot: both, or neither. */
+  lat?: number
+  lng?: number
+  address?: string
+  owner?: Owner
+}
+
+/**
+ * Changes anything about a ticket: its words, photos, spot or department. Only
+ * its poster can, or an admin. New words and a new main photo are screened like
+ * a new report, so this can fail with a screening problem (see screeningProblem).
+ */
+export async function editTicket(ticketId: string, changes: TicketChanges): Promise<Ticket> {
+  const body: Record<string, unknown> = {}
+  if (changes.title !== undefined) body.title = changes.title
+  if (changes.issueType !== undefined) body.issue_type = changes.issueType
+  if (changes.description !== undefined) body.description = changes.description
+  if (changes.photos !== undefined) body.photos = changes.photos
+  if (changes.lat !== undefined && changes.lng !== undefined) {
+    body.lat = changes.lat
+    body.lng = changes.lng
+  }
+  if (changes.address) body.address = changes.address
+  if (changes.owner) body.owner = OWNER_TO_API[changes.owner]
+  return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/edit`, { body }))
+}
+
+/**
+ * The web address of one ticket's own page, e.g. "https://site/?ticket=<id>".
+ * This is the one link in the messages people send to departments: the page
+ * shows the ticket with all of its photos.
+ */
+export function ticketLink(ticketId: string): string {
+  return new URL(`${import.meta.env.BASE_URL}?ticket=${ticketId}`, window.location.origin).href
+}
+
+/** The ticket a link like that points at, when the page was opened from one. */
+export function linkedTicket(): string | null {
+  const id = new URLSearchParams(window.location.search).get("ticket")
+  return id && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : null
+}
+
+/**
+ * The stored path ("/uploads/abc.jpg") behind one of a ticket's photos, or null
+ * for a picture that isn't one of our uploads (some of the first test tickets).
+ */
+export function photoPath(link: string): string | null {
+  return link.match(/\/uploads\/[0-9a-f]{32}\.jpg$/)?.[0] ?? null
 }
 
 /**

@@ -131,6 +131,10 @@ class TicketMerged(Exception):
     """The ticket was merged into another and no longer takes votes."""
 
 
+class TicketFixed(Exception):
+    """The ticket is marked fixed, so only an admin can change or delete it."""
+
+
 def ping():
     with pool.connection() as conn:
         return conn.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
@@ -338,18 +342,21 @@ def delete_ticket(ticket_id, user_id, admin=False):
     """Delete a ticket, with its votes. Only its poster can, or an admin.
 
     Reports that point at it are kept but unlinked. Returns the ticket's photos
-    (so the caller can delete the files), or raises LookupError / NotYours.
+    (so the caller can delete the files), or raises LookupError / NotYours /
+    TicketFixed (a fixed ticket is kept as it is; only an admin can delete it).
     """
     more = "more_photos" if HAS_MORE_PHOTOS else "'{}'::text[] AS more_photos"
     with pool.connection() as conn:
         row = conn.execute(
-            f"SELECT created_by, photo_url, {more} FROM tickets WHERE id = %s FOR UPDATE",
+            f"SELECT created_by, status, photo_url, {more} FROM tickets WHERE id = %s FOR UPDATE",
             (ticket_id,),
         ).fetchone()
         if row is None:
             raise LookupError(ticket_id)
         if not admin and (user_id is None or row["created_by"] != user_id):
             raise NotYours
+        if row["status"] == "fixed" and not admin:
+            raise TicketFixed
         # Tell the people who voted on it, while the votes still say who they are,
         # and the poster too when it was an admin who removed it.
         _notify(conn, _TELL_VOTERS, ticket_id, user_id, "removed", keep_link=False)
@@ -480,6 +487,8 @@ def move_ticket(ticket_id, user_id, lat, lng, address, owner=None, admin=False):
             raise NotYours
         if row["status"] == "merged":
             raise TicketMerged
+        if row["status"] == "fixed" and not admin:
+            raise TicketFixed
         conn.execute(
             """UPDATE tickets
                SET lat = %(lat)s, lng = %(lng)s, address = %(address)s,
@@ -498,6 +507,77 @@ def move_ticket(ticket_id, user_id, lat, lng, address, owner=None, admin=False):
             _notify(conn, _TELL_VOTERS, ticket_id, user_id, kind)
             _notify(conn, _TELL_POSTER, ticket_id, user_id, kind)
         return get_ticket(ticket_id, user_id, conn)
+
+
+def edit_ticket(ticket_id, user_id, changes, admin=False):
+    """Change a ticket's words, photos, place and/or department. Only its poster can, or an admin.
+
+    `changes` holds only what is changing: any of title, issue_type, description
+    (None clears it), photos (every photo, the main one first), lat + lng,
+    address, owner. Returns (the updated ticket, the photos that came off it, so
+    the caller can delete the files), or raises LookupError / NotYours / TicketMerged.
+    """
+    more = "more_photos" if HAS_MORE_PHOTOS else "'{}'::text[] AS more_photos"
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"""SELECT created_by, status, lat, lng, owner, title, issue_type, description,
+                       photo_url, {more}
+                FROM tickets WHERE id = %s FOR UPDATE""",
+            (ticket_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError(ticket_id)
+        if not admin and (user_id is None or row["created_by"] != user_id):
+            raise NotYours
+        if row["status"] == "merged":
+            raise TicketMerged
+        if row["status"] == "fixed" and not admin:
+            raise TicketFixed
+        had = [url for url in (row["photo_url"], *row["more_photos"]) if url]
+        new = {
+            "lat": changes.get("lat", row["lat"]),
+            "lng": changes.get("lng", row["lng"]),
+            "owner": changes.get("owner", row["owner"]),
+            "title": changes.get("title", row["title"]),
+            "issue_type": changes.get("issue_type", row["issue_type"]),
+            "description": changes.get("description", row["description"]),
+        }
+        sets = ["lat = %(lat)s", "lng = %(lng)s", "owner = %(owner)s", "title = %(title)s",
+                "issue_type = %(issue_type)s", "description = %(description)s", "updated_at = now()"]
+        if "address" in changes:
+            new["address"] = changes["address"]
+            sets.append("address = %(address)s")
+        has = had
+        if "photos" in changes:
+            has = list(changes["photos"]) if HAS_MORE_PHOTOS else list(changes["photos"])[:1]
+            new["photo_url"] = has[0] if has else None
+            sets.append("photo_url = %(photo_url)s")
+            if HAS_MORE_PHOTOS:
+                new["more_photos"] = has[1:]
+                sets.append("more_photos = %(more_photos)s")
+        conn.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %(id)s", {**new, "id": ticket_id})
+        # The people who voted on it are told what changed, and the poster too
+        # when it was an admin who changed it.
+        kinds = []
+        if (row["lat"], row["lng"]) != (new["lat"], new["lng"]):
+            kinds.append("moved")
+        if new["owner"] != row["owner"]:
+            kinds.append("rerouted")
+        if has != had or any(new[field] != row[field] for field in ("title", "issue_type", "description")):
+            kinds.append("edited")
+        for kind in kinds:
+            _notify(conn, _TELL_VOTERS, ticket_id, user_id, kind)
+            _notify(conn, _TELL_POSTER, ticket_id, user_id, kind)
+        return get_ticket(ticket_id, user_id, conn), [url for url in had if url not in has]
+
+
+def may_change(ticket_id, user_id):
+    """Whether this person may change the ticket: its poster or an admin. None if there is no such ticket."""
+    with pool.connection() as conn:
+        row = conn.execute("SELECT created_by FROM tickets WHERE id = %s", (ticket_id,)).fetchone()
+    if row is None:
+        return None
+    return user_id is not None and (row["created_by"] == user_id or is_admin(user_id))
 
 
 # ---------- screening ----------

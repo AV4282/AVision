@@ -23,6 +23,11 @@ export function mapOwner(owner: Ticket["owner"]): AvisionMapOwner {
   return owners[owner] ?? "unknown"
 }
 
+/** The map's name for a ticket's status. */
+export function mapStatus(status: Ticket["status"]): AvisionMapStatus {
+  return statuses[status]
+}
+
 /** Display the API's location, owner and status without deriving routing decisions. */
 export function ticketMarker(ticket: Ticket): AvisionMapMarker {
   return {

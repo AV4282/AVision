@@ -16,7 +16,7 @@ It is still used as a hint for Gemini and as the answer when Gemini is not
 available, so the app keeps routing either way.
 
     1. Within 100 m of a MARTA rail station       -> MARTA
-    2. Inside the GSU downtown campus outline     -> GSU Facilities
+    2. Inside the GSU campus outline              -> GSU Facilities
     3. Inside the Georgia Tech campus outline     -> Georgia Tech
     4. On an interstate, US route or state route  -> GDOT
     5. Anywhere else                              -> City of Atlanta (ATL311)
@@ -61,12 +61,21 @@ GSU_CAMPUS = shape(_load("gsu_campus.geojson")["geometry"])
 GEORGIA_TECH_CAMPUS = shape(_load("georgia_tech_campus.geojson")["geometry"])
 ATLANTA = shape(_load("atlanta_city_limits.geojson")["geometry"])
 
+# GSU's outline (data/gsu_campus.geojson) is the two campus areas OpenStreetMap has,
+# joined with every GSU building and lot and a 35 m margin around each, so the
+# housing on Piedmont Ave, the outlying buildings, the Convocation Center and
+# Center Parc Stadium are all in it. The file's "source" says exactly how it was made.
+#
+# Georgia Tech's outline (data/georgia_tech_campus.geojson) is made the same way:
+# the main campus with Tech Square, plus the research areas south of Tech Parkway
+# and on 14th St and the few Georgia Tech buildings outside those.
+#
 # A campus department only takes tickets on its own campus: GSU Facilities inside
 # GSU's outline, Georgia Tech inside Georgia Tech's. The other departments have
 # no such limit (MARTA's stops and GDOT's roads are all over the city).
 CAMPUS_EDGE_SLACK_M = 30  # a pin this far past the outline still counts; positions are rarely exact
 CAMPUSES = {
-    "gsu_facilities": ("Georgia State's downtown campus", GSU_CAMPUS),
+    "gsu_facilities": ("Georgia State's campus", GSU_CAMPUS),
     "georgia_tech": ("Georgia Tech's campus", GEORGIA_TECH_CAMPUS),
 }
 
@@ -144,7 +153,7 @@ def location_facts(lat: float, lng: float, road: dict | None = None, address: st
         facts.append(f"Nearest address: {address}")
     facts.append(f"Nearest MARTA rail station: {station['name']}, about {_round_m(distance)} m away")
     facts.append(
-        "Inside the outline of Georgia State University's downtown campus: "
+        "Inside the outline of Georgia State University's Atlanta campus: "
         + ("yes" if GSU_CAMPUS.contains(here) else "no")
     )
     if "georgia_tech" not in UNAVAILABLE:
@@ -192,7 +201,7 @@ def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
         return _answer(
             "gsu_facilities",
             "gsu_campus",
-            "This spot is inside Georgia State's downtown campus, so it goes to GSU Facilities.",
+            "This spot is on Georgia State's campus, so it goes to GSU Facilities.",
         )
 
     if "georgia_tech" not in UNAVAILABLE and GEORGIA_TECH_CAMPUS.contains(here):

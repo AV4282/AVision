@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, Copy, ExternalLink, Mail, Phone, Send, X } from "lucide-react"
-import { reportSent, type DraftedReport, type OwnerContact } from "./api"
+import { reportSent, ticketLink, type DraftedReport, type OwnerContact } from "./api"
 import { useAccount } from "./auth"
 import { useReportNamePreference } from "./report-preferences"
 
@@ -21,6 +21,14 @@ export type ReportToSend = {
  * and a button that opens it in the person's own email, addressed to the
  * department. AVision never sends anything itself.
  */
+// The message has one link: the ticket's own page, where the photos are. It
+// goes just above the closing "Sent with AVision" line the server writes.
+function withTicketLink(message: string, ticketId: string): string {
+  const line = `See the report and its photos: ${ticketLink(ticketId)}`
+  const closing = message.lastIndexOf("\nSent with AVision")
+  return closing === -1 ? `${message}\n${line}` : `${message.slice(0, closing)}\n${line}${message.slice(closing)}`
+}
+
 export default function ReportReady({
   contact,
   report,
@@ -35,7 +43,8 @@ export default function ReportReady({
   // Snapshot at preparation: later preference changes must not rewrite an edited message.
   const [message, setMessage] = useState(() => {
     const name = account?.name.trim()
-    return includeName && name ? `${report.message}\n\n${name}` : report.message
+    const text = ticketId ? withTicketLink(report.message, ticketId) : report.message
+    return includeName && name ? `${text}\n\n${name}` : text
   })
   const [copied, setCopied] = useState(false)
 
