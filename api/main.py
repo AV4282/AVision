@@ -34,6 +34,7 @@ import db  # first: it loads api/.env, which the modules below read their settin
 import agent
 import auth
 import gemini
+import geocode
 import live
 import photos
 import routing
@@ -545,6 +546,64 @@ def delete_ticket(
         photos.delete(photos.name_in(photo_url))
 
 
+class MoveIn(BaseModel):
+    """Where to put a ticket instead."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    lat: float = Field(ge=-90, le=90, examples=[33.7531])
+    lng: float = Field(ge=-180, le=180, examples=[-84.3853])
+    # The address or landmark to show. Left out, the nearest address is looked up.
+    address: str | None = Field(default=None, max_length=200, examples=["Courtland St SE & Gilmer St SE"])
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def blank_to_none(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
+
+
+@app.post("/tickets/{ticket_id}/location", response_model=Ticket)
+def move_ticket(
+    ticket_id: UUID,
+    body: MoveIn,
+    authorization: AuthorizationHeader = None,
+    guest_id: UserIdHeader = None,
+):
+    """Move a ticket that was put in the wrong spot. Only its poster can, or an admin.
+
+    The new spot has to be inside the area AVision covers. If the old spot was
+    why the ticket went to its department (a campus, a MARTA station) and the new
+    spot belongs to a different one, the ticket goes to that one instead. A
+    department the AI or the person chose for another reason is left alone.
+    """
+    user_id = caller(authorization, guest_id, required=True)
+    require_covered(body.lat, body.lng)
+    before = db.get_ticket(ticket_id)
+    if before is None:
+        raise HTTPException(404, "Ticket not found")
+    by_old_spot = routing.find_owner(before["lat"], before["lng"])["owner"]
+    by_new_spot = routing.find_owner(body.lat, body.lng)["owner"]
+    new_owner = by_new_spot if before["owner"] == by_old_spot and by_new_spot != by_old_spot else None
+    try:
+        ticket = db.move_ticket(
+            ticket_id,
+            user_id,
+            body.lat,
+            body.lng,
+            body.address or geocode.address_for(body.lat, body.lng),
+            owner=new_owner,
+            admin=db.is_admin(user_id),
+        )
+    except LookupError:
+        raise HTTPException(404, "Ticket not found")
+    except db.NotYours:
+        raise HTTPException(403, "Only the person who posted this ticket can move it")
+    except db.TicketMerged:
+        raise HTTPException(409, "This ticket was merged into another; move that one")
+    live.publish("ticket_changed", ticket_id)
+    return ticket
+
+
 @app.post("/tickets/{ticket_id}/close", response_model=Ticket)
 def close_ticket(ticket_id: UUID, authorization: AuthorizationHeader = None):
     """Mark a ticket as fixed. Admins only. Returns the updated ticket.
@@ -606,7 +665,7 @@ async def events():
 # ---------- notifications ----------
 class Notification(BaseModel):
     id: UUID
-    # still_there, marked_fixed, likely_fixed, fixed, reopened or removed (see sql/005_notifications.sql)
+    # still_there, marked_fixed, likely_fixed, fixed, reopened, moved or removed (see sql/005_notifications.sql)
     kind: str
     # True when the reader posted the ticket, false when they only voted on it.
     yours: bool

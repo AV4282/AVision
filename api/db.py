@@ -412,6 +412,36 @@ def create_ticket(ticket, user_id=None):
         return get_ticket(ticket_id, user_id, conn)
 
 
+def move_ticket(ticket_id, user_id, lat, lng, address, owner=None, admin=False):
+    """Put a ticket somewhere else on the map. Only its poster can, or an admin.
+
+    `owner` is the department to switch to when the new spot belongs to a
+    different one, or None to leave it as it is. Returns the updated ticket, or
+    raises LookupError / NotYours / TicketMerged.
+    """
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT created_by, status FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,)
+        ).fetchone()
+        if row is None:
+            raise LookupError(ticket_id)
+        if not admin and (user_id is None or row["created_by"] != user_id):
+            raise NotYours
+        if row["status"] == "merged":
+            raise TicketMerged
+        conn.execute(
+            """UPDATE tickets
+               SET lat = %(lat)s, lng = %(lng)s, address = %(address)s,
+                   owner = coalesce(%(owner)s, owner), updated_at = now()
+               WHERE id = %(id)s""",
+            {"id": ticket_id, "lat": lat, "lng": lng, "address": address, "owner": owner},
+        )
+        # The people who voted on it are told, and the poster too when an admin moved it.
+        _notify(conn, _TELL_VOTERS, ticket_id, user_id, "moved")
+        _notify(conn, _TELL_POSTER, ticket_id, user_id, "moved")
+        return get_ticket(ticket_id, user_id, conn)
+
+
 def close_ticket(ticket_id, user_id):
     """Mark a ticket fixed (admins only; the caller checks). Returns it, or None if it doesn't exist.
 

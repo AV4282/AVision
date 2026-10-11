@@ -121,6 +121,9 @@ const STATUS_TO_API = Object.fromEntries(
 export const PLACEHOLDER_PHOTO =
   "https://images.unsplash.com/photo-1653701888795-a23335d9aee2?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=82&w=900"
 
+/** What a ticket shows in place of an address when it has none. */
+export const NO_ADDRESS = "Location pinned on map"
+
 export function timeAgo(iso: string, now = Date.now()): string {
   const minutes = Math.floor((now - new Date(iso).getTime()) / 60_000)
   if (minutes < 1) return "Just now"
@@ -143,7 +146,7 @@ function toTicket(t: ApiTicket): Ticket {
     code: `AV-${t.id.slice(0, 4).toUpperCase()}`,
     title: t.title,
     description: t.description ?? "",
-    address: t.address ?? "Location pinned on map",
+    address: t.address ?? NO_ADDRESS,
     owner: OWNER_FROM_API[t.owner],
     status: STATUS_FROM_API[t.status === "merged" ? "open" : t.status],
     time: timeAgo(t.updated_at),
@@ -810,7 +813,7 @@ export async function draftReport(ticket: {
  */
 export type Notice = {
   id: string
-  /** still_there, marked_fixed, likely_fixed, fixed, reopened or removed. */
+  /** still_there, marked_fixed, likely_fixed, fixed, reopened, moved or removed. */
   kind: string
   /** True when the viewer posted the ticket, false when they voted on it. */
   yours: boolean
@@ -879,6 +882,19 @@ export async function followUpReport(ticket: Ticket): Promise<TicketDraft> {
 /** Deletes a ticket. Only the person who posted it can, or an admin. */
 export async function deleteTicket(ticketId: string): Promise<void> {
   await request<void>("DELETE", `/tickets/${ticketId}`)
+}
+
+/**
+ * Moves a ticket to another spot on the map. Only its poster can, or an admin.
+ * The server may also change its department, when the new spot belongs to a
+ * different one (say, moved off a campus).
+ */
+export async function moveTicket(
+  ticketId: string,
+  to: { lat: number; lng: number; address: string },
+): Promise<Ticket> {
+  const body = { lat: to.lat, lng: to.lng, address: to.address || null }
+  return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/location`, { body }))
 }
 
 /** Marks a ticket as fixed. Admins only. */

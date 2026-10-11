@@ -20,6 +20,7 @@ import {
   Clock3,
   Eye,
   HelpCircle,
+  Info,
   Home,
   List,
   LogIn,
@@ -62,6 +63,8 @@ import {
 } from "./api"
 import { useAccount } from "./auth"
 import PhotoViewer from "./PhotoViewer"
+import MoreInfoDialog from "./MoreInfoDialog"
+import MoveTicket from "./MoveTicket"
 import ReportForm from "./ReportForm"
 import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
@@ -267,6 +270,18 @@ function Brand({ compact = false }: { compact?: boolean }) {
  * have one (uploaded here, or from their Google account), otherwise their
  * initials. Falls back to the initials if the picture won't load.
  */
+/**
+ * What kind of member someone is, as shown under their name: "Admin" for an
+ * admin (granted with api/admin.py), otherwise "Community member". One place,
+ * so the sidebar and the profile always agree.
+ */
+function memberLabel(signedIn: boolean, member: Member | null): string {
+  if (!signedIn) return "Not signed in"
+  if (member?.role === "admin") return "Admin"
+  if (member?.role === "facilities_staff") return "Facilities staff"
+  return "Community member"
+}
+
 function AvatarFace({ member, initials }: { member: Member | null; initials: string }) {
   const picture = photoLink(member?.avatarUrl ?? null)
   const [broken, setBroken] = useState<string | null>(null)
@@ -294,6 +309,123 @@ function StatusPill({ status }: { status: Status }) {
       </span>
       {status}
     </span>
+  )
+}
+
+// The photos behind the welcome text: Atlanta, the two campuses AVision covers,
+// and people out fixing and using the street. Files are in web/public/welcome.
+// Every photo is free to use; `by` and `link` give its credit, shown on screen.
+// The Georgia State photo's license (CC BY-SA) requires that credit, so keep it.
+const WELCOME_PHOTOS = [
+  {
+    file: "atlanta-skyline.jpg",
+    label: "Atlanta",
+    by: "Joey Kyber",
+    link: "https://unsplash.com/photos/timelapse-photo-of-highway-during-golden-hour-45FJgZMXCK8",
+    terms: "Unsplash",
+  },
+  {
+    file: "street-repair.jpg",
+    label: "Street repair crew",
+    by: "Nicolas J Leclercq",
+    link: "https://unsplash.com/photos/WJg2bynUWOk",
+    terms: "Unsplash",
+  },
+  {
+    file: "gsu-library-plaza.jpg",
+    label: "Georgia State University",
+    by: "Hwi.padam",
+    link: "https://commons.wikimedia.org/wiki/File:GSU_Library_Plaza.jpg",
+    terms: "CC BY-SA 4.0",
+    termsLink: "https://creativecommons.org/licenses/by-sa/4.0",
+  },
+  {
+    file: "crosswalk.jpg",
+    label: "People crossing the street",
+    by: "Gabe",
+    link: "https://unsplash.com/photos/people-crossing-gray-road-t--Oc97rSm8",
+    terms: "Unsplash",
+  },
+  {
+    file: "georgia-tech-tower.jpg",
+    label: "Georgia Tech",
+    by: "Mistercontributer",
+    link: "https://commons.wikimedia.org/wiki/File:Tech_Tower_-_June_2024.jpg",
+    terms: "Wikimedia Commons",
+  },
+  {
+    file: "paving-crew.jpg",
+    label: "Paving crew",
+    by: "Christian Agbede",
+    link: "https://unsplash.com/photos/construction-workers-operate-asphalt-paving-machinery-on-road-U4penYTuR04",
+    terms: "Unsplash",
+  },
+  {
+    file: "atlanta-aerial.jpg",
+    label: "Atlanta",
+    by: "Lance Asper",
+    link: "https://unsplash.com/photos/a-city-with-tall-buildings-9fxD3UW_C1I",
+    terms: "Unsplash",
+  },
+] as const
+// How long each photo stays before the next one fades in.
+const WELCOME_PHOTO_SECONDS = 8
+
+/**
+ * The slow slideshow behind the welcome text. One photo at a time, each fading
+ * into the next while drifting slightly. Purely decoration, so screen readers
+ * skip the pictures; the credit line under them is real text.
+ */
+function WelcomePhotos() {
+  const [index, setIndex] = useState(0)
+  const count = WELCOME_PHOTOS.length
+  useEffect(() => {
+    // People who asked their device for less motion keep the first photo.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    const timer = window.setInterval(
+      () => setIndex((shown) => (shown + 1) % count),
+      WELCOME_PHOTO_SECONDS * 1000,
+    )
+    return () => window.clearInterval(timer)
+  }, [count])
+  const photo = WELCOME_PHOTOS[index]
+
+  return (
+    <>
+      <div className="story-photos" aria-hidden="true">
+        {WELCOME_PHOTOS.map((each, position) => {
+          // Only the photo on screen and its neighbours are loaded: the next one
+          // so it is ready to fade in, the last one so it can fade out.
+          const near =
+            position === index ||
+            position === (index + 1) % count ||
+            position === (index + count - 1) % count
+          return near ? (
+            <img
+              key={each.file}
+              src={`${import.meta.env.BASE_URL}welcome/${each.file}`}
+              className={position === index ? "shown" : undefined}
+              alt=""
+              decoding="async"
+            />
+          ) : null
+        })}
+      </div>
+      <p className="story-photo-credit">
+        {photo.label} · Photo:{" "}
+        <a href={photo.link} target="_blank" rel="noreferrer">
+          {photo.by}
+        </a>
+        ,{" "}
+        {"termsLink" in photo ? (
+          <a href={photo.termsLink} target="_blank" rel="noreferrer">
+            {photo.terms}
+          </a>
+        ) : (
+          photo.terms
+        )}
+      </p>
+    </>
   )
 }
 
@@ -329,6 +461,7 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
 
       <section className="onboarding-grid">
         <div className="onboarding-story">
+          <WelcomePhotos />
           <div className="story-glow one" />
           <div className="story-glow two" />
           <div className="story-map-lines" />
@@ -458,6 +591,7 @@ function Sidebar({
   openCount,
   onReport,
   onResources,
+  onMoreInfo,
 }: {
   view: View
   setView: (view: View) => void
@@ -466,6 +600,8 @@ function Sidebar({
   openCount: number
   onReport: () => void
   onResources: (opener: HTMLButtonElement) => void
+  /** Opens "More information" (where the map's data comes from). */
+  onMoreInfo: (opener: HTMLButtonElement) => void
 }) {
   const { account, member, signOut } = useAccount()
   const navigate = (next: View) => {
@@ -556,6 +692,16 @@ function Sidebar({
           >
             <HelpCircle size={18} /> Help & resources
           </button>
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={(event) => {
+              onClose()
+              onMoreInfo(event.currentTarget)
+            }}
+          >
+            <Info size={18} /> More information
+          </button>
         </nav>
         <div className="sidebar-account" ref={accountArea}>
           {accountMenu && (
@@ -605,7 +751,7 @@ function Sidebar({
             </span>
             <span className="who">
               <strong>{account?.name ?? "Guest"}</strong>
-              <small>{account ? "Community member" : "Not signed in"}</small>
+              <small>{memberLabel(!!account, member)}</small>
             </span>
             <ChevronDown size={16} className={accountMenu ? "turned" : undefined} />
           </button>
@@ -632,6 +778,10 @@ function noticeText(notice: Notice): string {
       return notice.yours
         ? "Your ticket was marked fixed by an admin."
         : "A ticket you voted on was marked fixed by an admin."
+    case "moved":
+      return notice.yours
+        ? "Your ticket was moved to a new spot by an admin."
+        : "A ticket you voted on was moved to a new spot on the map."
     case "reopened":
       return "Your ticket was reopened. Someone says it is still there."
     case "removed":
@@ -813,7 +963,6 @@ function AppHeader({
   setView,
   onOpenTicket,
   onNews,
-  live,
   bellNudge,
 }: {
   title: string
@@ -822,8 +971,6 @@ function AppHeader({
   setView: (view: View) => void
   onOpenTicket: (ticketId: string) => void
   onNews: () => void
-  /** True while the page is receiving live updates. */
-  live: boolean
   bellNudge: number
 }) {
   const { account, member } = useAccount()
@@ -839,12 +986,6 @@ function AppHeader({
         </div>
       </div>
       <div className="header-actions">
-        {live && (
-          <span className="live-pill" title="This page updates by itself when tickets change">
-            <i aria-hidden="true" />
-            Live
-          </span>
-        )}
         <ThemeToggle />
         <NotificationBell onOpenTicket={onOpenTicket} onNews={onNews} nudge={bellNudge} />
         <button
@@ -897,6 +1038,10 @@ function TicketDetail({
       setClosing(false)
     }
   }
+
+  // Moving the pin, for a ticket put in the wrong spot. `moveNote` says how it went.
+  const [moving, setMoving] = useState(false)
+  const [moveNote, setMoveNote] = useState<string | null>(null)
 
   async function removeTicket() {
     if (deleting) return
@@ -1127,6 +1272,16 @@ function TicketDetail({
               <div className="ticket-actions">
                 <button
                   type="button"
+                  className="move-ticket-button"
+                  onClick={() => {
+                    setMoveNote(null)
+                    setMoving(true)
+                  }}
+                >
+                  <MapPin size={15} /> Edit location
+                </button>
+                <button
+                  type="button"
                   className="delete-ticket-button"
                   onClick={() => setConfirmingDelete(true)}
                 >
@@ -1167,6 +1322,29 @@ function TicketDetail({
                 </div>
               </div>
             )}
+            {moveNote && (
+              <p className="move-note" role="status">
+                <Check size={14} aria-hidden="true" /> {moveNote}
+              </p>
+            )}
+            {/* On top of everything, wherever this ticket is shown. */}
+            {moving &&
+              createPortal(
+                <MoveTicket
+                  ticket={ticket}
+                  onClose={() => setMoving(false)}
+                  onMoved={(updated) => {
+                    setMoving(false)
+                    setMoveNote(
+                      updated.owner !== ticket.owner
+                        ? `Location updated. This spot belongs to ${updated.owner}, so the ticket is now routed there.`
+                        : "Location updated.",
+                    )
+                    onTicketChange(updated)
+                  }}
+                />,
+                document.body,
+              )}
             {deleteError && (
               <p className="vote-error" role="alert">
                 {deleteError}
@@ -1418,7 +1596,12 @@ function MapView({
               mapPage.current?.scrollIntoView({ block: "start" })
             }
           }}
-          onTicketChange={state.replaceTicket}
+          onTicketChange={(updated) => {
+            state.replaceTicket(updated)
+            // Moving a ticket can change its department. Keep it on the map
+            // even if that department was switched off in Filters.
+            if (!filter.shown.includes(updated.owner)) filter.setShown([...filter.shown, updated.owner])
+          }}
           onViewFull={() => onOpen(selected.id)}
           onDeleted={state.removeTicket}
         />
@@ -1744,15 +1927,8 @@ function ProfileView({
         <div className="profile-identity">
           <div>
             <h2>{account?.name ?? "Guest"}</h2>
-            <span className="member-badge">
-              <ShieldCheck size={14} />{" "}
-              {!account
-                ? "Not signed in"
-                : member?.role === "admin"
-                  ? "Admin"
-                  : member?.role === "facilities_staff"
-                    ? "Facilities staff"
-                    : "Community member"}
+            <span className={member?.role === "admin" ? "member-badge admin" : "member-badge"}>
+              <ShieldCheck size={14} /> {memberLabel(!!account, member)}
             </span>
           </div>
           <p>
@@ -1987,6 +2163,8 @@ export default function App() {
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)
+  const [moreInfoOpener, setMoreInfoOpener] = useState<HTMLButtonElement | null>(null)
+  const closeMoreInfo = useCallback(() => setMoreInfoOpener(null), [])
   const menuOpener = useRef<HTMLButtonElement | null>(null)
   const openMenu = useCallback((opener: HTMLButtonElement) => {
     menuOpener.current = opener
@@ -2063,6 +2241,7 @@ export default function App() {
         }
         onReport={openReport}
         onResources={setResourcesOpener}
+        onMoreInfo={setMoreInfoOpener}
       />
       <main className="app-main">
         <AppHeader
@@ -2076,7 +2255,6 @@ export default function App() {
             setOpenId(id)
           }}
           onNews={reloadTickets}
-          live={live.connected}
           bellNudge={live.bellNudge}
         />
         {page === "map" && (
@@ -2146,6 +2324,7 @@ export default function App() {
           fallbackOpener={menuOpener.current}
         />
       )}
+      {moreInfoOpener && <MoreInfoDialog onClose={closeMoreInfo} opener={moreInfoOpener} />}
     </div>
   )
 }
