@@ -13,6 +13,10 @@ On the server:
 It prints which settings are present (never their values), then tests Gemini
 (the photo, the choice of department, the drafted message), the routing data,
 the address lookup, the photo privacy service and Microsoft Foundry in turn.
+
+It uses two Gemini requests a run (the free allowance is 20 a day), and the
+Foundry agent is tested on its own first, so it can be checked even on a day
+when Gemini's allowance is used up.
 """
 
 import io
@@ -76,6 +80,7 @@ def main():
         "FOUNDRY_OPENAI_URL",
         "FOUNDRY_API_KEY",
         "FOUNDRY_REASONING_EFFORT",
+        "FOUNDRY_GRACE_SECONDS",
         "PHOTO_PRIVACY_URL",
     ):
         print(f"  {'set    ' if os.getenv(name, '').strip() else 'missing'}  {name}")
@@ -84,44 +89,42 @@ def main():
     photo, photo_name = choose_photo()
     print(f"\nUsing {photo_name}.")
 
-    print("\n1. Gemini (photo analysis, department, message)")
-    analysis = None
+    print("\n1. Gemini (one request: the photo, the department, the message)")
+    seen = None
     if not gemini.is_configured():
-        report(False, "GEMINI_API_KEY is missing", "Add it to api/.env. Nothing else can run without it.")
+        report(False, "GEMINI_API_KEY is missing", "Add it to api/.env. Without it the map rules and a plain message are used.")
     else:
         try:
             started = time.time()
-            analysis = gemini.analyze_photo(photo)
+            seen = agent.work_out(lat=GSU_LIBRARY[0], lng=GSU_LIBRARY[1], photo=photo, must_see_photo=True)
+            analysis, chosen = seen["analysis"], seen["routing"]
             report(
                 True,
-                f"Gemini answered in {time.time() - started:.1f}s",
+                f"Gemini answered in {time.time() - started:.1f}s (address lookup included)",
                 f"reportable: {analysis['is_reportable']} | {analysis['issue_type']} | {analysis['title']}",
             )
+            if analysis["is_reportable"]:
+                print(f"        department: {chosen['contact']['name']} ({chosen['decided_by']}): {chosen['reason']}")
+                print(f"        subject: {seen['draft']['subject'] if seen['draft'] else '(no message written)'}")
         except gemini.GeminiFailed as problem:
             report(False, "Gemini call failed", f"{problem} The exact error is on the line above.")
 
-    if analysis is not None:
-        # A made-up report that only MARTA can fix, at a spot the map rules would also give to MARTA.
+    if seen is not None:
+        # A typed report that only MARTA can fix, at a spot the map rules would also give to MARTA.
         elevator = {
             "title": "Station elevator out of service",
             "issue_type": "broken_elevator",
             "description": "The elevator from the street to the platform is not working.",
         }
-        five_points = (33.75387, -84.39157)
-        try:
-            started = time.time()
-            chosen = agent.decide_owner(elevator, *five_points, "Five Points station", None)
-            report(
-                chosen["decided_by"] == "gemini" and chosen["owner"] == "marta",
-                f"Gemini chose the department in {time.time() - started:.1f}s",
-                f"{chosen['contact']['name']} ({chosen['contact']['email']}), decided by {chosen['decided_by']}: "
-                f"{chosen['reason']}",
-            )
-            started = time.time()
-            draft = gemini.draft_report(elevator, "Five Points station", *five_points)
-            report(True, f"Gemini wrote the message in {time.time() - started:.1f}s", f"subject: {draft['subject']}")
-        except gemini.GeminiFailed as problem:
-            report(False, "Gemini call failed", f"{problem} The exact error is on the line above.")
+        started = time.time()
+        typed = agent.work_out(lat=33.75387, lng=-84.39157, typed=elevator, address="Five Points station")
+        chosen = typed["routing"]
+        report(
+            chosen["decided_by"] == "gemini" and chosen["owner"] == "marta" and typed["draft"] is not None,
+            f"A typed report (no photo) got its department and message in {time.time() - started:.1f}s",
+            f"{chosen['contact']['name']} <{chosen['contact']['email']}>, decided by {chosen['decided_by']}: "
+            f"{chosen['reason']}",
+        )
 
     print("\n2. Routing data (no network)")
     library = routing.find_owner(*GSU_LIBRARY)
@@ -164,23 +167,43 @@ def main():
     print("\n5. Microsoft Foundry (the agent)")
     mode = agent.foundry_mode()
     if mode is None:
-        print("  SKIP  No Foundry settings, so the tools run in direct mode. That works, just without the agent.")
-    elif analysis is None:
-        print("  SKIP  Needs Gemini working first.")
+        print("  SKIP  No Foundry settings, so reports run in direct mode. That works, just without the agent.")
     else:
         print(f"  Mode: {'full agent (Entra sign-in)' if mode == 'foundry_agent' else 'model with an API key'}")
-        started = time.time()
-        result = agent.run(agent.Job(photo=photo, lat=GSU_LIBRARY[0], lng=GSU_LIBRARY[1]))
-        took = time.time() - started
-        if result["orchestrator"] == "direct":
-            report(False, "Foundry did not complete the run; direct mode took over", "The exact error is printed above this line.")
+        # First the agent alone, on a made-up report, so this works even when Gemini doesn't.
+        try:
+            alone = agent.check_foundry()
+            report(
+                alone["tool_calls"] and sorted(alone["tool_calls"]) == sorted(agent.TOOL_ORDER),
+                f"The agent steered a made-up report in {alone['seconds']:.1f}s and {alone['turns']} turns",
+                f"tools it called, in order: {', '.join(alone['tool_calls']) or 'none'}",
+            )
+            print(f"        It said: {alone['said']}")
+            if alone["turns"] > 3:
+                print("        Three turns is the quickest. More means it called the last three tools one at a time.")
+        except Exception as problem:
+            alone = None
+            report(False, "The Foundry agent failed", f"{type(problem).__name__}: {str(problem)[:700]}")
+
+        # Then a real report, the way the site runs it: the agent has to keep up with the work.
+        if alone is None:
+            print("  SKIP  The real run, until the agent itself works.")
+        elif seen is None:
+            print("  SKIP  The real run needs Gemini working first.")
         else:
-            report(True, f"The agent ran the report in {took:.1f}s", f"tools it called, in order: {', '.join(result['tool_calls'])}")
-            expected = agent.TOOL_ORDER if result["analysis"]["is_reportable"] else agent.TOOL_ORDER[:1]
-            report(result["tool_calls"] == expected, "It called the right tools in the right order")
-            print(f"        It said: {result['summary']}")
-            if took > 30:
-                print("        That is slow for a demo. For gpt-5 models, set FOUNDRY_REASONING_EFFORT=low in api/.env.")
+            started = time.time()
+            job = agent.Job(photo=photo, lat=GSU_LIBRARY[0], lng=GSU_LIBRARY[1])
+            result = agent.run(job)
+            took = time.time() - started
+            if result["orchestrator"] == "direct":
+                report(False, f"The report came back without the agent after {took:.1f}s", job.agent_problem or "")
+                print(f"        To give it longer, set FOUNDRY_GRACE_SECONDS in api/.env (now {agent.FOUNDRY_GRACE_SECONDS:g}).")
+            else:
+                report(
+                    True,
+                    f"A real report came back in {took:.1f}s with the agent steering",
+                    f"tools it had called: {', '.join(result['tool_calls'])} ({job.turns} turns so far)",
+                )
 
     print("\n" + ("Everything that is set up works." if failures == 0 else f"{failures} check(s) failed. See FAIL lines above."))
     sys.exit(1 if failures else 0)

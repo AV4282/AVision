@@ -89,7 +89,8 @@ Faces and license plates are blurred by a second program, the photo privacy serv
 The "fill in the form from this photo" feature needs keys in `/opt/avision/api/.env`, next to `DATABASE_URL`. The full list with examples is in `api/sql/.env.example`.
 
 - `GEMINI_API_KEY` turns the feature on. It also lets Gemini choose the department and write the message when a ticket is posted; without it, fixed map rules and a plain template do that.
-- The Foundry settings make a Microsoft Foundry agent run the steps. Without them the server runs the same steps itself.
+- The Foundry settings make a Microsoft Foundry agent steer each report. Without them, or when the agent is slow or failing, the server finishes the report itself.
+- The free Gemini allowance is 20 requests a day (one per report). Turn on billing for the key's project in Google AI Studio before a demo.
 
 After changing the file:
 

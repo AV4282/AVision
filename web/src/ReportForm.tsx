@@ -459,7 +459,7 @@ export default function ReportForm({
               >
                 <Sparkles size={15} />
                 {analyzing
-                  ? "Looking at the photo… this takes about 20 seconds"
+                  ? "Looking at the photo… this takes about 10 seconds"
                   : found
                     ? "Look at the photo again"
                     : "Fill in the form from this photo"}
