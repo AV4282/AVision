@@ -416,10 +416,13 @@ export default function AvisionMap({
   // The legend under the map can be hidden to give the map more room. The
   // choice is remembered in this browser.
   const [showLegend, setShowLegend] = useState(() => {
+    // On a phone the legend starts hidden, so the map itself gets the room.
+    const phone = window.matchMedia("(max-width: 640px)").matches
     try {
-      return localStorage.getItem(LEGEND_KEY) !== "hidden"
+      const kept = localStorage.getItem(LEGEND_KEY)
+      return kept ? kept !== "hidden" : !phone
     } catch {
-      return true // storage is blocked in some browsers; the legend just starts shown
+      return !phone // storage is blocked in some browsers; it just starts that way
     }
   })
 

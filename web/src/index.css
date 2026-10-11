@@ -836,6 +836,23 @@ summary:focus-visible {
   right: 18px;
 }
 
+/* On a narrow phone the arrow would sit on top of the words, and the two
+   sign-in buttons would break onto two lines. */
+@media (max-width: 420px) {
+  .google-button svg {
+    position: static;
+    flex-shrink: 0;
+  }
+
+  .google-button,
+  .guest-button {
+    gap: 8px;
+    padding-inline: 10px;
+    font-size: clamp(13.5px, 4.2vw, 16px);
+    white-space: nowrap;
+  }
+}
+
 .google-g {
   width: 25px;
   height: 25px;
@@ -1244,6 +1261,14 @@ summary:focus-visible {
   margin: 0;
   /* Same graffiti handstyle as the AVision header; one weight, so a bit larger */
   font: 400 22px/1.2 "Sedgwick Ave Display", "Manrope", sans-serif;
+}
+
+/* On a phone the title shares the header with three buttons: smaller, on one line. */
+@media (max-width: 520px) {
+  .header-title h1 {
+    font-size: clamp(16px, 4.9vw, 20px);
+    white-space: nowrap;
+  }
 }
 
 .header-title p {
@@ -4066,7 +4091,9 @@ summary:focus-visible {
 }
 @media (max-width: 800px) {
   .map-page { padding: 10px 10px calc(88px + env(safe-area-inset-bottom)); }
-  .integrated-map { height: 640px; }
+  /* The whole map, with its search box and controls, fits one screen between
+     the header and the tab bar; the ticket's card is a scroll below. */
+  .integrated-map { height: max(480px, calc(100dvh - var(--header-height, 68px) - 64px - 22px - env(safe-area-inset-bottom))); }
   .map-page .ticket-detail { height: auto; }
   .ticket-row { grid-template-columns: 72px minmax(0, 1fr) 44px; }
   .ticket-title-line { flex-wrap: wrap; }
