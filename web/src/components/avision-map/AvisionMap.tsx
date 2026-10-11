@@ -137,12 +137,6 @@ const NO_MARKERS = Object.freeze([])
 // every ticket has an owner, the mark is only for data the map can't place.
 const FILTER_OWNERS = ISSUE_OWNERS.filter((owner) => owner.id !== "unknown")
 
-/** "GSU Facilities", "GSU Facilities and MARTA", "GSU Facilities, MARTA and GDOT". */
-function listed(names: string[]): string {
-  if (names.length < 2) return names.join("")
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
-}
-
 function IssueMarker({
   marker,
 
@@ -817,23 +811,6 @@ export default function AvisionMap({
           </button>
         </nav>
       </div>
-      {filters && filtered && (
-        <div className="avision-map-filter-note" role="status">
-          <span>
-            {shownFilterOwners.length === 0
-              ? "All tickets are hidden. Switch some on in Filters."
-              : `Showing ${listed(shownFilterOwners.map((owner) => owner.label))} tickets${
-                  filterNote ? `, ${filterNote}` : ""
-                }.`}
-            {hiddenTickets > 0 &&
-              shownFilterOwners.length > 0 &&
-              ` ${hiddenTickets} other ${hiddenTickets === 1 ? "ticket is" : "tickets are"} hidden.`}
-          </span>
-          <button type="button" onClick={showAllOwners}>
-            Show all
-          </button>
-        </div>
-      )}
       <div className="avision-map-canvas">
         <MapContainer
           bounds={initialBounds}
@@ -1099,6 +1076,16 @@ export default function AvisionMap({
               )}
             </fieldset>
           </details>
+        )}
+        {filters && filtered && (
+          <button
+            type="button"
+            className="avision-map-show-all"
+            onClick={showAllOwners}
+            aria-label={`Show all tickets${hiddenTickets > 0 ? ` (${hiddenTickets} hidden)` : ""}`}
+          >
+            Show all
+          </button>
         )}
         <details
           className="avision-map-layer-menu"
