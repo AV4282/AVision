@@ -297,7 +297,7 @@ export type Member = {
   id: string // AVision user ID (not the Auth0 ID)
   displayName: string | null
   avatarUrl: string | null
-  role: "user" | "facilities_staff"
+  role: "user" | "facilities_staff" | "admin"
   joinedAt: string // ISO timestamp
   // Onboarding answers; null = not answered.
   isStudent: boolean | null
@@ -790,9 +790,14 @@ export async function followUpReport(ticket: Ticket): Promise<TicketDraft> {
   }
 }
 
-/** Deletes a ticket. Only the person who posted it can. */
+/** Deletes a ticket. Only the person who posted it can, or an admin. */
 export async function deleteTicket(ticketId: string): Promise<void> {
   await request<void>("DELETE", `/tickets/${ticketId}`)
+}
+
+/** Marks a ticket as fixed. Admins only. */
+export async function closeTicket(ticketId: string): Promise<Ticket> {
+  return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/close`))
 }
 
 export async function vote(ticketId: string, choice: VoteChoice): Promise<Ticket> {

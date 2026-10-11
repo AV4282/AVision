@@ -36,6 +36,7 @@ from psycopg.rows import dict_row
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")
 load_dotenv(HERE / "sql" / ".env")
+load_dotenv(HERE.parent / ".env")
 
 BACKUP_DIR = HERE / "backups"
 SEED_TICKETS = HERE / "sql" / "002_seed_tickets.sql"

@@ -40,6 +40,7 @@ import {
   X,
 } from "lucide-react"
 import {
+  closeTicket,
   deleteTicket,
   followUpReport,
   listNotices,
@@ -777,6 +778,23 @@ function TicketDetail({
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Admins (granted with api/admin.py) can delete any ticket and mark it fixed.
+  const isAdmin = useAccount().member?.role === "admin"
+  const [closing, setClosing] = useState(false)
+  const [closeError, setCloseError] = useState<string | null>(null)
+
+  async function markFixed() {
+    if (closing) return
+    setClosing(true)
+    setCloseError(null)
+    try {
+      onTicketChange(await closeTicket(ticket.id))
+    } catch (err) {
+      setCloseError(err instanceof Error ? err.message : "Couldn’t mark the ticket as fixed")
+    } finally {
+      setClosing(false)
+    }
+  }
 
   async function removeTicket() {
     if (deleting) return
@@ -1001,16 +1019,28 @@ function TicketDetail({
           {ticket.firstReported.toLowerCase()} · Updated{" "}
           {ticket.time.toLowerCase()}
         </p>
-        {ticket.mine && (
+        {(ticket.mine || isAdmin) && (
           <div className="delete-ticket">
             {!confirmingDelete ? (
-              <button
-                type="button"
-                className="delete-ticket-button"
-                onClick={() => setConfirmingDelete(true)}
-              >
-                <Trash2 size={15} /> Delete my ticket
-              </button>
+              <div className="ticket-actions">
+                <button
+                  type="button"
+                  className="delete-ticket-button"
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  <Trash2 size={15} /> {ticket.mine ? "Delete my ticket" : "Delete ticket"}
+                </button>
+                {isAdmin && ticket.status !== "Fixed" && (
+                  <button
+                    type="button"
+                    className="mark-fixed-button"
+                    onClick={markFixed}
+                    disabled={closing}
+                  >
+                    <CheckCircle2 size={15} /> {closing ? "Marking as fixed…" : "Mark as fixed"}
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="delete-confirm" role="group" aria-label="Confirm delete">
                 <p>Delete this ticket for everyone? Its votes and photo go too.</p>
@@ -1038,6 +1068,11 @@ function TicketDetail({
             {deleteError && (
               <p className="vote-error" role="alert">
                 {deleteError}
+              </p>
+            )}
+            {closeError && (
+              <p className="vote-error" role="alert">
+                {closeError}
               </p>
             )}
           </div>
@@ -1609,9 +1644,11 @@ function ProfileView({
               <ShieldCheck size={14} />{" "}
               {!account
                 ? "Not signed in"
-                : member?.role === "facilities_staff"
-                  ? "Facilities staff"
-                  : "Community member"}
+                : member?.role === "admin"
+                  ? "Admin"
+                  : member?.role === "facilities_staff"
+                    ? "Facilities staff"
+                    : "Community member"}
             </span>
           </div>
           <p>
