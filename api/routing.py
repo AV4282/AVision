@@ -4,23 +4,24 @@ Where a report is, and the map-math backup for who should get it.
 The department is chosen by Gemini (see gemini.py), which is given what the
 problem is plus the facts this file works out about the spot:
 
-    location_facts()   nearest MARTA station, inside GSU's campus or not, the road
-                       and its route numbers, inside the city or not
+    location_facts()   nearest MARTA station, inside GSU's or Georgia Tech's campus
+                       or not, the road and its route numbers, inside the city or not
     emailable()        the departments Gemini may choose from (data/contacts.json)
 
 Gemini can only answer with one of those departments, and the contact details
 always come from data/contacts.json, so neither can be made up.
 
-find_owner() is the older, AI-free answer: four fixed rules, checked in order.
+find_owner() is the older, AI-free answer: five fixed rules, checked in order.
 It is still used as a hint for Gemini and as the answer when Gemini is not
 available, so the app keeps routing either way.
 
     1. Within 100 m of a MARTA rail station       -> MARTA
     2. Inside the GSU downtown campus outline     -> GSU Facilities
-    3. On an interstate, US route or state route  -> GDOT
-    4. Anywhere else                              -> City of Atlanta (ATL311)
+    3. Inside the Georgia Tech campus outline     -> Georgia Tech
+    4. On an interstate, US route or state route  -> GDOT
+    5. Anywhere else                              -> City of Atlanta (ATL311)
 
-MARTA comes before GSU because Georgia State station sits inside the campus
+MARTA comes before the campuses because Georgia State station sits inside GSU's
 outline, and a broken station elevator is MARTA's to fix.
 
 Every answer carries a `reason` in plain words, which the app shows to the
@@ -54,7 +55,13 @@ def _load(name: str):
 CONTACTS = _load("contacts.json")["owners"]
 MARTA_STATIONS = _load("marta_stations.json")["stations"]
 GSU_CAMPUS = shape(_load("gsu_campus.geojson")["geometry"])
+GEORGIA_TECH_CAMPUS = shape(_load("georgia_tech_campus.geojson")["geometry"])
 ATLANTA = shape(_load("atlanta_city_limits.geojson")["geometry"])
+
+# Departments this server can't file tickets under yet, so they are never chosen
+# or offered. main.py adds one when the database doesn't accept it (see
+# db.ensure_schema); normally this stays empty.
+UNAVAILABLE: set[str] = set()
 
 
 def coverage(lat: float, lng: float) -> dict:
@@ -79,7 +86,11 @@ def coverage(lat: float, lng: float) -> dict:
 
 def emailable() -> dict:
     """The departments a report can be emailed to, as {owner: contact}. Gemini picks from these."""
-    return {owner: contact for owner, contact in CONTACTS.items() if contact.get("email")}
+    return {
+        owner: contact
+        for owner, contact in CONTACTS.items()
+        if contact.get("email") and owner not in UNAVAILABLE
+    }
 
 
 def location_facts(lat: float, lng: float, road: dict | None = None, address: str | None = None) -> list[str]:
@@ -98,6 +109,11 @@ def location_facts(lat: float, lng: float, road: dict | None = None, address: st
         "Inside the outline of Georgia State University's downtown campus: "
         + ("yes" if GSU_CAMPUS.contains(here) else "no")
     )
+    if "georgia_tech" not in UNAVAILABLE:
+        facts.append(
+            "Inside the outline of Georgia Tech's campus: "
+            + ("yes" if GEORGIA_TECH_CAMPUS.contains(here) else "no")
+        )
     if road:
         name = road["name"] or "an unnamed road"
         routes = [route for route in road["routes"] if STATE_ROUTE.match(route)]
@@ -121,7 +137,7 @@ def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
     wasn't looked up; then rule 3 is skipped.
 
     Returns {"owner", "rule", "reason", "contact"} where `owner` is one of the
-    four values the tickets table accepts.
+    values the tickets table accepts.
     """
     here = Point(lng, lat)
 
@@ -141,6 +157,13 @@ def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
             "This spot is inside Georgia State's downtown campus, so it goes to GSU Facilities.",
         )
 
+    if "georgia_tech" not in UNAVAILABLE and GEORGIA_TECH_CAMPUS.contains(here):
+        return _answer(
+            "georgia_tech",
+            "georgia_tech_campus",
+            "This spot is inside Georgia Tech's campus, so it goes to Georgia Tech's facilities team.",
+        )
+
     if road and road["distance_m"] <= ROAD_WIDTH_M:
         routes = [route for route in road["routes"] if STATE_ROUTE.match(route)]
         if routes:
@@ -152,7 +175,7 @@ def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
             )
 
     # The state route check only happens when the caller looked the road up.
-    checked = "a MARTA station, GSU's campus or a state route" if road else "a MARTA station or GSU's campus"
+    checked = "a MARTA station, a campus or a state route" if road else "a MARTA station or a campus"
     if ATLANTA.contains(here):
         return _answer(
             "city_of_atlanta",

@@ -42,11 +42,17 @@ import {
 import {
   deleteTicket,
   followUpReport,
+  listNotices,
   listTickets,
+  markNoticesRead,
+  OWNERS,
+  schoolOwner,
   photoLink,
   PLACEHOLDER_PHOTO,
   vote,
   type Member,
+  type Notice,
+  type Owner,
   type Status,
   type Ticket,
   type VoteChoice,
@@ -58,7 +64,8 @@ import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 import { ThemeToggle } from "./theme"
 
-import { ticketMarker } from "./ticket-map"
+import { mapOwner, ticketMarker } from "./ticket-map"
+import type { AvisionMapOwner } from "./components/avision-map/types"
 const AvisionMap = lazy(() => import("./components/avision-map/AvisionMap"))
 type View = "onboarding" | "map" | "issues" | "profile"
 
@@ -166,6 +173,7 @@ function TicketsNotice({
 const ownerColors: Record<Ticket["owner"], string> = {
   "City of Atlanta": "owner-city",
   "GSU Facilities": "owner-gsu",
+  "Georgia Tech": "owner-gt",
   MARTA: "owner-marta",
   GDOT: "owner-gdot",
 }
@@ -388,11 +396,29 @@ function Sidebar({
   openCount: number
   onReport: () => void
 }) {
-  const { account, member } = useAccount()
+  const { account, member, signOut } = useAccount()
   const navigate = (next: View) => {
     setView(next)
     onClose()
   }
+  // The small menu that opens from the account row at the bottom.
+  const [accountMenu, setAccountMenu] = useState(false)
+  const accountArea = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!accountMenu) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAccountMenu(false)
+    }
+    const onPress = (event: MouseEvent) => {
+      if (!accountArea.current?.contains(event.target as Node)) setAccountMenu(false)
+    }
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("mousedown", onPress)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("mousedown", onPress)
+    }
+  }, [accountMenu])
 
   return (
     <>
@@ -452,18 +478,239 @@ function Sidebar({
             <HelpCircle size={18} /> Help & resources
           </button>
         </nav>
-        <div className="sidebar-user">
-          <div className="avatar">
-            <AvatarFace member={member} initials={account?.initials ?? "G"} />
-          </div>
-          <div>
-            <strong>{account?.name ?? "Guest"}</strong>
-            <span>{account ? "Community member" : "Not signed in"}</span>
-          </div>
-          <ChevronDown size={16} />
+        <div className="sidebar-account" ref={accountArea}>
+          {accountMenu && (
+            <div className="account-menu" role="menu" aria-label="Account">
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setAccountMenu(false)
+                  navigate("profile")
+                }}
+              >
+                <User size={16} /> My profile
+              </button>
+              {account ? (
+                <button
+                  role="menuitem"
+                  className="leaving"
+                  onClick={() => {
+                    setAccountMenu(false)
+                    signOut()
+                  }}
+                >
+                  <LogOut size={16} /> Sign out
+                </button>
+              ) : (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setAccountMenu(false)
+                    navigate("onboarding") // the welcome screen, where sign-in is
+                  }}
+                >
+                  <LogIn size={16} /> Sign in
+                </button>
+              )}
+            </div>
+          )}
+          <button
+            className="sidebar-user"
+            onClick={() => setAccountMenu((shown) => !shown)}
+            aria-haspopup="menu"
+            aria-expanded={accountMenu}
+            aria-label={`Account menu for ${account?.name ?? "Guest"}`}
+          >
+            <span className="avatar">
+              <AvatarFace member={member} initials={account?.initials ?? "G"} />
+            </span>
+            <span className="who">
+              <strong>{account?.name ?? "Guest"}</strong>
+              <small>{account ? "Community member" : "Not signed in"}</small>
+            </span>
+            <ChevronDown size={16} className={accountMenu ? "turned" : undefined} />
+          </button>
         </div>
       </aside>
     </>
+  )
+}
+
+// How often the bell asks the server for news while the page is in view.
+const NOTICE_CHECK_MS = 30_000
+
+function noticeText(notice: Notice): string {
+  switch (notice.kind) {
+    case "still_there":
+      return "Someone confirmed your ticket is still there."
+    case "marked_fixed":
+      return "Someone marked your ticket as fixed."
+    case "likely_fixed":
+      return notice.yours
+        ? "Your ticket is now marked likely fixed."
+        : "A ticket you voted on is now marked likely fixed."
+    case "reopened":
+      return "Your ticket was reopened. Someone says it is still there."
+    case "removed":
+      return "A ticket you voted on was removed by the person who posted it."
+    default: // a kind added to the server after this page was loaded
+      return notice.yours ? "Your ticket was updated." : "A ticket you voted on was updated."
+  }
+}
+
+/**
+ * The bell in the header. Lists what happened to tickets the viewer posted or
+ * voted on, with a count of the ones they haven't seen. Works for guests too:
+ * their tickets and votes belong to this browser.
+ */
+function NotificationBell({
+  onOpenTicket,
+  onNews,
+}: {
+  onOpenTicket: (ticketId: string) => void
+  /** Called when something new arrives, so the page can refresh its tickets. */
+  onNews: () => void
+}) {
+  const { member } = useAccount()
+  const [notices, setNotices] = useState<Notice[]>([])
+  const [unread, setUnread] = useState(0)
+  const [open, setOpen] = useState(false)
+  // The ones that were new when the list was opened. They keep their "new" look until it closes.
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
+  const wrap = useRef<HTMLDivElement>(null)
+  const lastUnread = useRef(0)
+  const news = useRef(onNews)
+  news.current = onNews
+
+  const check = useCallback(() => {
+    listNotices()
+      .then((found) => {
+        setNotices(found.items)
+        setUnread(found.unread)
+        if (found.unread > lastUnread.current) news.current()
+        lastUnread.current = found.unread
+      })
+      .catch(() => {}) // no news is fine; the next check tries again
+  }, [])
+
+  // Check now, on a timer, and whenever the person comes back to the page.
+  // Signing in changes whose notifications these are, so that checks again too.
+  const memberId = member?.id
+  useEffect(() => {
+    check()
+    const whenSeen = () => {
+      if (document.visibilityState === "visible") check()
+    }
+    const timer = window.setInterval(whenSeen, NOTICE_CHECK_MS)
+    document.addEventListener("visibilitychange", whenSeen)
+    window.addEventListener("focus", whenSeen)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", whenSeen)
+      window.removeEventListener("focus", whenSeen)
+    }
+  }, [check, memberId])
+
+  const close = useCallback(() => {
+    setOpen(false)
+    setFresh(new Set())
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close()
+    }
+    const onPress = (event: MouseEvent) => {
+      if (!wrap.current?.contains(event.target as Node)) close()
+    }
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("mousedown", onPress)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("mousedown", onPress)
+    }
+  }, [open, close])
+
+  function toggle() {
+    if (open) {
+      close()
+      return
+    }
+    // Opening the list is seeing it: the count clears here and on the server.
+    const unseen = notices.filter((notice) => !notice.read).map((notice) => notice.id)
+    setFresh(new Set(unseen))
+    setOpen(true)
+    if (unseen.length > 0) {
+      setUnread((count) => Math.max(0, count - unseen.length))
+      lastUnread.current = Math.max(0, lastUnread.current - unseen.length)
+      setNotices((list) => list.map((notice) => ({ ...notice, read: true })))
+      markNoticesRead(unseen).catch(() => {})
+    }
+  }
+
+  return (
+    <div className="notice-wrap" ref={wrap}>
+      <button
+        className="icon-button"
+        onClick={toggle}
+        aria-label={unread > 0 ? `Notifications, ${unread} new` : "Notifications"}
+        aria-haspopup="true"
+        aria-expanded={open}
+      >
+        <Bell size={19} />
+        {unread > 0 && (
+          <span className="notice-count" aria-hidden="true">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
+      {open && (
+        <section className="notice-panel" aria-label="Notifications">
+          <h2>Notifications</h2>
+          {notices.length === 0 ? (
+            <p className="notice-empty">
+              Nothing yet. You’ll see it here when someone votes on a ticket you
+              posted, or when a ticket you voted on is marked fixed or removed.
+            </p>
+          ) : (
+            <ul>
+              {notices.map((notice) => {
+                const isNew = fresh.has(notice.id) || !notice.read
+                const body = (
+                  <>
+                    <strong>{notice.ticketTitle}</strong>
+                    <span>{noticeText(notice)}</span>
+                    <small>
+                      {isNew && <em>New</em>}
+                      {notice.time}
+                    </small>
+                  </>
+                )
+                const ticketId = notice.ticketId
+                return (
+                  <li key={notice.id} className={isNew ? "new" : undefined}>
+                    {ticketId ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          close()
+                          onOpenTicket(ticketId)
+                        }}
+                      >
+                        {body}
+                      </button>
+                    ) : (
+                      <div>{body}</div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+    </div>
   )
 }
 
@@ -472,11 +719,15 @@ function AppHeader({
   subtitle,
   onMenu,
   setView,
+  onOpenTicket,
+  onNews,
 }: {
   title: string
   subtitle: string
   onMenu: () => void
   setView: (view: View) => void
+  onOpenTicket: (ticketId: string) => void
+  onNews: () => void
 }) {
   const { account, member } = useAccount()
   return (
@@ -492,10 +743,7 @@ function AppHeader({
       </div>
       <div className="header-actions">
         <ThemeToggle />
-        <button className="icon-button" aria-label="Notifications">
-          <Bell size={19} />
-          <span className="notification-dot" />
-        </button>
+        <NotificationBell onOpenTicket={onOpenTicket} onNews={onNews} />
         <button
           className="header-avatar"
           onClick={() => setView("profile")}
@@ -857,24 +1105,101 @@ function TicketModal({
   )
 }
 
+/** The departments whose tickets a person's onboarding answers point to, or null for no preference. */
+function ownersForProfile(member: Member | null): Owner[] | null {
+  if (!member) return null
+  const picks = new Set<Owner>()
+  const campus = member.isStudent ? schoolOwner(member.school) : null
+  if (campus) picks.add(campus)
+  if (member.takesMarta) picks.add("MARTA")
+  // In the same order as everywhere else.
+  return picks.size > 0 ? OWNERS.filter((owner) => picks.has(owner)) : null
+}
+
+type OwnerFilter = {
+  shown: readonly Owner[]
+  setShown: (owners: Owner[]) => void
+  /** Why the filter is set as it is, while it is still the profile's own choice. */
+  note: string | null
+}
+
+/**
+ * Which departments' tickets the map shows. It starts from the onboarding
+ * answers (a GSU student who rides MARTA sees GSU and MARTA tickets first) and
+ * the person can switch the others on. Guests, and people who haven't answered,
+ * start with everything.
+ *
+ * Lives in App, not the map page, so a choice survives a visit to another page.
+ */
+function useOwnerFilter(
+  member: Member | null,
+  tickets: Ticket[],
+  selectedId: string | null,
+): OwnerFilter {
+  const fromProfile = useMemo(
+    () => ownersForProfile(member),
+    [member?.id, member?.isStudent, member?.school, member?.takesMarta],
+  )
+  const [shown, setShown] = useState<readonly Owner[]>(fromProfile ?? OWNERS)
+
+  // New answers (a first sign-in, an edited profile, signing out) set the filter again.
+  const profileKey = fromProfile ? fromProfile.join("|") : ""
+  useEffect(() => {
+    setShown(fromProfile ?? OWNERS)
+  }, [profileKey])
+
+  // A ticket picked from a list, or one just posted, has to be on the map:
+  // switch its department on. Once per pick, so it can be switched off again.
+  const revealed = useRef<string | null>(null)
+  useEffect(() => {
+    if (!selectedId || revealed.current === selectedId) return
+    const picked = tickets.find((ticket) => ticket.id === selectedId)
+    if (!picked) return // not loaded yet; this runs again when it is
+    revealed.current = selectedId
+    setShown((owners) => (owners.includes(picked.owner) ? owners : [...owners, picked.owner]))
+  }, [selectedId, tickets])
+
+  const untouched =
+    fromProfile !== null &&
+    fromProfile.length === shown.length &&
+    fromProfile.every((owner) => shown.includes(owner))
+  return { shown, setShown, note: untouched ? "picked from your profile" : null }
+}
+
 function MapView({
   state,
+  filter,
   selectedId,
   onSelect,
   onOpen,
 }: {
   state: TicketsState
+  filter: OwnerFilter
   selectedId: string | null
   onSelect: (id: string) => void
   onOpen: (id: string) => void
 }) {
-  const { tickets } = state
   const [showDetail, setShowDetail] = useState(true)
   const mapPage = useRef<HTMLElement>(null)
+  // Only the tickets of the departments switched on in the map's Filters.
+  const tickets = useMemo(
+    () => state.tickets.filter((ticket) => filter.shown.includes(ticket.owner)),
+    [state.tickets, filter.shown],
+  )
   const selected =
     tickets.find((ticket) => ticket.id === selectedId) ?? tickets[0] ?? null
 
   const markers = useMemo(() => tickets.map(ticketMarker), [tickets])
+  const shownOwners = useMemo(() => filter.shown.map(mapOwner), [filter.shown])
+  const ownerCounts = useMemo(() => {
+    const counts: Partial<Record<AvisionMapOwner, number>> = {}
+    for (const ticket of state.tickets) {
+      const owner = mapOwner(ticket.owner)
+      counts[owner] = (counts[owner] ?? 0) + 1
+    }
+    return counts
+  }, [state.tickets])
+  const hiddenByFilter = state.tickets.length > 0 && tickets.length === 0
   // Votes refresh ticket data without recentering a map the user has panned.
   const focusPoint = useMemo(
     () =>
@@ -914,6 +1239,12 @@ function MapView({
             dataUrl={import.meta.env.BASE_URL + "avision-map"}
             initialArea="corridor"
             markers={markers}
+            shownOwners={shownOwners}
+            ownerCounts={ownerCounts}
+            filterNote={filter.note}
+            onShownOwnersChange={(owners) =>
+              filter.setShown(OWNERS.filter((owner) => owners.includes(mapOwner(owner))))
+            }
             selectedMarkerId={selected?.id ?? null}
             focusPoint={focusPoint}
             onMarkerSelect={(marker) => {
@@ -927,7 +1258,7 @@ function MapView({
             <MapPin size={17} /> Open selected ticket
           </button>
         )}
-        {(state.error || !selected) && (
+        {(state.error || (!selected && !hiddenByFilter)) && (
           <div className="integrated-map-notice">
             <TicketsNotice
               state={state}
@@ -1178,11 +1509,17 @@ function answersSummary(member: Member): string {
 
 function ProfileView({
   tickets,
+  onReport,
+  onBrowse,
   onWelcome,
   onOpen,
   onEditAnswers,
 }: {
   tickets: Ticket[]
+  /** Opens the report form (from the empty "My tickets" list). */
+  onReport: () => void
+  /** Goes to the list of everyone's tickets (from the empty "My votes" list). */
+  onBrowse: () => void
   /** Guests have nothing to sign out of; this takes them back to the sign-in screen. */
   onWelcome: () => void
   onOpen: (id: string) => void
@@ -1324,14 +1661,25 @@ function ProfileView({
           </div>
           <div className="profile-ticket-list">
             {shown.length === 0 && (
-              <div className="empty-state">
-                {tab === "tickets" ? <MapPin size={24} /> : <ThumbsUp size={24} />}
+              <div className="empty-state profile-empty">
+                <span className="empty-icon" aria-hidden="true">
+                  {tab === "tickets" ? <MapPin size={26} /> : <ThumbsUp size={26} />}
+                </span>
                 <h3>{tab === "tickets" ? "No tickets yet" : "No votes yet"}</h3>
                 <p>
                   {tab === "tickets"
-                    ? "Issues you report will show up here."
-                    : "Open an issue and vote “Still there” or “Fixed” to see it here."}
+                    ? "Seen a blocked ramp, a broken elevator or a damaged sidewalk? Report it and it will show up here."
+                    : "Vote “Still there” or “Fixed” on a ticket to keep it accurate. Your votes show up here."}
                 </p>
+                {tab === "tickets" ? (
+                  <button className="primary-button" onClick={onReport}>
+                    <Plus size={16} /> Report an issue
+                  </button>
+                ) : (
+                  <button className="secondary-button" onClick={onBrowse}>
+                    <List size={16} /> Browse issues
+                  </button>
+                )}
               </div>
             )}
             {shown.map(
@@ -1503,6 +1851,7 @@ export default function App() {
   useEffect(() => {
     if (memberId) reloadTickets()
   }, [memberId, reloadTickets])
+  const ownerFilter = useOwnerFilter(auth.member, ticketsState.tickets, selectedId)
   const openTicket =
     ticketsState.tickets.find((ticket) => ticket.id === openId) ?? null
   const closeTicket = useCallback(() => setOpenId(null), [])
@@ -1566,10 +1915,17 @@ export default function App() {
           subtitle={subtitle}
           onMenu={() => setMenuOpen(true)}
           setView={setView}
+          onOpenTicket={(id) => {
+            // Reload first: the notification is about something that just changed.
+            reloadTickets()
+            setOpenId(id)
+          }}
+          onNews={reloadTickets}
         />
         {page === "map" && (
           <MapView
             state={ticketsState}
+            filter={ownerFilter}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onOpen={setOpenId}
@@ -1589,6 +1945,8 @@ export default function App() {
         {page === "profile" && (
           <ProfileView
             tickets={ticketsState.tickets}
+            onReport={openReport}
+            onBrowse={() => setView("issues")}
             onWelcome={() => setView("onboarding")}
             onOpen={setOpenId}
             onEditAnswers={() => setQuestionsOpen(true)}

@@ -100,8 +100,8 @@ barriers. Never call anything illegal or a violation."""
 TOOL_DESCRIPTIONS = {
     "analyze_photo": "Look at this report's photo. Returns whether it shows a reportable problem, the issue "
     "type, a short title, how serious it is and how sure the analysis is. Always call this first, on its own.",
-    "find_owner": "Find out which department this report goes to (GSU Facilities, the City of Atlanta or "
-    "MARTA), chosen from what the photo shows and what the map says about the spot, and why.",
+    "find_owner": "Find out which department this report goes to (GSU Facilities, Georgia Tech, the City of "
+    "Atlanta or MARTA), chosen from what the photo shows and what the map says about the spot, and why.",
     "look_up_address": "Get the nearest street address for this report's map position.",
     "draft_report": "Get the report message and phone script written for the department.",
 }

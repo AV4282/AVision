@@ -108,11 +108,13 @@ CHOOSE_RULES = """Choosing the department. You are given what the map says about
 you may choose from, with what each one looks after.
 - Use both the problem and the place. The department that owns the spot is the one that fixes it.
 - Something that is part of a MARTA station, stop or vehicle goes to MARTA, even where the station sits inside \
-the university campus.
-- Something in or on a Georgia State University building, or on campus grounds, goes to GSU Facilities.
+a university campus.
+- Something in or on a Georgia State University building, or on its campus grounds, goes to GSU Facilities.
+- Something in or on a Georgia Tech building, or on its campus grounds, goes to Georgia Tech, when Georgia Tech \
+is one of the departments listed.
 - A public street, sidewalk, curb ramp, crosswalk or traffic signal goes to the city, even where it runs past a \
-station or through the campus.
-- Being near a station or inside the campus outline is a clue, not proof. A cracked public sidewalk 60 m from a \
+station or through a campus.
+- Being near a station or inside a campus outline is a clue, not proof. A cracked public sidewalk 60 m from a \
 station is still the city's.
 - If nothing clearly fits, choose the city.
 - Answer with the department's id exactly as listed, and one plain sentence for the person reporting that says \

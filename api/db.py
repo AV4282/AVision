@@ -37,26 +37,52 @@ log = logging.getLogger("uvicorn.error")  # shows up in uvicorn's (and journalct
 HAS_MORE_PHOTOS = False
 
 
+# Notifications live in their own table (sql/005_notifications.sql). True once it
+# is known to exist. Without it nobody is notified, and everything else still works.
+HAS_NOTIFICATIONS = False
+
+# tickets.owner only accepts 'georgia_tech' once sql/006_georgia_tech.sql has run.
+# Until it is known to, nothing is routed to Georgia Tech (see main.py's lifespan).
+HAS_GEORGIA_TECH = False
+
+
 def ensure_schema():
     """Add what this version of the API needs to the database, if it isn't there yet.
 
     Called once at startup. Only ever adds (never changes or removes), and is
-    safe to run every time. If it can't make the change (say the database user
-    isn't allowed to), the API carries on with one photo per ticket.
+    safe to run every time. If it can't make a change (say the database user
+    isn't allowed to), the API carries on without that feature: one photo per
+    ticket, no notifications, or no Georgia Tech tickets.
     """
-    global HAS_MORE_PHOTOS
+    global HAS_MORE_PHOTOS, HAS_NOTIFICATIONS, HAS_GEORGIA_TECH
     with pool.connection() as conn:
-        try:
-            conn.execute((HERE / "sql" / "004_more_photos.sql").read_text(encoding="utf-8"))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            log.exception("Could not add tickets.more_photos; tickets keep one photo each for now")
+        for name in ("004_more_photos.sql", "005_notifications.sql", "006_georgia_tech.sql"):
+            try:
+                conn.execute((HERE / "sql" / name).read_text(encoding="utf-8"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                log.exception("Could not apply sql/%s; carrying on without it", name)
         HAS_MORE_PHOTOS = (
             conn.execute(
                 """SELECT 1 FROM information_schema.columns
                    WHERE table_schema = current_schema()
                      AND table_name = 'tickets' AND column_name = 'more_photos'"""
+            ).fetchone()
+            is not None
+        )
+        HAS_NOTIFICATIONS = (
+            conn.execute(
+                """SELECT 1 FROM information_schema.tables
+                   WHERE table_schema = current_schema() AND table_name = 'notifications'"""
+            ).fetchone()
+            is not None
+        )
+        HAS_GEORGIA_TECH = (
+            conn.execute(
+                """SELECT 1 FROM pg_constraint
+                   WHERE conrelid = 'tickets'::regclass AND conname = 'tickets_owner_check'
+                     AND pg_get_constraintdef(oid) LIKE '%%georgia_tech%%'"""
             ).fetchone()
             is not None
         )
@@ -221,6 +247,19 @@ def claim_guest(member_id, guest_id):
             "UPDATE ticket_votes SET user_id = %s WHERE user_id = %s", (member_id, guest_id)
         ).rowcount
         conn.execute("UPDATE reports SET user_id = %s WHERE user_id = %s", (member_id, guest_id))
+        if HAS_NOTIFICATIONS:
+            # Before the guest goes, or their notifications would go with them.
+            conn.execute(
+                "UPDATE notifications SET user_id = %s WHERE user_id = %s", (member_id, guest_id)
+            )
+            conn.execute(
+                "UPDATE notifications SET actor_id = %s WHERE actor_id = %s", (member_id, guest_id)
+            )
+            # What the guest did to the member's tickets is now their own doing.
+            conn.execute(
+                "DELETE FROM notifications WHERE user_id = %s AND actor_id = %s",
+                (member_id, member_id),
+            )
         if dropped:
             conn.execute(RECOMPUTE_STATUS, {"ids": dropped, "threshold": FIXED_VOTE_THRESHOLD})
         conn.execute("DELETE FROM users WHERE id = %s", (guest_id,))
@@ -247,6 +286,8 @@ def delete_ticket(ticket_id, user_id):
             raise LookupError(ticket_id)
         if user_id is None or row["created_by"] != user_id:
             raise NotYours
+        # Tell the people who voted on it, while the votes still say who they are.
+        _notify(conn, _TELL_VOTERS, ticket_id, user_id, "removed", keep_link=False)
         conn.execute("DELETE FROM ticket_votes WHERE ticket_id = %s", (ticket_id,))
         conn.execute("UPDATE reports SET ticket_id = NULL WHERE ticket_id = %s", (ticket_id,))
         conn.execute("UPDATE tickets SET merged_into = NULL WHERE merged_into = %s", (ticket_id,))
@@ -369,6 +410,11 @@ def cast_vote(ticket_id, user_id, vote):
             return None
         if row["status"] == "merged":
             raise TicketMerged
+        status_before = row["status"]
+        earlier = conn.execute(
+            "SELECT vote FROM ticket_votes WHERE ticket_id = %s AND user_id = %s",
+            (ticket_id, user_id),
+        ).fetchone()
 
         try:
             conn.execute(
@@ -384,7 +430,7 @@ def cast_vote(ticket_id, user_id, vote):
         # Enough fixed votes, outnumbering still-there votes -> likely fixed; otherwise open.
         # Another fixed vote leaves an already-fixed ticket fixed; a still-there vote reopens it.
         # A still-there vote also counts as a fresh sighting.
-        conn.execute(
+        status_now = conn.execute(
             """UPDATE tickets t SET
                    status = CASE WHEN t.status = 'fixed' AND %(vote)s = 'fixed' THEN 'fixed'
                                  WHEN v.fixed >= %(threshold)s AND v.fixed > v.still
@@ -395,7 +441,96 @@ def cast_vote(ticket_id, user_id, vote):
                FROM (SELECT count(*) FILTER (WHERE vote = 'fixed')       AS fixed,
                             count(*) FILTER (WHERE vote = 'still_there') AS still
                      FROM ticket_votes WHERE ticket_id = %(id)s) v
-               WHERE t.id = %(id)s""",
+               WHERE t.id = %(id)s
+               RETURNING t.status""",
             {"id": ticket_id, "vote": vote, "threshold": FIXED_VOTE_THRESHOLD},
-        )
+        ).fetchone()["status"]
+
+        # Pressing the same button again changes nothing, so it tells nobody.
+        if earlier is None or earlier["vote"] != vote or status_now != status_before:
+            if status_now == "likely_fixed" and status_before != "likely_fixed":
+                kind = "likely_fixed"
+                _notify(conn, _TELL_VOTERS, ticket_id, user_id, kind)
+            elif status_now == "open" and status_before in ("likely_fixed", "fixed"):
+                kind = "reopened"
+            else:
+                kind = "still_there" if vote == "still_there" else "marked_fixed"
+            _notify(conn, _TELL_POSTER, ticket_id, user_id, kind)
         return get_ticket(ticket_id, user_id, conn)
+
+
+# ---------- notifications ----------
+# Both statements skip the person who did the thing, and skip a repeat of a
+# notification that person already caused and the reader hasn't seen yet.
+_NOT_A_REPEAT = """NOT EXISTS (
+        SELECT 1 FROM notifications n
+        WHERE n.user_id = {reader} AND n.ticket_id = t.id AND n.kind = %(kind)s
+          AND n.actor_id IS NOT DISTINCT FROM %(actor)s::uuid AND n.read_at IS NULL)"""
+
+# The person who posted the ticket.
+_TELL_POSTER = """
+INSERT INTO notifications (user_id, ticket_id, ticket_title, kind, yours, actor_id)
+SELECT t.created_by, t.id, t.title, %(kind)s, true, %(actor)s::uuid
+FROM tickets t
+WHERE t.id = %(ticket)s AND t.created_by IS NOT NULL
+  AND t.created_by IS DISTINCT FROM %(actor)s::uuid
+  AND """ + _NOT_A_REPEAT.format(reader="t.created_by")
+
+# Everyone who voted on it, apart from the poster (told above, or doing this themselves).
+_TELL_VOTERS = """
+INSERT INTO notifications (user_id, ticket_id, ticket_title, kind, yours, actor_id)
+SELECT v.user_id, CASE WHEN %(keep_link)s THEN t.id END, t.title, %(kind)s, false, %(actor)s::uuid
+FROM ticket_votes v JOIN tickets t ON t.id = v.ticket_id
+WHERE t.id = %(ticket)s
+  AND v.user_id IS DISTINCT FROM %(actor)s::uuid
+  AND v.user_id IS DISTINCT FROM t.created_by
+  AND """ + _NOT_A_REPEAT.format(reader="v.user_id")
+
+
+def _notify(conn, statement, ticket_id, actor_id, kind, keep_link=True):
+    """Add notifications inside the caller's transaction, without ever failing it.
+
+    keep_link=False is for a ticket that is about to be deleted: the notification
+    must not point at it, or it would be deleted along with the ticket.
+    """
+    if not HAS_NOTIFICATIONS:
+        return
+    try:
+        with conn.transaction():  # a savepoint: a problem here undoes only this
+            conn.execute(
+                statement,
+                {"ticket": ticket_id, "actor": actor_id, "kind": kind, "keep_link": keep_link},
+            )
+    except Exception:
+        log.exception("Could not save a %s notification for ticket %s", kind, ticket_id)
+
+
+def list_notifications(user_id, limit=30):
+    """A person's newest notifications, and how many they haven't seen."""
+    if not HAS_NOTIFICATIONS:
+        return {"unread": 0, "items": []}
+    with pool.connection() as conn:
+        items = conn.execute(
+            """SELECT id, kind, yours, ticket_id, ticket_title, created_at,
+                      read_at IS NOT NULL AS read
+               FROM notifications WHERE user_id = %s
+               ORDER BY created_at DESC, id LIMIT %s""",
+            (user_id, limit),
+        ).fetchall()
+        unread = conn.execute(
+            "SELECT count(*) AS n FROM notifications WHERE user_id = %s AND read_at IS NULL",
+            (user_id,),
+        ).fetchone()["n"]
+    return {"unread": unread, "items": items}
+
+
+def mark_notifications_read(user_id, ids):
+    """Mark these notifications as seen. Only the person's own ones are touched."""
+    if not HAS_NOTIFICATIONS or not ids:
+        return
+    with pool.connection() as conn:
+        conn.execute(
+            """UPDATE notifications SET read_at = now()
+               WHERE user_id = %s AND id = ANY(%s) AND read_at IS NULL""",
+            (user_id, list(ids)),
+        )

@@ -233,7 +233,8 @@
 .avision-map-widget .avision-issue-pin { border-radius: 50%; color: #334155; }
 .avision-issue-agency { width: 100%; height: 100%; display: grid; place-items: center;
   border: 2px solid #334155; border-radius: 50%; box-shadow: 0 2px 6px #18364b44; font-weight: 800; }
-.avision-owner-city .avision-issue-agency, .avision-owner-unknown .avision-issue-agency { color: white; }
+.avision-owner-city .avision-issue-agency, .avision-owner-unknown .avision-issue-agency,
+.avision-owner-gt .avision-issue-agency { color: white; }
 .avision-issue-selected { outline: 3px solid #0039A6; outline-offset: 4px; }
 .avision-issue-status { position: absolute; right: -8px; top: -8px; }
 .avision-issue-status, .avision-legend-status { display: inline-grid; place-items: center;
@@ -390,8 +391,68 @@
 .avision-map-views { flex-wrap: wrap; }
 .avision-map-widget .avision-map-legend-dot { display: inline-grid; place-items: center;
   width: 20px; height: 20px; border: 1px solid #334155; font-size: 11px; font-weight: 800; color: #334155; }
-.avision-map-legend-item:nth-child(3) .avision-map-legend-dot,
-.avision-map-legend-item:nth-child(6) .avision-map-legend-dot { color: white; }
+.avision-map-widget .avision-legend-owner-city,
+.avision-map-widget .avision-legend-owner-gt,
+.avision-map-widget .avision-legend-owner-unknown { color: white; }
+
+/* Ticket filters: the menu beside Layers, and the line that says what is shown. */
+.avision-map-filter-menu label small {
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: #E5EEE9;
+  font-size: 12px;
+  font-weight: 700;
+}
+.avision-map-filter-menu .avision-map-filter-all {
+  margin-top: 8px;
+  padding: 6px 12px;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: none;
+}
+.avision-map-filter-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 7px 12px;
+  border-top: 1px solid #E5EEE9;
+  flex-shrink: 0;
+  background: #EEF4FB;
+  font-size: 13px;
+}
+.avision-map-filter-note button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #FAFBF8;
+  font-weight: 700;
+}
+.avision-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+:root[data-theme="dark"] .avision-map-filter-note {
+  border-color: var(--line);
+  color: var(--ink);
+  background: var(--surface-subtle);
+}
+:root[data-theme="dark"] .avision-map-filter-menu label small {
+  color: var(--ink);
+  background: var(--control-surface);
+}
+:root[data-theme="dark"] :is(.avision-map-filter-note button, .avision-map-filter-menu .avision-map-filter-all) {
+  border-color: var(--control-line);
+  color: var(--ink);
+  background: var(--surface);
+}
 .avision-map-options label, .avision-map-options button, .avision-map-views button { min-height: 44px; }
 @media (max-width: 640px) { .avision-map-search { flex-basis: auto; } }
 
