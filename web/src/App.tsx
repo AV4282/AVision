@@ -1167,6 +1167,8 @@ function TicketDetail({
   const [deleteError, setDeleteError] = useState<string | null>(null)
   // Admins (granted with api/admin.py) can delete any ticket and mark it fixed.
   const isAdmin = useAccount().member?.role === "admin"
+  // A ticket marked fixed takes no more votes, except an admin's (which can reopen it).
+  const votingClosed = ticket.status === "Fixed" && !isAdmin
   const [closing, setClosing] = useState(false)
   const [closeError, setCloseError] = useState<string | null>(null)
 
@@ -1338,14 +1340,18 @@ function TicketDetail({
         </div>
         <div className="vote-section">
           <div>
-            <h3>Is this issue still here?</h3>
-            <p>Your vote helps keep this ticket accurate.</p>
+            <h3>{votingClosed ? "This issue is marked fixed" : "Is this issue still here?"}</h3>
+            <p>
+              {votingClosed
+                ? "Voting is closed. Only an admin can reopen it."
+                : "Your vote helps keep this ticket accurate."}
+            </p>
           </div>
           <div className="vote-buttons" aria-busy={pending !== null}>
             <button
               className={ticket.myVote === "still_there" ? "selected" : ""}
               aria-pressed={ticket.myVote === "still_there"}
-              disabled={pending !== null}
+              disabled={pending !== null || votingClosed}
               onClick={() => castVote("still_there")}
             >
               <Eye size={17} />{" "}
@@ -1355,7 +1361,7 @@ function TicketDetail({
             <button
               className={ticket.myVote === "fixed" ? "selected vote-fixed" : ""}
               aria-pressed={ticket.myVote === "fixed"}
-              disabled={pending !== null}
+              disabled={pending !== null || votingClosed}
               onClick={() => castVote("fixed")}
             >
               <Check size={17} /> {pending === "fixed" ? "Saving…" : "Fixed"}

@@ -43,8 +43,8 @@ A user looks like `{id, display_name, avatar_url, role, created_at, is_student, 
 | GET | `/coverage?lat=&lng=` | Anyone | Whether reports are taken at a spot, and `blocked`: the departments that can't take it (a campus department, off its campus) |
 | GET | `/campuses` | Anyone | The GSU and Georgia Tech campus outlines the pin map draws |
 | GET | `/screening/status` | Guest or signed in | The caller's flagged attempts, the limit, and when a pause on posting ends |
-| POST | `/tickets/{id}/close` | Admin only | Marks it `fixed` and returns it. A later still-there vote can reopen it. `403` for non-admins, `409` if merged |
-| POST | `/tickets/{id}/votes` | Guest or signed in | `{"vote": "still_there" \| "fixed"}`. Changing your vote replaces it. Returns the updated ticket; a merged ticket returns `409` |
+| POST | `/tickets/{id}/close` | Admin only | Marks it `fixed` and returns it. Only an admin's still-there vote can reopen it. `403` for non-admins, `409` if merged |
+| POST | `/tickets/{id}/votes` | Guest or signed in | `{"vote": "still_there" \| "fixed"}`. Changing your vote replaces it. Returns the updated ticket; a merged ticket returns `409`, and so does a ticket marked `fixed` unless the voter is an admin (an admin's still-there vote reopens it) |
 
 Creating a ticket:
 
