@@ -30,7 +30,7 @@ To keep a report quick, the work starts the moment the request arrives, at the
 same time as the agent, and the agent's tools simply wait for it. If the agent
 is slow, fails, or isn't set up, the finished work is returned without it
 ("direct" mode) rather than making the person wait. The result says which way
-it went. After a failure the agent is left out for a few minutes, so one bad
+it went. After a failure the agent is left out for a minute, so one bad
 spell doesn't slow every report.
 
 draft_for_ticket() is the same work for a ticket that is being posted: it uses
@@ -51,7 +51,7 @@ Settings (api/.env), all optional. With none, reports run in direct mode.
         FOUNDRY_MODEL              deployment name, default gpt-5-mini
         FOUNDRY_REASONING_EFFORT   e.g. "low" for gpt-5 models (faster); leave unset for others
         FOUNDRY_AGENT_NAME         default avision-report-agent
-        FOUNDRY_GRACE_SECONDS      how long to wait for the agent once the report is ready, default 5
+        FOUNDRY_GRACE_SECONDS      how long to wait for the agent once the report is ready, default 12
 """
 
 import hashlib
@@ -72,12 +72,12 @@ log = logging.getLogger("avision.agent")
 
 FOUNDRY_MODEL = os.getenv("FOUNDRY_MODEL", "gpt-5-mini")
 FOUNDRY_AGENT_NAME = os.getenv("FOUNDRY_AGENT_NAME", "avision-report-agent")
-FOUNDRY_TIMEOUT_SECONDS = 20  # per model turn
+FOUNDRY_TIMEOUT_SECONDS = 30  # per model turn
 MAX_TURNS = 6  # a report needs three turns (or five, one tool at a time); one spare
 # Once the report itself is ready, how long the agent gets to finish steering it
 # before the report is returned without it.
-FOUNDRY_GRACE_SECONDS = float(os.getenv("FOUNDRY_GRACE_SECONDS", "5"))
-FOUNDRY_PAUSE_SECONDS = 180  # after the agent fails or is too slow, leave it out for this long
+FOUNDRY_GRACE_SECONDS = float(os.getenv("FOUNDRY_GRACE_SECONDS", "12"))
+FOUNDRY_PAUSE_SECONDS = 60  # after the agent fails or is too slow, leave it out for this long
 
 INSTRUCTIONS = """You are the report agent for AVision, a site where people in Atlanta report everyday \
 problems to the department that can fix them. Each message you get is one new report: a photo (already on the \
@@ -340,7 +340,7 @@ def run(job: Job) -> dict:
         else:
             _foundry_paused_until = time.monotonic() + FOUNDRY_PAUSE_SECONDS
     elif mode:
-        job.agent_problem = "The Foundry agent is being left out for a few minutes after an earlier problem."
+        job.agent_problem = "The Foundry agent is being left out for a minute after an earlier problem."
     return _result(job, orchestrator)
 
 

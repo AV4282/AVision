@@ -37,7 +37,7 @@ const LET_AVISION_CHOOSE = "auto"
 // What the ticket is filed under if the choice can't be made (the server is unreachable).
 const FALLBACK_OWNER: Owner = "City of Atlanta"
 // Writing the report is worth a wait, but not a long one: past this the ticket posts without it.
-const DRAFT_WAIT_MS = 45_000
+const DRAFT_WAIT_MS = 60_000
 
 /** "2 faces and 1 license plate", or null when nothing was hidden. */
 function hiddenSummary(stored: UploadedPhoto): string | null {

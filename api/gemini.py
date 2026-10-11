@@ -35,11 +35,13 @@ from pydantic import BaseModel, Field, create_model
 log = logging.getLogger("avision.gemini")
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-# A normal answer takes 5 to 12 seconds. Past this, give up so the person isn't left waiting.
-TIMEOUT_MS = 25_000
-# A normal answer is a few hundred tokens. The cap stops an answer that has gone
-# wrong (the model repeating itself) from running on. It also covers the model's thinking.
-MAX_OUTPUT_TOKENS = 4096
+# A normal answer takes 5 to 12 seconds. This is how long a slow one is given
+# before giving up; set GEMINI_TIMEOUT_SECONDS to change it.
+TIMEOUT_MS = int(float(os.getenv("GEMINI_TIMEOUT_SECONDS", "45")) * 1000)
+# A normal answer is a few hundred tokens, so this leaves plenty of room. The cap
+# stops an answer that has gone wrong (the model repeating itself) from running
+# on for ever. It also covers the model's thinking.
+MAX_OUTPUT_TOKENS = 8192
 # How hard the model thinks before answering. "low" is plenty for this job and
 # takes seconds off every report. Set GEMINI_THINKING_LEVEL="" to use the model's default.
 THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low").strip().lower()
