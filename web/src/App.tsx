@@ -26,7 +26,6 @@ import {
   Maximize2,
   MapPin,
   Menu,
-  Navigation,
   Plus,
   Search,
   Settings,
@@ -169,9 +168,11 @@ const ownerColors: Record<Ticket["owner"], string> = {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className="brand">
-      <div className="brand-mark" aria-hidden="true">
-        <Navigation size={compact ? 17 : 20} strokeWidth={2.6} />
-      </div>
+      <img
+        className={compact ? "brand-mark compact" : "brand-mark"}
+        src="/logo.svg"
+        alt=""
+      />
       <span className={compact ? "brand-name compact" : "brand-name"}>
         AVision
       </span>
@@ -202,13 +203,11 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
       eyebrow: "See it. Share it. Fix it.",
       title: "A more accessible city starts with you.",
       body: "Turn everyday accessibility barriers into mapped, trackable tickets—and help your community follow them through to a fix.",
-      icon: <MapPin size={28} />,
     },
     {
       eyebrow: "One photo is enough",
       title: "Report barriers in a few simple steps.",
       body: "Upload a photo, confirm the location, and review the possible barrier. AVision routes your ticket to the right public agency.",
-      icon: <Camera size={28} />,
     },
   ]
   const panel = panels[step]
@@ -230,9 +229,13 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
           <div className="story-glow one" />
           <div className="story-glow two" />
           <div className="story-map-lines" />
+<<<<<<< HEAD
           {/* The key replays the entrance animation when the panel changes. */}
           <div className="story-content" key={step}>
             <div className="story-icon">{panel.icon}</div>
+=======
+          <div className="story-content">
+>>>>>>> 7e22890fa4090dd7e0c988dea3e906d80cc64d14
             <p className="eyebrow light">{panel.eyebrow}</p>
             {/* Each word is its own piece so the title can come in word by word.
                 Screen readers get the whole sentence at once. */}
@@ -412,9 +415,6 @@ function Sidebar({
           </button>
         </nav>
         <div className="report-card">
-          <div className="report-icon">
-            <Camera size={19} />
-          </div>
           <strong>Spot a barrier?</strong>
           <p>Upload a photo and we’ll help route it.</p>
           <button
@@ -429,9 +429,6 @@ function Sidebar({
         <nav className="support-nav">
           <button>
             <HelpCircle size={18} /> Help & resources
-          </button>
-          <button>
-            <Settings size={18} /> Settings
           </button>
         </nav>
         <div className="sidebar-user">
