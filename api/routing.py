@@ -1,8 +1,8 @@
 """
 Where a report is, and the map-math backup for who should get it.
 
-The department is chosen by Gemini (gemini.choose_owner), which is given what
-the problem is plus the facts this file works out about the spot:
+The department is chosen by Gemini (see gemini.py), which is given what the
+problem is plus the facts this file works out about the spot:
 
     location_facts()   nearest MARTA station, inside GSU's campus or not, the road
                        and its route numbers, inside the city or not
@@ -94,8 +94,8 @@ def _nearest_station(lat: float, lng: float) -> tuple[dict, float]:
 def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
     """Pick the owner for a position.
 
-    `road` is the closest road from geocode.nearest_road(), or None when that
-    lookup wasn't possible; then rule 3 is skipped and the reason says so.
+    `road` is the closest road from geocode.nearest_road(), or None when it
+    wasn't looked up; then rule 3 is skipped.
 
     Returns {"owner", "rule", "reason", "contact"} where `owner` is one of the
     four values the tickets table accepts.
@@ -128,9 +128,8 @@ def find_owner(lat: float, lng: float, road: dict | None = None) -> dict:
                 f"This spot is on {street}, a state-maintained route, so it goes to GDOT.",
             )
 
-    checked = "a MARTA station, GSU's campus or a state route"
-    if road is None:
-        checked = "a MARTA station or GSU's campus (the state route check wasn't available)"
+    # The state route check only happens when the caller looked the road up.
+    checked = "a MARTA station, GSU's campus or a state route" if road else "a MARTA station or GSU's campus"
     if ATLANTA.contains(here):
         return _answer(
             "city_of_atlanta",

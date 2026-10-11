@@ -1,11 +1,15 @@
 """
-The three jobs Gemini does for the report agent.
+What Gemini does for a report, in ONE request per report:
 
-  analyze_photo()  photo -> what the issue is, how serious, how sure
-  choose_owner()   the issue + what the map says about the spot -> which department
-  draft_report()   the issue + the place -> a message and a phone script
+  report_from_photo()  photo + what the map says about the spot (+ the person's own
+                       words, if any) -> what the issue is, which department it
+                       goes to and why, and a message and phone script to send
+  report_from_text()   the same without a photo, from the person's words alone
 
-All three ask for a fixed JSON shape (a response schema), so the answer can be used
+Doing it all in one request is what keeps a report quick (one round trip, not
+three) and cheap (the free allowance is counted per request).
+
+Both ask for a fixed JSON shape (a response schema), so the answer can be used
 directly instead of being picked out of free text.
 
 Three rules are built into the prompts and checked again in code:
@@ -21,6 +25,7 @@ import logging
 import os
 import re
 import threading
+import time
 from typing import Literal
 
 from google import genai
@@ -30,7 +35,16 @@ from pydantic import BaseModel, Field, create_model
 log = logging.getLogger("avision.gemini")
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-TIMEOUT_MS = 40_000
+# A normal answer takes 5 to 12 seconds. This is how long a slow one is given
+# before giving up; set GEMINI_TIMEOUT_SECONDS to change it.
+TIMEOUT_MS = int(float(os.getenv("GEMINI_TIMEOUT_SECONDS", "45")) * 1000)
+# A normal answer is a few hundred tokens, so this leaves plenty of room. The cap
+# stops an answer that has gone wrong (the model repeating itself) from running
+# on for ever. It also covers the model's thinking.
+MAX_OUTPUT_TOKENS = 8192
+# How hard the model thinks before answering. "low" is plenty for this job and
+# takes seconds off every report. Set GEMINI_THINKING_LEVEL="" to use the model's default.
+THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "low").strip().lower()
 
 # Same values as the "What's the issue?" list in the web app's report form.
 IssueType = Literal[
@@ -82,23 +96,15 @@ class Draft(BaseModel):
     phone_script: str = Field(description="What to say when calling instead: two or three short spoken sentences.")
 
 
-ANALYZE_INSTRUCTIONS = """You look at one photo for AVision, a site where people in Atlanta report everyday problems \
-(a blocked curb ramp, a broken elevator, a cracked sidewalk, a dead streetlight, a pothole and so on) so the \
-right agency can fix them.
-
-Describe only what is visible. Rules:
+# Each block of rules is used on its own in the text-only request and together in the photo one.
+LOOK_RULES = """Looking at the photo. Describe only what is visible.
 - Call things "possible" issues or barriers. Never say anything is illegal, a violation, or non-compliant.
 - Never describe people: no clothing, age, gender or appearance. Say "a person" only if it matters to the issue.
 - Never read out or mention license plates, faces, names or phone numbers that appear in the photo.
 - If the photo does not show a reportable problem, set is_reportable to false and say what it shows instead."""
 
-CHOOSE_INSTRUCTIONS = """You decide which department a report on AVision should be sent to. AVision is a site \
-where people in Atlanta report everyday problems so the right department can fix them.
-
-You are given what the problem is, what the map says about the spot, and the departments you may choose from \
-with what each one looks after.
-
-How to decide:
+CHOOSE_RULES = """Choosing the department. You are given what the map says about the spot and the departments \
+you may choose from, with what each one looks after.
 - Use both the problem and the place. The department that owns the spot is the one that fixes it.
 - Something that is part of a MARTA station, stop or vehicle goes to MARTA, even where the station sits inside \
 the university campus.
@@ -108,20 +114,42 @@ station or through the campus.
 - Being near a station or inside the campus outline is a clue, not proof. A cracked public sidewalk 60 m from a \
 station is still the city's.
 - If nothing clearly fits, choose the city.
+- Answer with the department's id exactly as listed, and one plain sentence for the person reporting that says \
+why, naming the place."""
 
-Answer with the department's id exactly as listed, and one plain sentence for the person reporting that says \
-why, naming the place. Do not include any phone number, email address or web link."""
-
-DRAFT_INSTRUCTIONS = """You write a short report that a member of the public will send to the department \
-responsible for fixing a problem. You are given the issue and the place.
-
-Rules:
-- Stick to the facts you are given. Do not invent details.
+WRITE_RULES = """Writing the report, which the person will send to that department themselves.
+- Stick to the facts you have. Do not invent details.
 - Call things "possible" issues or barriers. Never say anything is illegal, a violation, or non-compliant.
-- Do NOT include any phone number, email address, web link or staff name. The app adds contact details itself.
+- Do NOT include any phone number, email address, web link or staff name, anywhere in your answer. The app adds \
+contact details itself.
 - Do not name the department you are writing to. The app addresses the message.
 - Do not describe people.
 - Plain words, short sentences."""
+
+INTRODUCTION = """You work for AVision, a site where people in Atlanta report everyday problems (a blocked curb \
+ramp, a broken elevator, a cracked sidewalk, a dead streetlight, a pothole and so on) so the right department \
+can fix them."""
+
+PHOTO_INSTRUCTIONS = f"""{INTRODUCTION} For one new report you do three things in a single answer: look at \
+its photo, choose the department it goes to, and write the report.
+
+{LOOK_RULES}
+
+{CHOOSE_RULES}
+
+{WRITE_RULES}
+
+If the person reporting it added their own words, treat them as true: use them in the report and when choosing \
+the department, along with what the photo shows. is_reportable is still about the photo alone.
+If there is nothing to report (the photo shows no problem and the person described none), leave subject, message \
+and phone_script empty."""
+
+TEXT_INSTRUCTIONS = f"""{INTRODUCTION} For one new report, described in the person's own words, you do two \
+things in a single answer: choose the department it goes to, and write the report.
+
+{CHOOSE_RULES}
+
+{WRITE_RULES}"""
 
 
 _shared_client: genai.Client | None = None
@@ -147,19 +175,47 @@ def is_configured() -> bool:
     return bool(os.getenv("GEMINI_API_KEY", "").strip())
 
 
+_thinking_refused = False  # set if the model turns the thinking setting down, so it isn't sent again
+
+
 def _ask(contents, instructions: str, shape: type[BaseModel]):
-    """One Gemini call that must come back in the given JSON shape."""
-    try:
-        reply = _client().models.generate_content(
+    """One Gemini request that must come back in the given JSON shape."""
+    global _thinking_refused
+
+    def send(thinking: str | None):
+        return _client().models.generate_content(
             model=GEMINI_MODEL,
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=instructions,
                 response_mime_type="application/json",
                 response_schema=shape,
-                temperature=0.2,
+                # No temperature on purpose. Google's guide for Gemini 3 models says to leave it at
+                # the default: lowering it can make the model loop, which shows up here as a
+                # request that never finishes (504 DEADLINE_EXCEEDED).
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                thinking_config=types.ThinkingConfig(thinking_level=thinking) if thinking else None,
             ),
         )
+
+    thinking = THINKING_LEVEL if THINKING_LEVEL and not _thinking_refused else None
+    started = time.monotonic()
+    try:
+        try:
+            reply = send(thinking)
+        except Exception as problem:
+            said = str(problem)
+            if thinking and "400" in said and "think" in said.lower():
+                # A model that doesn't take this thinking level says so with a 400. Ask again without it.
+                log.warning("Gemini refused thinking level %r; using the model's default from now on", thinking)
+                _thinking_refused = True
+                reply = send(None)
+            elif ("503" in said or "500" in said) and time.monotonic() - started < 5:
+                # "Busy, try again" that came back at once: one more try costs the person little.
+                log.warning("Gemini was busy (%s); trying once more", said[:80])
+                reply = send(thinking)
+            else:
+                raise
         return shape.model_validate_json(reply.text or "")
     except NotConfigured:
         raise
@@ -173,84 +229,112 @@ def _plain_reason(problem: Exception) -> str:
     text = str(problem)
     if "API key" in text or "API_KEY" in text or "401" in text or "403" in text:
         return "The photo analysis key was rejected. Check GEMINI_API_KEY on the server."
+    if "PerDay" in text or "free_tier" in text:
+        return (
+            "The AI has used up today's free allowance from Google, so it can't help until that resets. "
+            "Fill in the form yourself for now."
+        )
     if "429" in text or "quota" in text.lower():
         return "Photo analysis is over its usage limit right now. Try again in a minute."
+    if "504" in text or "DEADLINE" in text or "timed out" in text.lower() or "Timeout" in type(problem).__name__:
+        return "The AI took too long to answer. Try again, or fill in the form yourself."
     return "Photo analysis didn't work this time. Try again, or fill in the form yourself."
 
 
-def analyze_photo(jpeg: bytes) -> dict:
-    """What the photo shows, as a dict with the Analysis fields."""
-    found = _ask(
-        [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), "Analyze this photo."],
-        ANALYZE_INSTRUCTIONS,
-        Analysis,
-    )
-    result = found.model_dump()
-    result["title"] = _strip_contacts(result["title"])[:120]
-    result["description"] = _strip_contacts(result["description"])[:2000]
-    result["possible_barriers"] = [_strip_contacts(b)[:200] for b in result["possible_barriers"][:3]]
-    result["confidence"] = round(min(1.0, max(0.0, result["confidence"])), 2)
-    return result
+def _answer_shape(departments: dict, with_photo: bool) -> type[BaseModel]:
+    """The JSON shape for one report: the findings (photo only), the department, then the message.
 
-
-def choose_owner(issue: dict, location: list[str], departments: dict, suggestion: str | None = None) -> dict:
-    """Which department this report goes to: {"owner": <id>, "reason": <one sentence>}.
-
-    `issue` is what the problem is (see _issue_lines), `location` is the lines from
-    routing.location_facts(), and `departments` is {id: contact} from
-    data/contacts.json. The answer is always one of those ids: the response
-    schema allows nothing else, and anything else fails validation.
-    `suggestion` is what the map rules alone would pick, as a hint.
+    Built per request because the department ids come from data/contacts.json.
+    The response schema allows no other id, and any other fails validation.
+    The fields are in the order the work is done, since the model fills them in order.
     """
-    ids = tuple(departments)
-    Choice = create_model(
-        "Choice",
-        owner=(Literal[ids], Field(description="The id of the department this report should go to.")),
-        reason=(
+    choice = {
+        "owner": (Literal[tuple(departments)], Field(description="The id of the department this report should go to.")),
+        "reason": (
             str,
             Field(description="One plain sentence, at most 30 words, on why this department, naming the place."),
         ),
-    )
+    }
+    message = {name: (field.annotation, field) for name, field in Draft.model_fields.items()}
+    return create_model("ReportAnswer", __base__=Analysis if with_photo else None, **choice, **message)
+
+
+def _place_and_departments(location: list[str], departments: dict, suggestion: str | None) -> str:
     listed = "\n".join(
         f"- {owner}: {contact['name']}. Looks after: {contact.get('handles') or 'not stated'}"
         for owner, contact in departments.items()
     )
-    asked = (
-        "The problem\n" + "\n".join(_issue_lines(issue))
-        + "\n\nThe place\n" + "\n".join(location)
+    return (
+        "The place\n" + "\n".join(location)
         + (f"\nMap rules alone would pick: {suggestion}" if suggestion else "")
         + "\n\nDepartments you may choose from\n" + listed
     )
-    choice = _ask(f"Choose the department for this report.\n\n{asked}", CHOOSE_INSTRUCTIONS, Choice)
-    return {"owner": choice.owner, "reason": _strip_contacts(choice.reason)[:300]}
 
 
-def draft_report(issue: dict, address: str | None, lat: float, lng: float) -> dict:
-    """A message and phone script about the issue, as a dict with the Draft fields.
+def report_from_photo(
+    jpeg: bytes,
+    location: list[str],
+    departments: dict,
+    suggestion: str | None = None,
+    typed: dict | None = None,
+) -> dict:
+    """Everything about a report with a photo, in one request.
 
-    `issue` needs a "title"; "description", "possible_barriers" and "severity" are
-    used when present (a photo analysis has them all, a typed ticket may not).
-    The draft names no department, so it stays right whoever it is sent to.
+    `location` is the lines from routing.location_facts(), `departments` is
+    {id: contact} from data/contacts.json, `suggestion` is what the map rules
+    alone would pick (a hint), and `typed` is what the person wrote in the form,
+    if anything (see _issue_lines).
+
+    Returns {"analysis": <the Analysis fields>, "owner": <id>, "reason": <sentence>,
+    "draft": <the Draft fields, or None when there is nothing to report>}.
     """
-    facts = "\n".join(
-        _issue_lines(issue)
-        + [f"Place: {address or 'no street address found'} (map position {lat:.5f}, {lng:.5f})"]
+    asked = "Here is the photo for a new report.\n\n" + _place_and_departments(location, departments, suggestion)
+    if typed and typed.get("title"):
+        asked += "\n\nWhat the person reporting it wrote\n" + "\n".join(_issue_lines(typed))
+    answer = _ask(
+        [types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), asked],
+        PHOTO_INSTRUCTIONS,
+        _answer_shape(departments, with_photo=True),
+    ).model_dump()
+
+    analysis = {key: answer[key] for key in Analysis.model_fields}
+    analysis["title"] = _strip_contacts(analysis["title"])[:120]
+    analysis["description"] = _strip_contacts(analysis["description"])[:2000]
+    analysis["possible_barriers"] = [_strip_contacts(b)[:200] for b in analysis["possible_barriers"][:3]]
+    analysis["confidence"] = round(min(1.0, max(0.0, analysis["confidence"])), 2)
+    return {"analysis": analysis, **_choice_and_draft(answer)}
+
+
+def report_from_text(issue: dict, location: list[str], departments: dict, suggestion: str | None = None) -> dict:
+    """The department and the message for a report with no photo, in one request.
+
+    `issue` is what the person wrote (see _issue_lines); the rest is as in
+    report_from_photo(). Returns {"owner", "reason", "draft"}.
+    """
+    asked = (
+        "A new report, in the person's own words\n" + "\n".join(_issue_lines(issue))
+        + "\n\n" + _place_and_departments(location, departments, suggestion)
     )
-    draft = _ask(f"Write the report from these facts.\n\n{facts}", DRAFT_INSTRUCTIONS, Draft).model_dump()
-    return {key: _strip_contacts(text) for key, text in draft.items()}
+    return _choice_and_draft(_ask(asked, TEXT_INSTRUCTIONS, _answer_shape(departments, with_photo=False)).model_dump())
+
+
+def _choice_and_draft(answer: dict) -> dict:
+    draft = {key: _strip_contacts(answer[key]) for key in Draft.model_fields}
+    return {
+        "owner": answer["owner"],
+        "reason": _strip_contacts(answer["reason"])[:300],
+        # A message with nothing in it is no message (the photo showed nothing to report).
+        "draft": draft if draft["subject"] and draft["message"] else None,
+    }
 
 
 def _issue_lines(issue: dict) -> list[str]:
-    """The issue as plain lines for a prompt, leaving out whatever isn't known."""
+    """An issue as plain lines for a prompt, leaving out whatever isn't known."""
     lines = [f"Issue: {issue['title']}"]
     if issue.get("issue_type") and issue["issue_type"] != "other":
         lines.append(f"Type: {issue['issue_type'].replace('_', ' ')}")
     if issue.get("description"):
-        lines.append(f"What was seen: {issue['description']}")
-    if issue.get("possible_barriers"):
-        lines.append(f"Who it may affect: {'; '.join(issue['possible_barriers'])}")
-    if issue.get("severity"):
-        lines.append(f"Seriousness: {issue['severity']}")
+        lines.append(f"Details: {issue['description']}")
     return lines
 
 
