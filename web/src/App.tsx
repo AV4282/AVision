@@ -64,6 +64,7 @@ import ReportForm from "./ReportForm"
 import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 import { ThemeToggle } from "./theme"
+import ResourcesDialog from "./ResourcesDialog"
 
 import { mapOwner, ticketMarker } from "./ticket-map"
 import type { AvisionMapOwner } from "./components/avision-map/types"
@@ -389,6 +390,7 @@ function Sidebar({
   onClose,
   openCount,
   onReport,
+  onResources,
 }: {
   view: View
   setView: (view: View) => void
@@ -396,6 +398,7 @@ function Sidebar({
   onClose: () => void
   openCount: number
   onReport: () => void
+  onResources: (opener: HTMLButtonElement) => void
 }) {
   const { account, member, signOut } = useAccount()
   const navigate = (next: View) => {
@@ -475,7 +478,15 @@ function Sidebar({
           </button>
         </div>
         <nav className="support-nav">
-          <button>
+          <button
+            type="button"
+            data-resources-opener
+            aria-haspopup="dialog"
+            onClick={(event) => {
+              onClose()
+              onResources(event.currentTarget)
+            }}
+          >
             <HelpCircle size={18} /> Help & resources
           </button>
         </nav>
@@ -725,7 +736,7 @@ function AppHeader({
 }: {
   title: string
   subtitle: string
-  onMenu: () => void
+  onMenu: (opener: HTMLButtonElement) => void
   setView: (view: View) => void
   onOpenTicket: (ticketId: string) => void
   onNews: () => void
@@ -734,7 +745,7 @@ function AppHeader({
   return (
     <header className="app-header">
       <div className="header-title">
-        <button className="menu-button" onClick={onMenu} aria-label="Open menu">
+        <button className="menu-button" data-menu-opener onClick={(event) => onMenu(event.currentTarget)} aria-label="Open menu">
           <Menu size={21} />
         </button>
         <div>
@@ -1834,10 +1845,12 @@ function MobileNav({
   view,
   setView,
   onReport,
+  onMenu,
 }: {
   view: View
   setView: (view: View) => void
   onReport: () => void
+  onMenu: (opener: HTMLButtonElement) => void
 }) {
   return (
     <nav className="mobile-nav">
@@ -1866,7 +1879,7 @@ function MobileNav({
       >
         <User size={19} /> Profile
       </button>
-      <button>
+      <button type="button" data-menu-opener onClick={(event) => onMenu(event.currentTarget)} aria-label="More, open menu">
         <Settings size={19} /> More
       </button>
     </nav>
@@ -1877,6 +1890,13 @@ export default function App() {
   const auth = useAccount()
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
+  const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)
+  const menuOpener = useRef<HTMLButtonElement | null>(null)
+  const openMenu = useCallback((opener: HTMLButtonElement) => {
+    menuOpener.current = opener
+    setMenuOpen(true)
+  }, [])
+  const closeResources = useCallback(() => setResourcesOpener(null), [])
   const [reportOpen, setReportOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // The ticket opened on top of the page, from a list or "View full ticket".
@@ -1945,12 +1965,13 @@ export default function App() {
             .length
         }
         onReport={openReport}
+        onResources={setResourcesOpener}
       />
       <main className="app-main">
         <AppHeader
           title={title}
           subtitle={subtitle}
-          onMenu={() => setMenuOpen(true)}
+          onMenu={openMenu}
           setView={setView}
           onOpenTicket={(id) => {
             // Reload first: the notification is about something that just changed.
@@ -1990,7 +2011,7 @@ export default function App() {
           />
         )}
       </main>
-      <MobileNav view={page} setView={setView} onReport={openReport} />
+      <MobileNav view={page} setView={setView} onReport={openReport} onMenu={openMenu} />
       {openTicket && (
         <TicketModal
           key={openTicket.id}
@@ -2019,6 +2040,13 @@ export default function App() {
         />
       )}
       {toSend && <ReportReady {...toSend} onClose={closeToSend} />}
+      {resourcesOpener && (
+        <ResourcesDialog
+          onClose={closeResources}
+          opener={resourcesOpener}
+          fallbackOpener={menuOpener.current}
+        />
+      )}
     </div>
   )
 }

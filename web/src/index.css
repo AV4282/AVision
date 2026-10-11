@@ -2755,6 +2755,236 @@ summary:focus-visible {
   box-shadow: var(--shadow);
 }
 
+/* ---------- Help & resources ---------- */
+.resources-dialog {
+  width: min(860px, calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.resources-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.resources-dialog::backdrop {
+  background: var(--modal-scrim);
+}
+
+.resources-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.resources-header .eyebrow {
+  margin: 0 0 6px;
+}
+
+.resources-header h2 {
+  margin: 0;
+  font: 800 26px/1.25 "Manrope", sans-serif;
+  letter-spacing: -0.6px;
+}
+
+.resources-header p:last-child {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.resources-header .dialog-close {
+  width: 44px;
+  height: 44px;
+  border-color: var(--control-line);
+}
+
+.resources-body {
+  min-height: 0;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.resources-emergency {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--warning-line);
+  border-radius: 10px;
+  color: var(--warning-text);
+  background: var(--orange-soft);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.resources-emergency a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.resources-guidance {
+  margin: 14px 0 20px;
+  color: var(--slate);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.resources-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.resource-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+
+.resource-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.resource-heading > div {
+  min-width: 0;
+}
+
+.resource-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--blue-soft);
+}
+
+.resource-heading h3 {
+  margin: 0;
+  font: 800 17px/1.3 "Manrope", sans-serif;
+}
+
+.resource-heading p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.resource-description {
+  margin: 16px 0;
+  color: var(--slate);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.resource-links {
+  display: grid;
+  gap: 8px;
+}
+
+.resource-links a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 9px;
+  color: var(--accent);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.resource-links a > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.resource-links svg,
+.resources-emergency svg {
+  flex-shrink: 0;
+}
+
+.resource-link-label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.resource-phone-note {
+  margin: -2px 0 4px;
+  padding-inline: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.resource-links a:hover,
+.resources-header .dialog-close:hover {
+  background: var(--hover);
+}
+
+.resources-dialog :is(a, button):focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 600px) {
+  .resources-dialog {
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border-radius: 14px;
+  }
+
+  .resources-header {
+    padding: 18px 16px;
+  }
+
+  .resources-header h2 {
+    font-size: 22px;
+  }
+
+  .resources-body {
+    padding: 16px;
+  }
+
+  .resources-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .resource-card {
+    padding: 16px;
+  }
+}
+
 .report-header {
   margin-bottom: 14px;
   display: flex;
