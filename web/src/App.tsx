@@ -407,9 +407,6 @@ function Sidebar({
           <button>
             <HelpCircle size={18} /> Help & resources
           </button>
-          <button>
-            <Settings size={18} /> Settings
-          </button>
         </nav>
         <div className="sidebar-user">
           <div className="avatar">{account?.initials ?? "G"}</div>
