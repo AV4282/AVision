@@ -771,33 +771,28 @@ function TicketDetail({
           {ticket.firstReported.toLowerCase()} · Updated{" "}
           {ticket.time.toLowerCase()}
         </p>
-        {isAdmin && ticket.status !== "Fixed" && (
-          <div className="delete-ticket">
-            <button
-              type="button"
-              className="delete-ticket-button"
-              onClick={markFixed}
-              disabled={closing}
-            >
-              <CheckCircle2 size={15} /> {closing ? "Marking as fixed…" : "Mark as fixed"}
-            </button>
-            {closeError && (
-              <p className="vote-error" role="alert">
-                {closeError}
-              </p>
-            )}
-          </div>
-        )}
         {(ticket.mine || isAdmin) && (
           <div className="delete-ticket">
             {!confirmingDelete ? (
-              <button
-                type="button"
-                className="delete-ticket-button"
-                onClick={() => setConfirmingDelete(true)}
-              >
-                <Trash2 size={15} /> {ticket.mine ? "Delete my ticket" : "Delete ticket"}
-              </button>
+              <div className="ticket-actions">
+                <button
+                  type="button"
+                  className="delete-ticket-button"
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  <Trash2 size={15} /> {ticket.mine ? "Delete my ticket" : "Delete ticket"}
+                </button>
+                {isAdmin && ticket.status !== "Fixed" && (
+                  <button
+                    type="button"
+                    className="mark-fixed-button"
+                    onClick={markFixed}
+                    disabled={closing}
+                  >
+                    <CheckCircle2 size={15} /> {closing ? "Marking as fixed…" : "Mark as fixed"}
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="delete-confirm" role="group" aria-label="Confirm delete">
                 <p>Delete this ticket for everyone? Its votes and photo go too.</p>
@@ -825,6 +820,11 @@ function TicketDetail({
             {deleteError && (
               <p className="vote-error" role="alert">
                 {deleteError}
+              </p>
+            )}
+            {closeError && (
+              <p className="vote-error" role="alert">
+                {closeError}
               </p>
             )}
           </div>
