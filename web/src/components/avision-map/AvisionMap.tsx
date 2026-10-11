@@ -17,8 +17,6 @@ import {
   CORRIDOR_VIEW,
   GSU_VIEW,
   CORRIDOR_STATIONS,
-  CONTROL_PLACEHOLDERS,
-  AREA_PLACEHOLDERS,
   PILOT_OUTLINE,
   ISSUE_OWNERS,
   ISSUE_STATUS_LABELS,
@@ -622,45 +620,6 @@ export default function AvisionMap({
       style={{ height }}
       aria-label="Avision interactive Atlanta map"
     >
-      {/* Hidden labels for future connections. They add no markers, requests, or actions. */}
-      <div hidden aria-hidden="true" style={{ display: "none" }}>
-        {CONTROL_PLACEHOLDERS.map((name) => (
-          <span
-            key={`control:${name}`}
-            data-avision-placeholder={`control:${name}`}
-          />
-        ))}
-        {results.map((item) => (
-          <span
-            key={`search-result:${item.key}`}
-            data-avision-placeholder={`search-result:${item.key}`}
-          />
-        ))}
-        {AREA_PLACEHOLDERS.map((name) => (
-          <span
-            key={`area:${name}`}
-            data-avision-placeholder={`location:area:${name}`}
-          />
-        ))}
-        {stations.map((station) => (
-          <span
-            key={`station:${station.properties.STATION}`}
-            data-avision-placeholder={`location:station:${station.properties.STATION}`}
-          />
-        ))}
-        {neighborhoods.map(({ feature }) => (
-          <span
-            key={`neighborhood:${feature.properties.NAME}`}
-            data-avision-placeholder={`location:neighborhood:${feature.properties.NAME}`}
-          />
-        ))}
-        {markers.map((marker) => (
-          <span
-            key={`marker:${marker.id}`}
-            data-avision-placeholder={`location:marker:${marker.id}`}
-          />
-        ))}
-      </div>
       <div className="avision-map-toolbar">
         <div ref={search} className="avision-map-search">
           <input

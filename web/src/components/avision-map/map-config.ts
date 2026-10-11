@@ -72,46 +72,6 @@ export const CORRIDOR_STATIONS = [
   "Garnett",
 ]
 
-// Named slots for later wiring. These do not change any control or map behavior.
-
-export const CONTROL_PLACEHOLDERS = [
-  "search",
-
-  "clear-search",
-
-  "view-atlanta",
-
-  "view-gsu-marta",
-
-  "view-gsu",
-
-  "zoom-in",
-
-  "zoom-out",
-
-  "toggle-pilot",
-
-  "toggle-stations",
-
-  "toggle-neighborhoods",
-
-  "style-soft",
-
-  "style-street",
-
-  "data-sources",
-
-  "close-sources",
-] as const
-
-export const AREA_PLACEHOLDERS = [
-  "Atlanta",
-
-  "GSU + MARTA",
-
-  "GSU downtown",
-] as const
-
 // Team-defined pilot outline for display. Eligibility and ownership belong to the backend.
 
 export const PILOT_OUTLINE: Feature<Polygon> = {

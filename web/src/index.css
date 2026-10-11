@@ -1076,13 +1076,6 @@ summary:focus-visible {
   background: var(--green-soft);
 }
 
-.status-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .detail-body h2 {
   margin: 12px 0 6px;
   font: 800 21px/1.2 "Manrope", sans-serif;
@@ -1342,10 +1335,6 @@ summary:focus-visible {
 .issue-stats small {
   color: var(--text-stat);
   font-size: 8px;
-}
-
-.issue-stats small.positive {
-  color: var(--green-text);
 }
 
 .list-controls {

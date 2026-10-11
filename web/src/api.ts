@@ -242,10 +242,6 @@ export async function listTickets(filters: { status?: Status; owner?: Owner } = 
   return (await request<ApiTicket[]>("GET", `/tickets${query}`)).map(toTicket)
 }
 
-export async function getTicket(id: string): Promise<Ticket> {
-  return toTicket(await request<ApiTicket>("GET", `/tickets/${id}`))
-}
-
 export async function createTicket(ticket: NewTicket): Promise<Ticket> {
   const body = {
     title: ticket.title,
