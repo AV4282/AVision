@@ -394,9 +394,6 @@ function Sidebar({
           </button>
         </nav>
         <div className="report-card">
-          <div className="report-icon">
-            <Camera size={19} />
-          </div>
           <strong>Spot a barrier?</strong>
           <p>Upload a photo and we’ll help route it.</p>
           <button
