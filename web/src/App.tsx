@@ -70,6 +70,8 @@ import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 import { ThemeToggle } from "./theme"
 import PrivacyDialog from "./PrivacyDialog"
+import NotificationPreferencesDialog from "./NotificationPreferencesDialog"
+import { useNotificationPreferences } from "./notification-preferences"
 import ResourcesDialog from "./ResourcesDialog"
 
 import { mapOwner, ticketMarker } from "./ticket-map"
@@ -809,7 +811,8 @@ function NotificationBell({
   /** Goes up when a live update says there may be news, so the bell checks right away. */
   nudge: number
 }) {
-  const { member } = useAccount()
+  const { account, member } = useAccount()
+  const { inApp, myReports } = useNotificationPreferences(account?.id ?? null)
   const [notices, setNotices] = useState<Notice[]>([])
   const [unread, setUnread] = useState(0)
   const [open, setOpen] = useState(false)
@@ -817,24 +820,34 @@ function NotificationBell({
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
   const wrap = useRef<HTMLDivElement>(null)
   const lastUnread = useRef(0)
+  const refreshNotices = useRef<() => void>(() => {})
   const news = useRef(onNews)
   news.current = onNews
-
-  const check = useCallback(() => {
-    listNotices()
-      .then((found) => {
-        setNotices(found.items)
-        setUnread(found.unread)
-        if (found.unread > lastUnread.current) news.current()
-        lastUnread.current = found.unread
-      })
-      .catch(() => {}) // no news is fine; the next check tries again
-  }, [])
+  const visibleNotices = inApp ? notices.filter((notice) => myReports || !notice.yours) : []
+  const visibleUnread = !inApp ? 0 : myReports ? unread : visibleNotices.filter((notice) => !notice.read).length
 
   // Check now, on a timer, and whenever the person comes back to the page.
   // Signing in changes whose notifications these are, so that checks again too.
+  // Preferences hide notices in the bell; polling still refreshes ticket status.
   const memberId = member?.id
+  const accountId = account?.id
   useEffect(() => {
+    let cancelled = false
+    setNotices([])
+    setUnread(0)
+    lastUnread.current = 0
+    const check = () => {
+      listNotices()
+        .then((found) => {
+          if (cancelled) return
+          setNotices(found.items)
+          setUnread(found.unread)
+          if (found.unread > lastUnread.current) news.current()
+          lastUnread.current = found.unread
+        })
+        .catch(() => {}) // no news is fine; the next check tries again
+    }
+    refreshNotices.current = check
     check()
     const whenSeen = () => {
       if (document.visibilityState === "visible") check()
@@ -843,20 +856,24 @@ function NotificationBell({
     document.addEventListener("visibilitychange", whenSeen)
     window.addEventListener("focus", whenSeen)
     return () => {
+      cancelled = true
+      refreshNotices.current = () => {}
       window.clearInterval(timer)
       document.removeEventListener("visibilitychange", whenSeen)
       window.removeEventListener("focus", whenSeen)
     }
-  }, [check, memberId])
+  }, [accountId, memberId])
 
   useEffect(() => {
-    if (nudge > 0) check()
-  }, [nudge, check])
+    if (nudge > 0) refreshNotices.current()
+  }, [nudge])
 
   const close = useCallback(() => {
     setOpen(false)
     setFresh(new Set())
   }, [])
+
+  useEffect(close, [close, accountId, memberId, inApp, myReports])
 
   useEffect(() => {
     if (!open) return
@@ -880,13 +897,13 @@ function NotificationBell({
       return
     }
     // Opening the list is seeing it: the count clears here and on the server.
-    const unseen = notices.filter((notice) => !notice.read).map((notice) => notice.id)
+    const unseen = visibleNotices.filter((notice) => !notice.read).map((notice) => notice.id)
     setFresh(new Set(unseen))
     setOpen(true)
     if (unseen.length > 0) {
       setUnread((count) => Math.max(0, count - unseen.length))
       lastUnread.current = Math.max(0, lastUnread.current - unseen.length)
-      setNotices((list) => list.map((notice) => ({ ...notice, read: true })))
+      setNotices((list) => list.map((notice) => unseen.includes(notice.id) ? { ...notice, read: true } : notice))
       markNoticesRead(unseen).catch(() => {})
     }
   }
@@ -896,28 +913,31 @@ function NotificationBell({
       <button
         className="icon-button"
         onClick={toggle}
-        aria-label={unread > 0 ? `Notifications, ${unread} new` : "Notifications"}
+        aria-label={visibleUnread > 0 ? `Notifications, ${visibleUnread} new` : "Notifications"}
         aria-haspopup="true"
         aria-expanded={open}
       >
         <Bell size={19} />
-        {unread > 0 && (
+        {visibleUnread > 0 && (
           <span className="notice-count" aria-hidden="true">
-            {unread > 9 ? "9+" : unread}
+            {visibleUnread > 9 ? "9+" : visibleUnread}
           </span>
         )}
       </button>
       {open && (
         <section className="notice-panel" aria-label="Notifications">
           <h2>Notifications</h2>
-          {notices.length === 0 ? (
+          {!inApp ? (
+            <p className="notice-empty">In-app notifications are off in this browser. Turn them on in My profile → Notification preferences.</p>
+          ) : visibleNotices.length === 0 ? (
             <p className="notice-empty">
-              Nothing yet. You’ll see it here when someone votes on a ticket you
-              posted, or when a ticket you voted on is marked fixed or removed.
+              {myReports
+                ? "Nothing yet. You’ll see it here when someone votes on a ticket you posted, or when a ticket you voted on is marked fixed or removed."
+                : "Nothing yet. Updates to tickets you posted are hidden. You’ll see updates here when a ticket you voted on is marked fixed or removed."}
             </p>
           ) : (
             <ul>
-              {notices.map((notice) => {
+              {visibleNotices.map((notice) => {
                 const isNew = fresh.has(notice.id) || !notice.read
                 const body = (
                   <>
@@ -1873,6 +1893,9 @@ function ProfileView({
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
   const [privacyOpener, setPrivacyOpener] = useState<HTMLButtonElement | null>(null)
   const closePrivacy = useCallback(() => setPrivacyOpener(null), [])
+  const [notificationOpener, setNotificationOpener] = useState<HTMLButtonElement | null>(null)
+  const closeNotifications = useCallback(() => setNotificationOpener(null), [])
+  useEffect(closeNotifications, [closeNotifications, account?.id])
   const joined = member
     ? new Date(member.joinedAt).toLocaleDateString(undefined, {
         month: "long",
@@ -2086,10 +2109,12 @@ function ProfileView({
           </div>
           <div className="account-card">
             <h3>Account</h3>
-            <button>
-              <Bell size={17} /> Notification preferences{" "}
-              <ArrowRight size={16} />
-            </button>
+            {account && (
+              <button type="button" aria-haspopup="dialog" onClick={(event) => setNotificationOpener(event.currentTarget)}>
+                <Bell size={17} aria-hidden="true" /> Notification preferences{" "}
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            )}
             <button type="button" aria-haspopup="dialog" onClick={(event) => setPrivacyOpener(event.currentTarget)}>
               <ShieldCheck size={17} /> Privacy & security{" "}
               <ArrowRight size={16} />
@@ -2108,6 +2133,9 @@ function ProfileView({
       </div>
       {privacyOpener && (
         <PrivacyDialog key={account?.id ?? "guest"} onClose={closePrivacy} opener={privacyOpener} />
+      )}
+      {account && notificationOpener && (
+        <NotificationPreferencesDialog key={account.id} accountId={account.id} onClose={closeNotifications} opener={notificationOpener} />
       )}
     </section>
   )
