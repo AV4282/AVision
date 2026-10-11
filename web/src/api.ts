@@ -5,7 +5,25 @@
 const API_URL = import.meta.env.VITE_API_URL ?? "/api"
 
 export type Status = "Open" | "Likely fixed" | "Fixed"
-export type Owner = "City of Atlanta" | "GSU Facilities" | "MARTA" | "GDOT"
+export type Owner = "City of Atlanta" | "GSU Facilities" | "Georgia Tech" | "MARTA" | "GDOT"
+
+/** Every department a ticket can belong to, in the order they are listed in menus. */
+export const OWNERS: readonly Owner[] = ["GSU Facilities", "Georgia Tech", "City of Atlanta", "MARTA", "GDOT"]
+
+// The schools AVision covers, as saved in a person's profile.
+export const GSU_SCHOOL = "Georgia State University"
+export const GEORGIA_TECH_SCHOOL = "Georgia Institute of Technology"
+
+/** The department that looks after a school's campus, or null for a school AVision doesn't cover. */
+export function schoolOwner(school: string | null): Owner | null {
+  const name = (school ?? "").trim().toLowerCase()
+  if (name === GSU_SCHOOL.toLowerCase() || name === "gsu" || name === "georgia state") return "GSU Facilities"
+  // Also what people typed under "Another school" before Georgia Tech was listed.
+  if (name === GEORGIA_TECH_SCHOOL.toLowerCase() || name === "georgia tech" || name === "gatech" || name === "gt") {
+    return "Georgia Tech"
+  }
+  return null
+}
 export type VoteChoice = "still_there" | "fixed"
 
 /** A ticket as the UI uses it. */
@@ -54,7 +72,7 @@ export const MAX_TICKET_PHOTOS = 5
 
 // ---------- API shapes and mapping ----------
 
-type ApiOwner = "gsu_facilities" | "city_of_atlanta" | "marta" | "gdot"
+type ApiOwner = "gsu_facilities" | "georgia_tech" | "city_of_atlanta" | "marta" | "gdot"
 type ApiStatus = "open" | "likely_fixed" | "fixed" | "merged"
 
 type ApiTicket = {
@@ -82,6 +100,7 @@ type ApiTicket = {
 const OWNER_FROM_API: Record<ApiOwner, Owner> = {
   city_of_atlanta: "City of Atlanta",
   gsu_facilities: "GSU Facilities",
+  georgia_tech: "Georgia Tech",
   marta: "MARTA",
   gdot: "GDOT",
 }
@@ -278,7 +297,7 @@ export type Member = {
   id: string // AVision user ID (not the Auth0 ID)
   displayName: string | null
   avatarUrl: string | null
-  role: "user" | "facilities_staff"
+  role: "user" | "facilities_staff" | "admin"
   joinedAt: string // ISO timestamp
   // Onboarding answers; null = not answered.
   isStudent: boolean | null
@@ -698,6 +717,56 @@ export async function draftReport(ticket: {
   }
 }
 
+// ---------- notifications ----------
+/**
+ * Something that happened to a ticket the viewer posted or voted on. The server
+ * adds these (api/db.py); nobody is told about their own actions.
+ */
+export type Notice = {
+  id: string
+  /** still_there, marked_fixed, likely_fixed, reopened or removed. */
+  kind: string
+  /** True when the viewer posted the ticket, false when they voted on it. */
+  yours: boolean
+  /** Null once the ticket is gone. */
+  ticketId: string | null
+  ticketTitle: string
+  time: string // e.g. "5 min ago"
+  read: boolean
+}
+
+type ApiNotice = {
+  id: string
+  kind: string
+  yours: boolean
+  ticket_id: string | null
+  ticket_title: string
+  created_at: string
+  read: boolean
+}
+
+/** The viewer's newest notifications, and how many they haven't seen yet. */
+export async function listNotices(): Promise<{ unread: number; items: Notice[] }> {
+  const found = await request<{ unread: number; items: ApiNotice[] }>("GET", "/notifications")
+  return {
+    unread: found.unread,
+    items: found.items.map((n) => ({
+      id: n.id,
+      kind: n.kind,
+      yours: n.yours,
+      ticketId: n.ticket_id,
+      ticketTitle: n.ticket_title,
+      time: timeAgo(n.created_at),
+      read: n.read,
+    })),
+  }
+}
+
+/** Marks notifications as seen, so they stop counting on the bell. */
+export async function markNoticesRead(ids: string[]): Promise<void> {
+  if (ids.length > 0) await request<void>("POST", "/notifications/read", { body: { ids } })
+}
+
 /**
  * Asks the server for a follow-up message about a ticket that is still there,
  * written from the ticket and addressed to its department. Nothing is saved or
@@ -721,9 +790,14 @@ export async function followUpReport(ticket: Ticket): Promise<TicketDraft> {
   }
 }
 
-/** Deletes a ticket. Only the person who posted it can. */
+/** Deletes a ticket. Only the person who posted it can, or an admin. */
 export async function deleteTicket(ticketId: string): Promise<void> {
   await request<void>("DELETE", `/tickets/${ticketId}`)
+}
+
+/** Marks a ticket as fixed. Admins only. */
+export async function closeTicket(ticketId: string): Promise<Ticket> {
+  return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/close`))
 }
 
 export async function vote(ticketId: string, choice: VoteChoice): Promise<Ticket> {

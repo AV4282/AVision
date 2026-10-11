@@ -8,6 +8,7 @@ import type {
 const owners: Record<Ticket["owner"], AvisionMapOwner> = {
   "City of Atlanta": "city",
   "GSU Facilities": "gsu",
+  "Georgia Tech": "gt",
   MARTA: "marta",
   GDOT: "gdot",
 }
@@ -15,6 +16,11 @@ const statuses: Record<Ticket["status"], AvisionMapStatus> = {
   Open: "open",
   "Likely fixed": "likely_fixed",
   Fixed: "fixed",
+}
+
+/** The map's name for a ticket's owner. */
+export function mapOwner(owner: Ticket["owner"]): AvisionMapOwner {
+  return owners[owner] ?? "unknown"
 }
 
 /** Display the API's location, owner and status without deriving routing decisions. */

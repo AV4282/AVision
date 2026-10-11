@@ -206,9 +206,11 @@ function Auth0Bridge({ children }: { children: ReactNode }) {
       signIn: () => {
         setSigningIn(true)
         setStartError(null)
-        // Straight to Google, skipping Auth0's own login page.
+        // Straight to Google, skipping Auth0's own login page. "select_account"
+        // makes Google ask which account to use every time, instead of quietly
+        // reusing the last one, so someone can switch accounts after signing out.
         loginWithRedirect({
-          authorizationParams: { connection: "google-oauth2" },
+          authorizationParams: { connection: "google-oauth2", prompt: "select_account" },
         }).catch(() => {
           setSigningIn(false)
           setStartError("Couldn’t reach the sign-in service. Please try again.")

@@ -37,7 +37,7 @@ const ISSUE_TYPES = [
 
 // The department is chosen on the server when the ticket is posted, by Gemini,
 // from the issue and the place (api/agent.py). These are for picking one by hand.
-const OWNERS: Owner[] = ["City of Atlanta", "GSU Facilities", "MARTA", "GDOT"]
+const OWNERS: Owner[] = ["City of Atlanta", "GSU Facilities", "Georgia Tech", "MARTA", "GDOT"]
 const LET_AVISION_CHOOSE = "auto"
 // What the ticket is filed under if the choice can't be made (the server is unreachable).
 const FALLBACK_OWNER: Owner = "City of Atlanta"

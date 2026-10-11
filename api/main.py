@@ -42,7 +42,7 @@ ALLOWED_ORIGINS = [
 ]
 
 # Same values as reports.owner and the CHECK on tickets.owner.
-Owner = Literal["gsu_facilities", "city_of_atlanta", "marta", "gdot"]
+Owner = Literal["gsu_facilities", "georgia_tech", "city_of_atlanta", "marta", "gdot"]
 Status = Literal["open", "likely_fixed", "fixed", "merged"]
 Vote = Literal["still_there", "fixed"]
 MAX_TICKET_PHOTOS = 5
@@ -77,6 +77,9 @@ def photo_cleanup_loop(stop: threading.Event):
 async def lifespan(_app):
     db.pool.open(wait=True, timeout=15)  # fail at startup, not on the first request
     db.ensure_schema()  # add anything this version needs that the database doesn't have yet
+    if not db.HAS_GEORGIA_TECH:
+        # The database would refuse a Georgia Tech ticket, so don't route anything there.
+        routing.UNAVAILABLE.add("georgia_tech")
     photos.prepare()  # same for the photo folder
     stop = threading.Event()
     # Once at startup (so each deploy tidies up), then every few hours.
@@ -220,7 +223,7 @@ class Me(BaseModel):
     id: UUID  # the AVision user ID; use this, never the Auth0 ID, to link data
     display_name: str | None
     avatar_url: str | None
-    role: Literal["user", "facilities_staff"]
+    role: Literal["user", "facilities_staff", "admin"]  # admin: granted with admin.py
     created_at: datetime
     # Onboarding answers; None = not answered. onboarded_at None = never saved, so ask.
     is_student: bool | None
@@ -478,6 +481,8 @@ def create_ticket(
     Only inside the area AVision covers: the City of Atlanta and MARTA rail stations.
     """
     require_covered(body.lat, body.lng)
+    if body.owner in routing.UNAVAILABLE:
+        raise HTTPException(422, "That department isn't set up on this server yet. Choose another one.")
     try:
         return db.create_ticket(body.model_dump(), caller(authorization, guest_id))
     except db.UnknownUser:
@@ -488,16 +493,34 @@ def create_ticket(
 def delete_ticket(
     ticket_id: UUID, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
 ):
-    """Delete a ticket. Only the person who posted it can. Its votes and photos go with it."""
+    """Delete a ticket. Only the person who posted it can, or an admin. Its votes and photos go with it."""
     user_id = caller(authorization, guest_id, required=True)
     try:
-        photo_urls = db.delete_ticket(ticket_id, user_id)
+        photo_urls = db.delete_ticket(ticket_id, user_id, admin=db.is_admin(user_id))
     except LookupError:
         raise HTTPException(404, "Ticket not found")
     except db.NotYours:
         raise HTTPException(403, "Only the person who posted this ticket can delete it")
     for photo_url in photo_urls:
         photos.delete(photos.name_in(photo_url))
+
+
+@app.post("/tickets/{ticket_id}/close", response_model=Ticket)
+def close_ticket(ticket_id: UUID, authorization: AuthorizationHeader = None):
+    """Mark a ticket as fixed. Admins only. Returns the updated ticket.
+
+    A later "still there" vote can still reopen it, as for any fixed ticket.
+    """
+    user_id = caller(authorization, None, required=True)
+    if not db.is_admin(user_id):
+        raise HTTPException(403, "Only admins can mark a ticket as fixed")
+    try:
+        ticket = db.close_ticket(ticket_id, user_id)
+    except db.TicketMerged:
+        raise HTTPException(409, "This ticket was merged into another; close that one")
+    if ticket is None:
+        raise HTTPException(404, "Ticket not found")
+    return ticket
 
 
 @app.post("/tickets/{ticket_id}/votes", response_model=Ticket)
@@ -517,6 +540,47 @@ def vote(
     if ticket is None:
         raise HTTPException(404, "Ticket not found")
     return ticket
+
+
+# ---------- notifications ----------
+class Notification(BaseModel):
+    id: UUID
+    # still_there, marked_fixed, likely_fixed, reopened or removed (see sql/005_notifications.sql)
+    kind: str
+    # True when the reader posted the ticket, false when they only voted on it.
+    yours: bool
+    # None once the ticket is gone.
+    ticket_id: UUID | None
+    ticket_title: str
+    created_at: datetime
+    read: bool
+
+
+class Notifications(BaseModel):
+    unread: int
+    items: list[Notification]
+
+
+class ReadIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[UUID] = Field(max_length=100)
+
+
+@app.get("/notifications", response_model=Notifications)
+def notifications(authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None):
+    """What happened to the caller's tickets, and to tickets they voted on. Newest first."""
+    user_id = caller(authorization, guest_id, strict=False)
+    if user_id is None:
+        return {"unread": 0, "items": []}
+    return db.list_notifications(user_id)
+
+
+@app.post("/notifications/read", status_code=204)
+def read_notifications(
+    body: ReadIn, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
+):
+    """Mark notifications as seen. Ones that aren't the caller's are left alone."""
+    db.mark_notifications_read(caller(authorization, guest_id, required=True), body.ids)
 
 
 @app.post("/uploads", response_model=Photo, status_code=201)

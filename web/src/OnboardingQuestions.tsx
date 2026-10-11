@@ -1,13 +1,27 @@
 import { useEffect, useId, useState, type FormEvent } from "react"
 import { X } from "lucide-react"
 import { useAccount } from "./auth"
-import type { Member } from "./api"
+import { GEORGIA_TECH_SCHOOL, GSU_SCHOOL, schoolOwner, type Member } from "./api"
 
 // The onboarding questions from the design doc, asked once after a first sign-in
 // and editable later from the profile. Every question can be left unanswered.
 // When opened from "Edit profile", the person can also change their name.
+//
+// The answers decide which tickets the map shows first (see useOwnerFilter in
+// App.tsx): the person's school's tickets, and MARTA's if they ride it.
 
-const GSU = "Georgia State University"
+// The schools AVision covers. Any other school is typed in under "Another school".
+const SCHOOLS = [
+  { id: "gsu", name: GSU_SCHOOL, label: "Georgia State University" },
+  { id: "gt", name: GEORGIA_TECH_SCHOOL, label: "Georgia Tech" },
+] as const
+type SchoolChoice = (typeof SCHOOLS)[number]["id"] | "other"
+
+/** Which choice a saved school is: one of the listed ones, or "other". */
+function choiceFor(school: string | null): SchoolChoice {
+  const owner = schoolOwner(school)
+  return owner === "GSU Facilities" ? "gsu" : owner === "Georgia Tech" ? "gt" : school ? "other" : "gsu"
+}
 
 function YesNo({
   legend,
@@ -54,12 +68,9 @@ export default function OnboardingQuestions({
   const { account, saveOnboarding, saveName } = useAccount()
   const ids = useId()
   const [isStudent, setIsStudent] = useState(member.isStudent)
-  // GSU is the one listed choice; any other school is typed in.
-  const [schoolChoice, setSchoolChoice] = useState<"gsu" | "other">(
-    member.school && member.school !== GSU ? "other" : "gsu",
-  )
+  const [schoolChoice, setSchoolChoice] = useState<SchoolChoice>(choiceFor(member.school))
   const [otherSchool, setOtherSchool] = useState(
-    member.school && member.school !== GSU ? member.school : "",
+    member.school && choiceFor(member.school) === "other" ? member.school : "",
   )
   const [takesMarta, setTakesMarta] = useState(member.takesMarta)
   const currentName = member.displayName || account?.name || ""
@@ -90,7 +101,9 @@ export default function OnboardingQuestions({
       if (!firstTime && newName !== currentName) await saveName(newName)
       await saveOnboarding({
         isStudent,
-        school: isStudent ? (schoolChoice === "gsu" ? GSU : otherSchool.trim() || null) : null,
+        school: isStudent
+          ? (SCHOOLS.find((school) => school.id === schoolChoice)?.name ?? (otherSchool.trim() || null))
+          : null,
         takesMarta,
       })
       onClose()
@@ -146,7 +159,9 @@ export default function OnboardingQuestions({
         )}
 
         <p className="onboarding-intro">
-          These help us show the issues that matter to you. Every question is optional.
+          Your answers pick which tickets the map shows you first. You can
+          switch the others on from the map’s Filters any time. Every question
+          is optional.
         </p>
 
         <YesNo
@@ -160,15 +175,20 @@ export default function OnboardingQuestions({
           <fieldset className="choice-group">
             <legend>What school do you go to?</legend>
             <div className="choice-options">
-              <label className={schoolChoice === "gsu" ? "choice selected" : "choice"}>
-                <input
-                  type="radio"
-                  name={`${ids}-school`}
-                  checked={schoolChoice === "gsu"}
-                  onChange={() => setSchoolChoice("gsu")}
-                />
-                {GSU}
-              </label>
+              {SCHOOLS.map((school) => (
+                <label
+                  key={school.id}
+                  className={schoolChoice === school.id ? "choice selected" : "choice"}
+                >
+                  <input
+                    type="radio"
+                    name={`${ids}-school`}
+                    checked={schoolChoice === school.id}
+                    onChange={() => setSchoolChoice(school.id)}
+                  />
+                  {school.label}
+                </label>
+              ))}
               <label className={schoolChoice === "other" ? "choice selected" : "choice"}>
                 <input
                   type="radio"
@@ -191,6 +211,11 @@ export default function OnboardingQuestions({
                 />
               </label>
             )}
+            <p className="choice-note">
+              {schoolChoice === "other"
+                ? "AVision only covers the Georgia State and Georgia Tech campuses for now, so there are no tickets for other schools yet. You can still see and report anything in the City of Atlanta or on MARTA."
+                : "Georgia State and Georgia Tech are the only schools AVision covers for now."}
+            </p>
           </fieldset>
         )}
 
@@ -200,6 +225,11 @@ export default function OnboardingQuestions({
           value={takesMarta}
           onChange={setTakesMarta}
         />
+
+        <p className="choice-note">
+          AVision covers the City of Atlanta, MARTA, Georgia State and Georgia
+          Tech right now.
+        </p>
 
         {error && (
           <p className="form-error" role="alert">

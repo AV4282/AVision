@@ -51,13 +51,13 @@ One row per person. No emails or passwords.
 | `id` | The AVision user ID. **Link data by this, never by the Auth0 ID** |
 | `auth0_sub` | Unique: `google-oauth2\|…` when signed in, `guest\|…` for guests, `seed\|…` for demo voters |
 | `display_name`, `avatar_url` | From Google at first sign-in; the name can be changed on the profile |
-| `role` | `user` or `facilities_staff` |
+| `role` | `user`, `facilities_staff` or `admin`. Admins can delete any ticket and mark tickets fixed |
 | `is_student`, `school`, `takes_marta`, `onboarded_at` | Onboarding answers; null means not answered. `school` is only allowed for students |
 | `created_at`, `last_login_at` | |
 
 When a guest signs in, their tickets, votes and reports move to the account and the guest row is deleted. If both voted on the same ticket, the account's vote wins.
 
-To make someone Facilities staff: `UPDATE users SET role = 'facilities_staff' WHERE display_name = '<name>';`
+**Admins:** run `python admin.py list`, `python admin.py grant "<name>"` or `python admin.py revoke "<name>"` from `api/`. The person must have signed in once. To make someone Facilities staff: `UPDATE users SET role = 'facilities_staff' WHERE display_name = '<name>';`
 
 ### `reports` and `hotspots_weekly`
 `reports` is a TimescaleDB hypertable (one row per photo submission, in 7-day chunks) holding the full AI output for each report: barriers, severity, confidence, routing reason and the drafted message. `hotspots_weekly` is a continuous aggregate counting reports per week, per ~110 m grid cell and per issue type, refreshed every minute.
@@ -75,8 +75,9 @@ In `api/sql/`, run in order. The live service is already set up, so you need the
 | `001_tickets.sql` | `python migrate.py sql/001_tickets.sql` | `users`, `tickets`, `ticket_votes` |
 | `002_seed_tickets.sql` | `python migrate.py sql/002_seed_tickets.sql` | 6 demo tickets with votes |
 | `003_onboarding.sql` | `python migrate.py sql/003_onboarding.sql` | Onboarding columns on `users` |
+| `004_admin.sql` | `python migrate.py sql/004_admin.sql` | Allows the `admin` role |
 
-`001`–`003` are safe to re-run. Demo rows are marked "(seed)"; the SQL to remove them is at the top of `002_seed_tickets.sql`.
+`001`–`004` are safe to re-run. Demo rows are marked "(seed)"; the SQL to remove them is at the top of `002_seed_tickets.sql`.
 
 ## Resetting test data
 
