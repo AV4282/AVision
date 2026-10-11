@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
 } from "react"
 import {
   ArrowRight,
@@ -42,6 +43,7 @@ import {
   deleteTicket,
   followUpReport,
   listTickets,
+  photoLink,
   PLACEHOLDER_PHOTO,
   vote,
   type Member,
@@ -180,6 +182,27 @@ function Brand({ compact = false }: { compact?: boolean }) {
         AVision
       </span>
     </div>
+  )
+}
+
+/**
+ * What goes inside an avatar circle: the person's profile picture when they
+ * have one (uploaded here, or from their Google account), otherwise their
+ * initials. Falls back to the initials if the picture won't load.
+ */
+function AvatarFace({ member, initials }: { member: Member | null; initials: string }) {
+  const picture = photoLink(member?.avatarUrl ?? null)
+  const [broken, setBroken] = useState<string | null>(null)
+  if (!picture || broken === picture) return <>{initials}</>
+  return (
+    <img
+      className="avatar-photo"
+      src={picture}
+      alt=""
+      // Google's picture links refuse requests that say which site they came from.
+      referrerPolicy="no-referrer"
+      onError={() => setBroken(picture)}
+    />
   )
 }
 
@@ -365,7 +388,7 @@ function Sidebar({
   openCount: number
   onReport: () => void
 }) {
-  const { account } = useAccount()
+  const { account, member } = useAccount()
   const navigate = (next: View) => {
     setView(next)
     onClose()
@@ -430,7 +453,9 @@ function Sidebar({
           </button>
         </nav>
         <div className="sidebar-user">
-          <div className="avatar">{account?.initials ?? "G"}</div>
+          <div className="avatar">
+            <AvatarFace member={member} initials={account?.initials ?? "G"} />
+          </div>
           <div>
             <strong>{account?.name ?? "Guest"}</strong>
             <span>{account ? "Community member" : "Not signed in"}</span>
@@ -453,7 +478,7 @@ function AppHeader({
   onMenu: () => void
   setView: (view: View) => void
 }) {
-  const { account } = useAccount()
+  const { account, member } = useAccount()
   return (
     <header className="app-header">
       <div className="header-title">
@@ -476,7 +501,7 @@ function AppHeader({
           onClick={() => setView("profile")}
           aria-label="My profile"
         >
-          {account?.initials ?? "G"}
+          <AvatarFace member={member} initials={account?.initials ?? "G"} />
         </button>
       </div>
     </header>
@@ -519,8 +544,13 @@ function TicketDetail({
   }
   const [viewingPhoto, setViewingPhoto] = useState(false)
   // Tickets without a photo show a stock picture, which isn't worth enlarging.
-  const hasPhoto = ticket.image !== PLACEHOLDER_PHOTO
-  const photoAlt = hasPhoto ? `Photo of: ${ticket.title}` : "City sidewalk beside a street"
+  const hasPhoto = ticket.images.length > 0
+  // A ticket can have up to five photos; this is the one showing.
+  const [photoIndex, setPhotoIndex] = useState(0)
+  const shownPhoto = ticket.images[Math.min(photoIndex, ticket.images.length - 1)] ?? ticket.image
+  const photoAlt = hasPhoto
+    ? `Photo ${ticket.images.length > 1 ? `${photoIndex + 1} of ${ticket.images.length} ` : ""}of: ${ticket.title}`
+    : "City sidewalk beside a street"
 
   // After a "Still there" vote: offer to write a follow-up to the department.
   // "asking" shows the question, "writing" while the message is drafted, and
@@ -580,7 +610,7 @@ function TicketDetail({
         <X size={18} />
       </button>
       <div className="detail-photo">
-        <img src={ticket.image} alt={photoAlt} />
+        <img src={shownPhoto} alt={photoAlt} />
         <div className="photo-count">
           <Camera size={14} /> {ticket.reports}{" "}
           {ticket.reports === 1 ? "report" : "reports"}
@@ -598,9 +628,25 @@ function TicketDetail({
           </button>
         )}
       </div>
+      {ticket.images.length > 1 && (
+        <div className="detail-thumbs" role="group" aria-label="This ticket’s photos">
+          {ticket.images.map((image, index) => (
+            <button
+              type="button"
+              key={image}
+              className={index === photoIndex ? "selected" : ""}
+              aria-pressed={index === photoIndex}
+              aria-label={`Show photo ${index + 1} of ${ticket.images.length}`}
+              onClick={() => setPhotoIndex(index)}
+            >
+              <img src={image} alt="" />
+            </button>
+          ))}
+        </div>
+      )}
       {viewingPhoto && (
         <PhotoViewer
-          src={ticket.image}
+          src={shownPhoto}
           alt={photoAlt}
           onClose={() => setViewingPhoto(false)}
         />
@@ -1143,7 +1189,30 @@ function ProfileView({
   /** Reopens the onboarding questions (signed-in people only). */
   onEditAnswers: () => void
 }) {
-  const { account, member, memberError, signIn, signOut } = useAccount()
+  const { account, member, memberError, signIn, signOut, savePicture } = useAccount()
+  // Changing the profile picture: pick a file, it uploads, the new one shows.
+  const pictureInput = useRef<HTMLInputElement>(null)
+  const [savingPicture, setSavingPicture] = useState(false)
+  const [pictureError, setPictureError] = useState<string | null>(null)
+
+  async function choosePicture(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = "" // so picking the same file again still counts as a change
+    if (!file || savingPicture) return
+    if (!file.type.startsWith("image/")) {
+      setPictureError("That file isn’t a picture. Choose a JPEG, PNG or WebP image.")
+      return
+    }
+    setSavingPicture(true)
+    setPictureError(null)
+    try {
+      await savePicture(file)
+    } catch (err) {
+      setPictureError(err instanceof Error ? err.message : "Couldn’t save your picture")
+    } finally {
+      setSavingPicture(false)
+    }
+  }
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
   const joined = member
     ? new Date(member.joinedAt).toLocaleDateString(undefined, {
@@ -1170,7 +1239,32 @@ function ProfileView({
         <div className="cover-pattern" />
       </div>
       <div className="profile-summary">
-        <div className="large-avatar">{account?.initials ?? "G"}</div>
+        <div className="large-avatar-wrap">
+          <div className="large-avatar">
+            <AvatarFace member={member} initials={account?.initials ?? "G"} />
+          </div>
+          {account && (
+            <>
+              <input
+                ref={pictureInput}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={choosePicture}
+                hidden
+              />
+              <button
+                type="button"
+                className="change-picture"
+                onClick={() => pictureInput.current?.click()}
+                disabled={savingPicture}
+                aria-label="Change your profile picture"
+                title="Change your profile picture"
+              >
+                <Camera size={15} />
+              </button>
+            </>
+          )}
+        </div>
         <div className="profile-identity">
           <div>
             <h2>{account?.name ?? "Guest"}</h2>
@@ -1189,6 +1283,12 @@ function ProfileView({
           </p>
           {member?.onboardedAt && (
             <p className="profile-answers">{answersSummary(member)}</p>
+          )}
+          {savingPicture && <p className="profile-answers">Saving your picture…</p>}
+          {pictureError && (
+            <p className="account-notice" role="alert">
+              {pictureError}
+            </p>
           )}
           {account && memberError && (
             <p className="account-notice" role="alert">

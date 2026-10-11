@@ -6,6 +6,7 @@ Rows come back as dicts. Endpoints are plain `def`, so this uses the sync pool:
 async psycopg needs a non-default event loop on Windows.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -26,6 +27,39 @@ pool = ConnectionPool(
     kwargs={"row_factory": dict_row},
     open=False,  # opened in main.py's lifespan, so importing this module never connects
 )
+
+
+log = logging.getLogger("uvicorn.error")  # shows up in uvicorn's (and journalctl's) log
+
+# A ticket's photos beyond the first live in tickets.more_photos (sql/004_more_photos.sql).
+# True once that column is known to exist. Until then every query works without it,
+# so the API runs the same before and after the column is added.
+HAS_MORE_PHOTOS = False
+
+
+def ensure_schema():
+    """Add what this version of the API needs to the database, if it isn't there yet.
+
+    Called once at startup. Only ever adds (never changes or removes), and is
+    safe to run every time. If it can't make the change (say the database user
+    isn't allowed to), the API carries on with one photo per ticket.
+    """
+    global HAS_MORE_PHOTOS
+    with pool.connection() as conn:
+        try:
+            conn.execute((HERE / "sql" / "004_more_photos.sql").read_text(encoding="utf-8"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            log.exception("Could not add tickets.more_photos; tickets keep one photo each for now")
+        HAS_MORE_PHOTOS = (
+            conn.execute(
+                """SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema()
+                     AND table_name = 'tickets' AND column_name = 'more_photos'"""
+            ).fetchone()
+            is not None
+        )
 
 
 # 2 for the demo; the design doc's real rule is 3.
@@ -54,7 +88,8 @@ def upsert_user(auth0_sub, display_name=None, avatar_url=None):
     """Find or create the user for a verified Auth0 ID, and record this sign-in.
 
     The first sign-in creates the row; every later one returns the same id.
-    A missing picture keeps the stored one rather than erasing it. The name from
+    A missing picture keeps the stored one rather than erasing it, and a picture
+    the person uploaded themselves (save_avatar) is never replaced. The name from
     Auth0 is only used until there is one stored, so a name the person chose on
     their profile (save_display_name) isn't replaced on their next sign-in.
     """
@@ -65,7 +100,11 @@ def upsert_user(auth0_sub, display_name=None, avatar_url=None):
                ON CONFLICT (auth0_sub) DO UPDATE
                    SET last_login_at = now(),
                        display_name  = coalesce(users.display_name, EXCLUDED.display_name),
-                       avatar_url    = coalesce(EXCLUDED.avatar_url, users.avatar_url)
+                       -- A picture the person uploaded here ("/uploads/...") is theirs
+                       -- to keep; only the one from their sign-in provider is refreshed.
+                       avatar_url    = CASE WHEN users.avatar_url LIKE '/uploads/%%'
+                                            THEN users.avatar_url
+                                            ELSE coalesce(EXCLUDED.avatar_url, users.avatar_url) END
                RETURNING """ + MEMBER_COLUMNS,
             {"sub": auth0_sub, "name": display_name, "avatar": avatar_url},
         ).fetchone()
@@ -94,6 +133,20 @@ def save_display_name(auth0_sub, display_name):
                WHERE auth0_sub = %(sub)s
                RETURNING """ + MEMBER_COLUMNS,
             {"sub": auth0_sub, "name": display_name},
+        ).fetchone()
+
+
+def save_avatar(auth0_sub, path):
+    """Store a signed-in person's uploaded profile picture (a path from photos.save_photo).
+
+    Returns their user, or None if unknown.
+    """
+    with pool.connection() as conn:
+        return conn.execute(
+            """UPDATE users SET avatar_url = %(path)s
+               WHERE auth0_sub = %(sub)s
+               RETURNING """ + MEMBER_COLUMNS,
+            {"sub": auth0_sub, "path": path},
         ).fetchone()
 
 
@@ -181,12 +234,14 @@ class NotYours(Exception):
 def delete_ticket(ticket_id, user_id):
     """Delete a ticket its poster no longer wants, with its votes.
 
-    Reports that point at it are kept but unlinked. Returns the ticket's photo_url
-    (so the caller can delete the file), or raises LookupError / NotYours.
+    Reports that point at it are kept but unlinked. Returns the ticket's photos
+    (so the caller can delete the files), or raises LookupError / NotYours.
     """
+    more = "more_photos" if HAS_MORE_PHOTOS else "'{}'::text[] AS more_photos"
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT created_by, photo_url FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,)
+            f"SELECT created_by, photo_url, {more} FROM tickets WHERE id = %s FOR UPDATE",
+            (ticket_id,),
         ).fetchone()
         if row is None:
             raise LookupError(ticket_id)
@@ -196,18 +251,24 @@ def delete_ticket(ticket_id, user_id):
         conn.execute("UPDATE reports SET ticket_id = NULL WHERE ticket_id = %s", (ticket_id,))
         conn.execute("UPDATE tickets SET merged_into = NULL WHERE merged_into = %s", (ticket_id,))
         conn.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))
-        return row["photo_url"]
+        return [url for url in (row["photo_url"], *row["more_photos"]) if url]
 
 
 def photo_names_in_use():
-    """File names of every photo a ticket points at (see photos.remove_unused)."""
+    """File names of every stored photo something points at (see photos.remove_unused).
+
+    That is each ticket's photos, and each person's uploaded profile picture.
+    """
     import photos  # local import: photos has no reason to load for every db use
 
+    more = "UNION ALL SELECT unnest(more_photos) FROM tickets" if HAS_MORE_PHOTOS else ""
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT photo_url FROM tickets WHERE photo_url IS NOT NULL"
+            f"""SELECT photo_url AS url FROM tickets WHERE photo_url IS NOT NULL
+                {more}
+                UNION ALL SELECT avatar_url FROM users WHERE avatar_url LIKE '/uploads/%%'"""
         ).fetchall()
-    return {name for row in rows if (name := photos.name_in(row["photo_url"]))}
+    return {name for row in rows if (name := photos.name_in(row["url"]))}
 
 
 def create_guest():
@@ -223,9 +284,20 @@ def create_guest():
 # Every ticket read goes through this, so list and detail return the same shape.
 # my_vote is the caller's own vote, or NULL when there is no caller or no vote.
 # created_by_me is true when the caller made the ticket (for the profile page).
+def ticket_select() -> str:
+    """The SELECT every ticket read starts with.
+
+    photo_urls is every photo, the main one first. Built when asked for, since
+    it depends on whether the more_photos column exists yet.
+    """
+    photos_column = "array_prepend(t.photo_url, t.more_photos)" if HAS_MORE_PHOTOS else "ARRAY[t.photo_url]"
+    return TICKET_SELECT.replace("{photo_urls}", f"array_remove({photos_column}, NULL)")
+
+
 TICKET_SELECT = """
 SELECT t.id, t.created_at, t.updated_at, t.issue_type, t.owner, t.lat, t.lng,
-       t.address, t.title, t.description, t.photo_url, t.status, t.report_count,
+       t.address, t.title, t.description, t.photo_url, {photo_urls} AS photo_urls,
+       t.status, t.report_count,
        t.last_seen_at,
        count(v.vote) FILTER (WHERE v.vote = 'still_there') AS still_there,
        count(v.vote) FILTER (WHERE v.vote = 'fixed')       AS fixed,
@@ -240,7 +312,7 @@ LEFT JOIN ticket_votes v ON v.ticket_id = t.id
 def list_tickets(status=None, owner=None, user_id=None, limit=100):
     with pool.connection() as conn:
         return conn.execute(
-            TICKET_SELECT
+            ticket_select()
             + """
             WHERE t.status <> 'merged'
               AND (%(status)s::text IS NULL OR t.status = %(status)s)
@@ -253,7 +325,7 @@ def list_tickets(status=None, owner=None, user_id=None, limit=100):
 
 
 def get_ticket(ticket_id, user_id=None, conn=None):
-    query = TICKET_SELECT + " WHERE t.id = %(id)s GROUP BY t.id"
+    query = ticket_select() + " WHERE t.id = %(id)s GROUP BY t.id"
     params = {"id": ticket_id, "user_id": user_id}
     if conn is not None:
         return conn.execute(query, params).fetchone()
@@ -262,16 +334,21 @@ def get_ticket(ticket_id, user_id=None, conn=None):
 
 
 def create_ticket(ticket, user_id=None):
-    """Insert a ticket from a dict of TicketIn fields and return it in the read shape."""
+    """Insert a ticket from a dict of TicketIn fields and return it in the read shape.
+
+    `more_photo_urls` (the photos after the first) are stored when the database
+    has the column for them, and left out otherwise.
+    """
+    more_column, more_value = (", more_photos", ", %(more_photo_urls)s") if HAS_MORE_PHOTOS else ("", "")
     with pool.connection() as conn:
         try:
             ticket_id = conn.execute(
-                """INSERT INTO tickets (title, issue_type, owner, lat, lng, address,
-                                        description, photo_url, created_by)
+                f"""INSERT INTO tickets (title, issue_type, owner, lat, lng, address,
+                                        description, photo_url, created_by{more_column})
                    VALUES (%(title)s, %(issue_type)s, %(owner)s, %(lat)s, %(lng)s, %(address)s,
-                           %(description)s, %(photo_url)s, %(created_by)s)
+                           %(description)s, %(photo_url)s, %(created_by)s{more_value})
                    RETURNING id""",
-                {**ticket, "created_by": user_id},
+                {"more_photo_urls": [], **ticket, "created_by": user_id},
             ).fetchone()["id"]
         except errors.ForeignKeyViolation:
             raise UnknownUser from None

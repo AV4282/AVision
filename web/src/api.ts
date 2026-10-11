@@ -27,7 +27,10 @@ export type Ticket = {
   myVote: VoteChoice | null
   /** True when this browser's user reported the ticket. */
   mine: boolean // the viewer posted it, so they can delete it
+  /** The main photo, or a stock picture when the ticket has none. */
   image: string
+  /** Every photo on the ticket (up to 5), main one first. Empty when it has none. */
+  images: string[]
   lat: number
   lng: number
 }
@@ -42,7 +45,12 @@ export type NewTicket = {
   address?: string
   description?: string
   photoUrl?: string // path from uploadPhoto(), e.g. "/uploads/abc.jpg"
+  /** The photos after the main one, as paths from uploadPhoto(). Up to 4. */
+  morePhotoUrls?: string[]
 }
+
+/** The most photos one ticket can have. */
+export const MAX_TICKET_PHOTOS = 5
 
 // ---------- API shapes and mapping ----------
 
@@ -61,6 +69,7 @@ type ApiTicket = {
   title: string
   description: string | null
   photo_url: string | null
+  photo_urls?: string[] // every photo, main one first (newer API versions)
   status: ApiStatus
   report_count: number
   last_seen_at: string
@@ -106,6 +115,10 @@ export function timeAgo(iso: string, now = Date.now()): string {
 }
 
 function toTicket(t: ApiTicket): Ticket {
+  // Older API versions sent only the one photo_url.
+  const images = (t.photo_urls ?? (t.photo_url ? [t.photo_url] : []))
+    .map(photoLink)
+    .filter((link): link is string => link !== null)
   return {
     id: t.id,
     code: `AV-${t.id.slice(0, 4).toUpperCase()}`,
@@ -123,7 +136,8 @@ function toTicket(t: ApiTicket): Ticket {
     fixed: t.fixed,
     myVote: t.my_vote,
     mine: t.created_by_me === true,
-    image: photoLink(t.photo_url) || PLACEHOLDER_PHOTO,
+    image: images[0] ?? PLACEHOLDER_PHOTO,
+    images,
     lat: t.lat,
     lng: t.lng,
   }
@@ -252,6 +266,7 @@ export async function createTicket(ticket: NewTicket): Promise<Ticket> {
     address: ticket.address || null,
     description: ticket.description || null,
     photo_url: ticket.photoUrl || null,
+    more_photo_urls: ticket.morePhotoUrls ?? [],
   }
   return toTicket(await request<ApiTicket>("POST", "/tickets", { body }))
 }
@@ -372,6 +387,25 @@ export async function saveOnboarding(
   )
 }
 
+/**
+ * Sets the signed-in person's profile picture. The server shrinks it and keeps
+ * it; faces are not blurred in a profile picture. Later sign-ins keep it.
+ */
+export async function uploadAvatar(accessToken: string, file: File): Promise<Member> {
+  const form = new FormData()
+  form.append("file", await shrinkPhoto(file, 512), "avatar.jpg")
+  const res = await fetch(API_URL + "/me/avatar", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    throw new ApiError(res.status, errorMessage(data?.detail) || `Couldn’t save your picture (${res.status})`)
+  }
+  return toMember((await res.json()) as ApiMember)
+}
+
 /** Changes the signed-in person's display name. Later sign-ins keep it. */
 export async function saveDisplayName(accessToken: string, displayName: string): Promise<Member> {
   return postAsMember(
@@ -394,6 +428,11 @@ export function photoLink(photoUrl: string | null): string | null {
   return photoUrl // older tickets stored a full link
 }
 
+/** A stored photo's path as a complete web address, for putting in a message. */
+function fullLink(photoPath: string): string {
+  return new URL(photoLink(photoPath) ?? photoPath, window.location.origin).href
+}
+
 const PHOTO_MAX_SIDE = 1600 // pixels; the API shrinks to the same size
 
 /**
@@ -401,10 +440,10 @@ const PHOTO_MAX_SIDE = 1600 // pixels; the API shrinks to the same size
  * uploads in a moment even on a weak signal. If the browser can't do it, the
  * original file is sent and the API shrinks it instead.
  */
-async function shrinkPhoto(file: File): Promise<Blob> {
+async function shrinkPhoto(file: File, maxSide = PHOTO_MAX_SIDE): Promise<Blob> {
   try {
     const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" })
-    const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(bitmap.width, bitmap.height))
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
     const canvas = document.createElement("canvas")
     canvas.width = Math.max(1, Math.round(bitmap.width * scale))
     canvas.height = Math.max(1, Math.round(bitmap.height * scale))
@@ -420,6 +459,23 @@ async function shrinkPhoto(file: File): Promise<Blob> {
     return blob ?? file
   } catch {
     return file
+  }
+}
+
+/**
+ * Whether AVision takes reports at a position (the City of Atlanta and MARTA
+ * rail stations). Returns null if it's covered, or the reason it isn't. If the
+ * check itself can't be made, this says "covered": the server checks again
+ * when the ticket is posted.
+ */
+export async function outsideCoverage(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_URL}/coverage?lat=${lat.toFixed(6)}&lng=${lng.toFixed(6)}`)
+    if (!res.ok) return null
+    const area = (await res.json()) as { covered: boolean; reason: string }
+    return area.covered ? null : area.reason
+  } catch {
+    return null
   }
 }
 
@@ -551,13 +607,20 @@ export async function analysisAvailable(): Promise<boolean> {
  * Runs the report agent on a photo that uploadPhoto() already stored.
  * `photoUrl` is the link uploadPhoto() returned. Takes around 10 to 30 seconds.
  */
-export async function analyzePhoto(photoUrl: string, lat: number, lng: number): Promise<PhotoAnalysis> {
+export async function analyzePhoto(
+  photoUrl: string,
+  lat: number,
+  lng: number,
+  /** The report's other photos (paths), to list in the drafted report. The agent looks at the first only. */
+  morePhotoUrls: string[] = [],
+): Promise<PhotoAnalysis> {
   const body = {
     photo: photoUrl.slice(photoUrl.lastIndexOf("/") + 1),
     lat: Number(lat.toFixed(6)),
     lng: Number(lng.toFixed(6)),
-    // The drafted report mentions the photo, so this has to be a full link.
-    photo_url: new URL(photoLink(photoUrl) ?? photoUrl, window.location.origin).href,
+    // The drafted report mentions the photos, so these have to be full links.
+    photo_url: fullLink(photoUrl),
+    more_photo_urls: morePhotoUrls.map(fullLink),
   }
   const found = await request<ApiAnalysis>("POST", "/analyze", { body, auth: false })
   return {
@@ -604,9 +667,10 @@ export async function draftReport(ticket: {
   description?: string
   /** The path uploadPhoto() returned, when the ticket has a photo. */
   photoPath?: string
+  /** The ticket's other photos, as paths. */
+  morePhotoPaths?: string[]
   owner?: Owner
 }): Promise<TicketDraft> {
-  const photoLinkHere = ticket.photoPath ? photoLink(ticket.photoPath) : null
   const body = {
     title: ticket.title,
     issue_type: ticket.issueType,
@@ -615,8 +679,9 @@ export async function draftReport(ticket: {
     address: ticket.address || null,
     description: ticket.description || null,
     photo: ticket.photoPath ? ticket.photoPath.slice(ticket.photoPath.lastIndexOf("/") + 1) : null,
-    // The message mentions the photo, so this has to be a full link.
-    photo_url: photoLinkHere ? new URL(photoLinkHere, window.location.origin).href : null,
+    // The message mentions the photos, so these have to be full links.
+    photo_url: ticket.photoPath ? fullLink(ticket.photoPath) : null,
+    more_photo_urls: (ticket.morePhotoPaths ?? []).map(fullLink),
     owner: ticket.owner ? OWNER_TO_API[ticket.owner] : null,
   }
   const drafted = await request<{
@@ -639,11 +704,9 @@ export async function draftReport(ticket: {
  * sent. Takes a few seconds.
  */
 export async function followUpReport(ticket: Ticket): Promise<TicketDraft> {
-  const body = {
-    // The message mentions the photo, so this has to be a full link. No link for the stock picture.
-    photo_url:
-      ticket.image === PLACEHOLDER_PHOTO ? null : new URL(ticket.image, window.location.origin).href,
-  }
+  // The message mentions the photos, so these have to be full links.
+  const links = ticket.images.map((image) => new URL(image, window.location.origin).href)
+  const body = { photo_url: links[0] ?? null, more_photo_urls: links.slice(1) }
   const drafted = await request<{
     owner: ApiChosenOwner
     contact: OwnerContact
