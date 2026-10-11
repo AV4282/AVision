@@ -291,6 +291,10 @@ function MapBehavior({
 }
 
 const LEGEND_KEY = "avision.map.legend" // where the "hide legend" choice is kept
+// The closest the map zooms in. OpenStreetMap has street tiles down to this level
+// and no further. The map and its tile layer must agree on it: Leaflet's tile
+// layer stops at 18 unless told otherwise, which left the map blank at 19.
+const MAX_ZOOM = 19
 
 export default function AvisionMap({
   height = 600,
@@ -744,7 +748,7 @@ export default function AvisionMap({
         <MapContainer
           bounds={initialBounds}
           minZoom={10}
-          maxZoom={19}
+          maxZoom={MAX_ZOOM}
           zoomControl={true}
           zoomAnimation={!reducedMotion}
           fadeAnimation={!reducedMotion}
@@ -755,6 +759,8 @@ export default function AvisionMap({
           <TileLayer
             url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            maxZoom={MAX_ZOOM}
+            maxNativeZoom={MAX_ZOOM}
             eventHandlers={{ tileerror: () => setTileError(true) }}
           />
           <MapBehavior
