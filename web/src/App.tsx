@@ -642,7 +642,9 @@ function Onboarding({
               You can browse and report anonymously. Voting requires sign-in.
             </p>
           </div>
-          <p className="legal-copy">
+          {/* Hidden until AVision has written Terms and a Privacy Policy to link to.
+              To show it, remove `hidden` and turn the two <u> into links. */}
+          <p className="legal-copy" hidden>
             By continuing, you agree to AVision’s <u>Terms</u> and{" "}
             <u>Privacy Policy</u>.
           </p>
