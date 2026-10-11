@@ -426,7 +426,7 @@ function Sidebar({
             className={view === "issues" ? "nav-item active" : "nav-item"}
             onClick={() => navigate("issues")}
           >
-            <List size={19} /> Current issues
+            <List size={19} /> Issues
             {openCount > 0 && <span className="nav-count">{openCount}</span>}
           </button>
           <button
