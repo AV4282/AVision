@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom"
+import { createStarPattern } from "./star-pattern"
 import {
   Fragment,
   lazy,
@@ -2040,9 +2041,7 @@ function ProfileView({
 
   return (
     <section className="profile-page page-content">
-      <div className="profile-cover">
-        <div className="cover-pattern" />
-      </div>
+      <div className="profile-cover" />
       <div className="profile-summary">
         <div className="large-avatar-wrap">
           <div className="large-avatar">
@@ -2191,8 +2190,8 @@ function ProfileView({
         <aside className="profile-side">
           <div className="impact-card">
             <div className="impact-heading">
-              <span>
-                <Sparkles size={18} />
+              <span className="impact-emoji" aria-hidden="true">
+                ✊
               </span>
               <div>
                 <p>YOUR COMMUNITY IMPACT</p>
@@ -2311,6 +2310,17 @@ function MobileNav({
 
 export default function App() {
   const auth = useAccount()
+  const accountId = auth.account?.id
+  useEffect(() => {
+    if (!auth.ready) return
+    let current = true
+    createStarPattern().then((pattern) => {
+      if (current) document.documentElement.style.setProperty("--dark-stars", pattern)
+    }).catch(() => {
+      // The CSS background keeps its static pattern if the asset is unavailable.
+    })
+    return () => { current = false }
+  }, [auth.ready, accountId])
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)

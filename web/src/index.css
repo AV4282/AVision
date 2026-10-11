@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=Sedgwick+Ave+Display&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -72,6 +72,14 @@
   font-synthesis: none;
 }
 
+/* Every h1 and h2 uses the graffiti handstyle from the AVision header. It has one weight. */
+h1,
+h2 {
+  font-family: "Sedgwick Ave Display", "Manrope", sans-serif;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
 /* Brand fills and agency swatches stay distinct from accessible text accents. */
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -134,6 +142,18 @@
   --danger-surface: #472e35;
   --danger-text: #ffb4ab;
   --shadow: 0 16px 42px rgba(3, 9, 18, 0.32);
+}
+
+/* Only the page canvas gets stars; content surfaces cover the decoration. */
+:root[data-theme="dark"] .app-main {
+  background-image: linear-gradient(var(--page), var(--page)), var(--dark-stars, url("/dark-stars.svg"));
+  background-size: 100% 74px, 960px 760px;
+  background-repeat: no-repeat, repeat;
+}
+
+/* These text groups otherwise sit directly on the transparent page canvas. */
+:root[data-theme="dark"] :is(.page-heading > div, .profile-summary) {
+  background-color: var(--page);
 }
 
 .onboarding-actions {
@@ -287,13 +307,13 @@ summary:focus-visible {
 }
 
 .brand-name {
-  font: 800 24px/1 "Manrope", sans-serif;
-  letter-spacing: -1px;
+  /* Graffiti handstyle; it has one weight, and needs a little more size than Manrope did */
+  font: 400 28px/1 "Sedgwick Ave Display", "Manrope", sans-serif;
   color: var(--ink);
 }
 
 .brand-name.compact {
-  font-size: 21px;
+  font-size: 25px;
 }
 
 .onboarding-shell {
@@ -469,8 +489,7 @@ summary:focus-visible {
 .story-content h1 {
   max-width: 580px;
   margin: 0;
-  font: 800 clamp(38px, 4vw, 60px) / 1.08 "Manrope", sans-serif;
-  letter-spacing: -2.5px;
+  font: 400 clamp(38px, 4vw, 60px) / 1.08 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .story-copy {
@@ -683,8 +702,7 @@ summary:focus-visible {
 
 .auth-card h2 {
   margin: 0;
-  font: 800 34px/1.2 "Manrope", sans-serif;
-  letter-spacing: -1.2px;
+  font: 400 34px/1.2 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .auth-copy {
@@ -850,8 +868,8 @@ summary:focus-visible {
   border-radius: 9px;
   color: var(--text-nav);
   background: transparent;
-  font-size: 14px;
-  font-weight: 600;
+  /* Same graffiti handstyle as the AVision header; one weight, so a bit larger */
+  font: 400 17px/1 "Sedgwick Ave Display", "DM Sans", sans-serif;
   cursor: pointer;
 }
 
@@ -862,7 +880,6 @@ summary:focus-visible {
 .nav-item.active {
   color: var(--accent);
   background: var(--blue-soft);
-  font-weight: 700;
 }
 
 .nav-count {
@@ -872,7 +889,7 @@ summary:focus-visible {
   border-radius: 10px;
   color: var(--muted);
   background: var(--count-surface);
-  font-size: 10px;
+  font: 600 10px/1.4 "DM Sans", sans-serif; /* numbers stay easy to read */
 }
 
 .report-card {
@@ -1126,8 +1143,8 @@ summary:focus-visible {
 
 .header-title h1 {
   margin: 0;
-  font: 700 18px/1.3 "Manrope", sans-serif;
-  letter-spacing: -0.35px;
+  /* Same graffiti handstyle as the AVision header; one weight, so a bit larger */
+  font: 400 22px/1.2 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .header-title p {
@@ -1578,6 +1595,7 @@ summary:focus-visible {
 
 .detail-body h2 {
   margin: 12px 0 6px;
+  /* Ticket titles are what people typed, so they keep the plain, readable font */
   font: 800 21px/1.2 "Manrope", sans-serif;
   letter-spacing: -0.5px;
 }
@@ -1785,8 +1803,7 @@ summary:focus-visible {
 
 .page-heading h2 {
   margin: 0;
-  font: 800 30px/1.25 "Manrope", sans-serif;
-  letter-spacing: -1px;
+  font: 400 30px/1.25 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .page-heading > div > p:last-child {
@@ -2130,17 +2147,8 @@ summary:focus-visible {
   position: relative;
   overflow: hidden;
   border-radius: 16px;
-  background: linear-gradient(120deg, var(--green), #16796c);
-}
-
-.cover-pattern {
-  position: absolute;
-  inset: -40%;
-  opacity: 0.16;
-  transform: rotate(-8deg);
-  background-image: linear-gradient(35deg, transparent 47%, white 48%, white 49%, transparent 50%),
-    linear-gradient(95deg, transparent 47%, white 48%, white 49%, transparent 50%);
-  background-size: 150px 130px, 240px 200px;
+  /* Atlanta skyline at dusk; the green shows while the photo loads */
+  background: var(--green) url("/skyline-banner.jpg") center 35% / cover no-repeat;
 }
 
 .profile-summary {
@@ -2189,7 +2197,7 @@ summary:focus-visible {
 
 .profile-identity h2 {
   margin: 0;
-  font: 800 22px/1.3 "Manrope", sans-serif;
+  font: 400 22px/1.3 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .member-badge {
@@ -2390,6 +2398,13 @@ summary:focus-visible {
   background: var(--lavender);
 }
 
+/* The emoji fills the badge's space on its own, with no square behind it */
+.impact-heading > .impact-emoji {
+  background: none;
+  font-size: 34px;
+  line-height: 1;
+}
+
 .impact-heading p {
   margin: 0;
   color: var(--green-text);
@@ -2534,6 +2549,10 @@ summary:focus-visible {
 }
 
 @media (max-width: 800px) {
+  :root[data-theme="dark"] .app-main {
+    background-size: 100% 68px, 960px 760px;
+  }
+
   .onboarding-header {
     height: 68px;
   }
@@ -2753,7 +2772,6 @@ summary:focus-visible {
 
   .story-content h1 {
     font-size: 36px;
-    letter-spacing: -1.6px;
   }
 
   .story-copy {
@@ -3037,8 +3055,7 @@ summary:focus-visible {
 
 .resources-header h2 {
   margin: 0;
-  font: 800 26px/1.25 "Manrope", sans-serif;
-  letter-spacing: -0.6px;
+  font: 400 26px/1.25 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .resources-header p:last-child {
@@ -3241,8 +3258,7 @@ summary:focus-visible {
 
 .report-header h2 {
   margin: 0;
-  font: 800 24px/1.25 "Manrope", sans-serif;
-  letter-spacing: -0.6px;
+  font: 400 24px/1.25 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .dialog-close {
@@ -4544,8 +4560,7 @@ summary:focus-visible {
 
 .privacy-header h2 {
   margin: 0;
-  font: 800 26px/1.25 "Manrope", sans-serif;
-  letter-spacing: -0.6px;
+  font: 400 26px/1.25 "Sedgwick Ave Display", "Manrope", sans-serif;
 }
 
 .privacy-header p:last-child {
