@@ -229,13 +229,8 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
           <div className="story-glow one" />
           <div className="story-glow two" />
           <div className="story-map-lines" />
-<<<<<<< HEAD
           {/* The key replays the entrance animation when the panel changes. */}
           <div className="story-content" key={step}>
-            <div className="story-icon">{panel.icon}</div>
-=======
-          <div className="story-content">
->>>>>>> 7e22890fa4090dd7e0c988dea3e906d80cc64d14
             <p className="eyebrow light">{panel.eyebrow}</p>
             {/* Each word is its own piece so the title can come in word by word.
                 Screen readers get the whole sentence at once. */}
