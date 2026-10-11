@@ -43,6 +43,7 @@ import {
   closeTicket,
   deleteTicket,
   followUpReport,
+  getTicket,
   listNotices,
   listTickets,
   markNoticesRead,
@@ -51,6 +52,7 @@ import {
   photoLink,
   PLACEHOLDER_PHOTO,
   vote,
+  watchLive,
   type Member,
   type Notice,
   type Owner,
@@ -79,6 +81,8 @@ type TicketsState = {
   replaceTicket: (ticket: Ticket) => void
   /** Put a just-created ticket at the top, matching the API's newest-first order. */
   addTicket: (ticket: Ticket) => void
+  /** Take in a ticket the server says changed: updated in place, or added at the top if new. */
+  upsertTicket: (ticket: Ticket) => void
   /** Drop a ticket that was just deleted. */
   removeTicket: (id: string) => void
 }
@@ -123,10 +127,72 @@ function useTickets(): TicketsState {
       ...current.filter((ticket) => ticket.id !== created.id),
     ])
   }, [])
+  const upsertTicket = useCallback((fresh: Ticket) => {
+    setTickets((current) =>
+      current.some((ticket) => ticket.id === fresh.id)
+        ? current.map((ticket) => (ticket.id === fresh.id ? fresh : ticket))
+        : [fresh, ...current],
+    )
+  }, [])
   const removeTicket = useCallback((id: string) => {
     setTickets((current) => current.filter((ticket) => ticket.id !== id))
   }, [])
-  return { tickets, loading, error, reload, replaceTicket, addTicket, removeTicket }
+  return { tickets, loading, error, reload, replaceTicket, addTicket, upsertTicket, removeTicket }
+}
+
+// Several changes to one ticket in a row (two people voting at once) are
+// fetched once, this long after the first.
+const LIVE_SETTLE_MS = 150
+
+/**
+ * Keeps the tickets up to date while the page is open: the server says which
+ * ticket changed (see watchLive), and this fetches that one ticket as the
+ * viewer sees it. After a dropped connection, everything is reloaded.
+ *
+ * Returns whether the live connection is up, and a number that goes up each
+ * time the bell should check for news (a change to a ticket the viewer posted
+ * or voted on).
+ */
+function useLiveTickets(state: TicketsState): { connected: boolean; bellNudge: number } {
+  const [connected, setConnected] = useState(false)
+  const [bellNudge, setBellNudge] = useState(0)
+  const ticketsNow = useRef(state.tickets)
+  ticketsNow.current = state.tickets
+  const { upsertTicket, removeTicket, reload } = state
+
+  useEffect(() => {
+    // Timers by ticket ID. (A plain object: "Map" in this file is the map icon.)
+    const waiting: Record<string, number> = {}
+    const stop = watchLive({
+      onEvent(event) {
+        const known = ticketsNow.current.find((ticket) => ticket.id === event.id)
+        if (known && (known.mine || known.myVote)) setBellNudge((count) => count + 1)
+        window.clearTimeout(waiting[event.id])
+        delete waiting[event.id]
+        if (event.type === "ticket_deleted") {
+          removeTicket(event.id)
+          return
+        }
+        waiting[event.id] = window.setTimeout(() => {
+          delete waiting[event.id]
+          getTicket(event.id)
+            .then((fresh) => (fresh ? upsertTicket(fresh) : removeTicket(event.id)))
+            .catch(() => {}) // shown as it was; the next change or reload fixes it
+        }, LIVE_SETTLE_MS)
+      },
+      onReconnect() {
+        reload()
+        setBellNudge((count) => count + 1)
+      },
+      onStatus: setConnected,
+    })
+    return () => {
+      stop()
+      Object.values(waiting).forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [upsertTicket, removeTicket, reload])
+
+  return { connected, bellNudge }
 }
 
 /** Loading, error, and empty states shared by the map and the issues list. */
@@ -550,10 +616,16 @@ function noticeText(notice: Notice): string {
       return notice.yours
         ? "Your ticket is now marked likely fixed."
         : "A ticket you voted on is now marked likely fixed."
+    case "fixed":
+      return notice.yours
+        ? "Your ticket was marked fixed by an admin."
+        : "A ticket you voted on was marked fixed by an admin."
     case "reopened":
       return "Your ticket was reopened. Someone says it is still there."
     case "removed":
-      return "A ticket you voted on was removed by the person who posted it."
+      return notice.yours
+        ? "Your ticket was removed by an admin."
+        : "A ticket you voted on was removed."
     default: // a kind added to the server after this page was loaded
       return notice.yours ? "Your ticket was updated." : "A ticket you voted on was updated."
   }
@@ -567,10 +639,13 @@ function noticeText(notice: Notice): string {
 function NotificationBell({
   onOpenTicket,
   onNews,
+  nudge,
 }: {
   onOpenTicket: (ticketId: string) => void
   /** Called when something new arrives, so the page can refresh its tickets. */
   onNews: () => void
+  /** Goes up when a live update says there may be news, so the bell checks right away. */
+  nudge: number
 }) {
   const { member } = useAccount()
   const [notices, setNotices] = useState<Notice[]>([])
@@ -611,6 +686,10 @@ function NotificationBell({
       window.removeEventListener("focus", whenSeen)
     }
   }, [check, memberId])
+
+  useEffect(() => {
+    if (nudge > 0) check()
+  }, [nudge, check])
 
   const close = useCallback(() => {
     setOpen(false)
@@ -722,6 +801,8 @@ function AppHeader({
   setView,
   onOpenTicket,
   onNews,
+  live,
+  bellNudge,
 }: {
   title: string
   subtitle: string
@@ -729,6 +810,9 @@ function AppHeader({
   setView: (view: View) => void
   onOpenTicket: (ticketId: string) => void
   onNews: () => void
+  /** True while the page is receiving live updates. */
+  live: boolean
+  bellNudge: number
 }) {
   const { account, member } = useAccount()
   return (
@@ -743,8 +827,14 @@ function AppHeader({
         </div>
       </div>
       <div className="header-actions">
+        {live && (
+          <span className="live-pill" title="This page updates by itself when tickets change">
+            <i aria-hidden="true" />
+            Live
+          </span>
+        )}
         <ThemeToggle />
-        <NotificationBell onOpenTicket={onOpenTicket} onNews={onNews} />
+        <NotificationBell onOpenTicket={onOpenTicket} onNews={onNews} nudge={bellNudge} />
         <button
           className="header-avatar"
           onClick={() => setView("profile")}
@@ -1882,6 +1972,7 @@ export default function App() {
   // The ticket opened on top of the page, from a list or "View full ticket".
   const [openId, setOpenId] = useState<string | null>(null)
   const ticketsState = useTickets()
+  const live = useLiveTickets(ticketsState)
   // Once a sign-in is confirmed, reload: "yours" and your votes now come from the account.
   const memberId = auth.member?.id
   const reloadTickets = ticketsState.reload
@@ -1958,6 +2049,8 @@ export default function App() {
             setOpenId(id)
           }}
           onNews={reloadTickets}
+          live={live.connected}
+          bellNudge={live.bellNudge}
         />
         {page === "map" && (
           <MapView

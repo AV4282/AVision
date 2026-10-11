@@ -56,7 +56,12 @@ def ensure_schema():
     """
     global HAS_MORE_PHOTOS, HAS_NOTIFICATIONS, HAS_GEORGIA_TECH
     with pool.connection() as conn:
-        for name in ("004_more_photos.sql", "005_notifications.sql", "006_georgia_tech.sql"):
+        for name in (
+            "004_admin.sql",
+            "004_more_photos.sql",
+            "005_notifications.sql",
+            "006_georgia_tech.sql",
+        ):
             try:
                 conn.execute((HERE / "sql" / name).read_text(encoding="utf-8"))
                 conn.commit()
@@ -295,8 +300,10 @@ def delete_ticket(ticket_id, user_id, admin=False):
             raise LookupError(ticket_id)
         if not admin and (user_id is None or row["created_by"] != user_id):
             raise NotYours
-        # Tell the people who voted on it, while the votes still say who they are.
+        # Tell the people who voted on it, while the votes still say who they are,
+        # and the poster too when it was an admin who removed it.
         _notify(conn, _TELL_VOTERS, ticket_id, user_id, "removed", keep_link=False)
+        _notify(conn, _TELL_POSTER, ticket_id, user_id, "removed", keep_link=False)
         conn.execute("DELETE FROM ticket_votes WHERE ticket_id = %s", (ticket_id,))
         conn.execute("UPDATE reports SET ticket_id = NULL WHERE ticket_id = %s", (ticket_id,))
         conn.execute("UPDATE tickets SET merged_into = NULL WHERE merged_into = %s", (ticket_id,))
@@ -422,6 +429,9 @@ def close_ticket(ticket_id, user_id):
         conn.execute(
             "UPDATE tickets SET status = 'fixed', updated_at = now() WHERE id = %s", (ticket_id,)
         )
+        if row["status"] != "fixed":
+            _notify(conn, _TELL_VOTERS, ticket_id, user_id, "fixed")
+            _notify(conn, _TELL_POSTER, ticket_id, user_id, "fixed")
         return get_ticket(ticket_id, user_id, conn)
 
 
@@ -499,7 +509,7 @@ _NOT_A_REPEAT = """NOT EXISTS (
 # The person who posted the ticket.
 _TELL_POSTER = """
 INSERT INTO notifications (user_id, ticket_id, ticket_title, kind, yours, actor_id)
-SELECT t.created_by, t.id, t.title, %(kind)s, true, %(actor)s::uuid
+SELECT t.created_by, CASE WHEN %(keep_link)s THEN t.id END, t.title, %(kind)s, true, %(actor)s::uuid
 FROM tickets t
 WHERE t.id = %(ticket)s AND t.created_by IS NOT NULL
   AND t.created_by IS DISTINCT FROM %(actor)s::uuid

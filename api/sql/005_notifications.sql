@@ -3,8 +3,9 @@
 -- (db.ensure_schema), so nobody has to remember to.
 --
 -- One row each time something happens to a ticket that a person cares about:
---   * a ticket they posted: someone else voted on it, or its status changed
---   * a ticket they voted on: it became likely fixed, or its poster removed it
+--   * a ticket they posted: someone else voted on it, its status changed, or an
+--     admin marked it fixed or removed it
+--   * a ticket they voted on: it became likely fixed, was marked fixed, or was removed
 -- Nobody gets a row for something they did themselves.
 --
 -- ticket_title is copied in, so the row still reads right after the ticket is
@@ -14,7 +15,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id      uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,   -- who is told
     ticket_id    uuid        REFERENCES tickets(id) ON DELETE CASCADE,
     ticket_title text        NOT NULL,
-    kind         text        NOT NULL,   -- still_there, marked_fixed, likely_fixed, reopened, removed
+    kind         text        NOT NULL,   -- still_there, marked_fixed, likely_fixed, fixed, reopened, removed
     yours        boolean     NOT NULL,   -- true: they posted the ticket. false: they voted on it
     actor_id     uuid,                   -- who did it. Never shown; only stops repeats
     created_at   timestamptz NOT NULL DEFAULT now(),

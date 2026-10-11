@@ -275,6 +275,92 @@ export async function listTickets(filters: { status?: Status; owner?: Owner } = 
   return (await request<ApiTicket[]>("GET", `/tickets${query}`)).map(toTicket)
 }
 
+/** One ticket as the viewer sees it, or null when it no longer exists. */
+export async function getTicket(ticketId: string): Promise<Ticket | null> {
+  try {
+    const found = await request<ApiTicket>("GET", `/tickets/${ticketId}`)
+    // A merged ticket lives on as another one; this one is gone from every list.
+    return found.status === "merged" ? null : toTicket(found)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+// ---------- live updates ----------
+/** What the server says when a ticket changes. Only which ticket and what kind of change. */
+export type LiveEvent = {
+  type: "ticket_created" | "ticket_changed" | "ticket_deleted"
+  id: string
+}
+
+// How long to wait before connecting again after the server turned us away,
+// and the longest that wait is allowed to grow to.
+const LIVE_RETRY_MS = 3_000
+const LIVE_RETRY_MAX_MS = 30_000
+
+/**
+ * Listens to the server's stream of ticket changes (GET /events, see api/live.py),
+ * so the page updates the moment someone posts, votes or deletes. Returns a
+ * function that stops listening.
+ *
+ * The stream is the same for everyone and carries no personal details, so no
+ * sign-in is sent with it. If it can't be reached the page still works; it just
+ * goes back to showing changes on the next reload.
+ */
+export function watchLive(handlers: {
+  onEvent: (event: LiveEvent) => void
+  /** Connected again after being cut off. Anything may have changed in between. */
+  onReconnect: () => void
+  /** True while connected. */
+  onStatus?: (connected: boolean) => void
+}): () => void {
+  if (typeof EventSource === "undefined") return () => {}
+  let source: EventSource | null = null
+  let stopped = false
+  let missedSome = false
+  let wait = LIVE_RETRY_MS
+  let retry: number | undefined
+
+  const connect = () => {
+    source = new EventSource(`${API_URL}/events`)
+    source.onopen = () => {
+      wait = LIVE_RETRY_MS
+      handlers.onStatus?.(true)
+      if (missedSome) handlers.onReconnect()
+      missedSome = false
+    }
+    source.onmessage = (message) => {
+      try {
+        const event = JSON.parse(message.data) as Partial<LiveEvent> | null
+        if (event && typeof event.id === "string" && typeof event.type === "string") {
+          handlers.onEvent(event as LiveEvent)
+        }
+      } catch {
+        // Not a line this version understands. Skip it.
+      }
+    }
+    source.onerror = () => {
+      missedSome = true
+      handlers.onStatus?.(false)
+      // A dropped connection is retried by the browser. An error answer (the
+      // server restarting, say) makes it give up for good, so then it's on us:
+      // try again, waiting a little longer each time.
+      if (source?.readyState === EventSource.CLOSED && !stopped) {
+        retry = window.setTimeout(connect, wait)
+        wait = Math.min(wait * 2, LIVE_RETRY_MAX_MS)
+      }
+    }
+  }
+  connect()
+
+  return () => {
+    stopped = true
+    window.clearTimeout(retry)
+    source?.close()
+  }
+}
+
 export async function createTicket(ticket: NewTicket): Promise<Ticket> {
   const body = {
     title: ticket.title,
@@ -724,7 +810,7 @@ export async function draftReport(ticket: {
  */
 export type Notice = {
   id: string
-  /** still_there, marked_fixed, likely_fixed, reopened or removed. */
+  /** still_there, marked_fixed, likely_fixed, fixed, reopened or removed. */
   kind: string
   /** True when the viewer posted the ticket, false when they voted on it. */
   yours: boolean

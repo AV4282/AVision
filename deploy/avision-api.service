@@ -16,7 +16,11 @@ User=avision
 Group=avision
 WorkingDirectory=/opt/avision/api
 # Only reachable from this server; Caddy forwards /api/* to it.
-ExecStart=/opt/avision/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+# One process only: live updates (api/live.py) are passed around inside it, so
+# do not add --workers. Pages keep a request open for those updates; the API
+# ends them itself when told to stop, and the timeout is the backstop so a
+# restart can never hang on one.
+ExecStart=/opt/avision/api/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --timeout-graceful-shutdown 10
 # Uploaded ticket photos are kept in /var/lib/avision/uploads, outside the code
 # folder, so updating the site never touches them. systemd creates
 # /var/lib/avision and gives it to the user above.

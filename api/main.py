@@ -12,8 +12,10 @@ Callers identify themselves in one of two ways (see caller() below):
     accepted this way, so nobody can act as a signed-in person by sending their ID.
 """
 
+import asyncio
 import logging
 import os
+import signal
 import threading
 import time
 from collections import deque
@@ -25,13 +27,14 @@ from uuid import UUID
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 import db  # first: it loads api/.env, which the modules below read their settings from
 import agent
 import auth
 import gemini
+import live
 import photos
 import routing
 
@@ -73,8 +76,35 @@ def photo_cleanup_loop(stop: threading.Event):
         clean_up_photos()
 
 
+def end_live_streams_on_shutdown():
+    """Make stopping the server end the open /events streams first.
+
+    The server waits for requests in progress before it stops, and an /events
+    stream never finishes by itself, so a restart would hang until it is killed.
+    This runs live.hub.close() when the stop signal arrives, then hands the
+    signal on to the server as before.
+    """
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):  # SIGBREAK is Windows only
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        before = signal.getsignal(number)
+
+        def handler(signum, frame, before=before):
+            live.hub.close()
+            if callable(before):
+                before(signum, frame)
+
+        try:
+            signal.signal(number, handler)
+        except ValueError:
+            pass  # not the main thread (some test runners); streams end when the process does
+
+
 @asynccontextmanager
 async def lifespan(_app):
+    live.hub.start(asyncio.get_running_loop())
+    end_live_streams_on_shutdown()
     db.pool.open(wait=True, timeout=15)  # fail at startup, not on the first request
     db.ensure_schema()  # add anything this version needs that the database doesn't have yet
     if not db.HAS_GEORGIA_TECH:
@@ -88,6 +118,7 @@ async def lifespan(_app):
     )
     cleanup.start()
     yield
+    live.hub.close()
     stop.set()
     cleanup.join(timeout=5)
     db.pool.close()
@@ -354,7 +385,13 @@ def caller(
 def health():
     # photo_privacy: whether uploads go through the face and plate blurring service.
     # version: the commit this server is running, to tell whether a deploy has landed.
-    return {"ok": db.ping(), "photo_privacy": bool(photos.PRIVACY_URL), "version": VERSION}
+    # live: how many pages are listening for live updates right now (GET /events).
+    return {
+        "ok": db.ping(),
+        "photo_privacy": bool(photos.PRIVACY_URL),
+        "version": VERSION,
+        "live": live.hub.listeners(),
+    }
 
 
 @app.post("/me", response_model=Me)
@@ -484,9 +521,11 @@ def create_ticket(
     if body.owner in routing.UNAVAILABLE:
         raise HTTPException(422, "That department isn't set up on this server yet. Choose another one.")
     try:
-        return db.create_ticket(body.model_dump(), caller(authorization, guest_id))
+        ticket = db.create_ticket(body.model_dump(), caller(authorization, guest_id))
     except db.UnknownUser:
         raise HTTPException(401, "Unknown X-User-Id; get a new one from POST /guests")
+    live.publish("ticket_created", ticket["id"])
+    return ticket
 
 
 @app.delete("/tickets/{ticket_id}", status_code=204)
@@ -501,6 +540,7 @@ def delete_ticket(
         raise HTTPException(404, "Ticket not found")
     except db.NotYours:
         raise HTTPException(403, "Only the person who posted this ticket can delete it")
+    live.publish("ticket_deleted", ticket_id)
     for photo_url in photo_urls:
         photos.delete(photos.name_in(photo_url))
 
@@ -520,6 +560,7 @@ def close_ticket(ticket_id: UUID, authorization: AuthorizationHeader = None):
         raise HTTPException(409, "This ticket was merged into another; close that one")
     if ticket is None:
         raise HTTPException(404, "Ticket not found")
+    live.publish("ticket_changed", ticket_id)
     return ticket
 
 
@@ -539,13 +580,33 @@ def vote(
         raise HTTPException(409, "This ticket was merged into another; vote on that one")
     if ticket is None:
         raise HTTPException(404, "Ticket not found")
+    live.publish("ticket_changed", ticket_id)
     return ticket
+
+
+# ---------- live updates ----------
+@app.get("/events")
+async def events():
+    """A stream of ticket changes, for pages to stay up to date without reloading.
+
+    Server-sent events. Each one is a line of JSON: {"type", "id"}, where type is
+    ticket_created, ticket_changed or ticket_deleted and id is the ticket. Nothing
+    about who did it. See live.py.
+    """
+    return StreamingResponse(
+        live.hub.stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",  # no-transform: proxies must not buffer or compress it
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------- notifications ----------
 class Notification(BaseModel):
     id: UUID
-    # still_there, marked_fixed, likely_fixed, reopened or removed (see sql/005_notifications.sql)
+    # still_there, marked_fixed, likely_fixed, fixed, reopened or removed (see sql/005_notifications.sql)
     kind: str
     # True when the reader posted the ticket, false when they only voted on it.
     yours: bool
