@@ -88,9 +88,9 @@ Faces and license plates are blurred by a second program, the photo privacy serv
 
 The "fill in the form from this photo" feature needs keys in `/opt/avision/api/.env`, next to `DATABASE_URL`. The full list with examples is in `api/sql/.env.example`.
 
-- `GEMINI_API_KEY` turns the feature on. It also lets Gemini choose the department and write the message when a ticket is posted; without it, fixed map rules and a plain template do that.
-- The Foundry settings make a Microsoft Foundry agent steer each report. Without them, or when the agent is slow or failing, the server finishes the report itself.
-- The free Gemini allowance is 20 requests a day (one per report). Turn on billing for the key's project in Google AI Studio before a demo.
+- `ANTHROPIC_API_KEY` (Claude) or `GEMINI_API_KEY` turns the feature on. With both set, Claude is asked first and Gemini is the backup. The AI also screens each report, chooses the department and writes the message when a ticket is posted; without a key, fixed map rules and a plain template do that and nothing is screened.
+- The Foundry settings make a Microsoft Foundry agent steer each report. They are left out on the live server since 2026-10-11, so the server finishes each report itself.
+- The Claude account needs credit. The free Gemini allowance is 20 requests a day (one per report).
 
 After changing the file:
 
@@ -99,9 +99,9 @@ systemctl restart avision-api
 cd /opt/avision/api && UPLOAD_DIR=/var/lib/avision/uploads PHOTO_PRIVACY_URL=http://127.0.0.1:8001 .venv/bin/python check_agent.py
 ```
 
-`check_agent.py` tests Gemini (the photo, the choice of department, the message), the routing data, the address lookup, the photo privacy service and Foundry with the real services, and prints PASS or FAIL for each with the reason. Leave `PHOTO_PRIVACY_URL=...` off the command on a server that does not run the photo privacy service.
+`check_agent.py` says which AI is asked first, then tests the AI (the photo, the choice of department, the message), the routing data, the address lookup, the photo privacy service and Foundry (when its settings are present) with the real services, and prints PASS or FAIL for each with the reason. Leave `PHOTO_PRIVACY_URL=...` off the command on a server that does not run the photo privacy service.
 
-The departments, their email addresses and what each one looks after are in `api/data/contacts.json`. Gemini may only choose a department that has an email address there.
+The departments, their email addresses and what each one looks after are in `api/data/contacts.json`. The AI may only choose a department that has an email address there.
 
 ## Day to day
 

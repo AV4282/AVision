@@ -1,6 +1,6 @@
 # AVision
 
-AVision turns a photo of a street or campus accessibility problem into a public ticket, routed to whoever owns the fix: **GSU Facilities**, the **City of Atlanta** (ATL311) or **MARTA**. Other people vote on whether the issue is still there, and their votes move the ticket toward "fixed."
+AVision turns a photo of a street or campus accessibility problem into a public ticket, routed to whoever owns the fix: **GSU Facilities**, **Georgia Tech**, the **City of Atlanta** (ATL311) or **MARTA**. Other people vote on whether the issue is still there, and their votes move the ticket toward "fixed."
 
 Built for the Social Good track at Hacklanta '26 (Oct 9–11, Georgia State University), with an Atlanta and GSU-first scope. AVision never sends reports on its own, and it describes findings as "possible barriers," never as legal violations.
 
@@ -11,12 +11,16 @@ Built for the Social Good track at Hacklanta '26 (Oct 9–11, Georgia State Univ
 ## Features
 
 - **Report an issue** with a photo, issue type and details. Set the location from your device, an address or a pin dropped on a map. A 911 banner sends emergencies elsewhere.
-- **Fill in the form from a photo:** Gemini describes the issue, picks the department and explains why, and drafts a message and phone script.
+- **Fill in the form from a photo:** the AI (Claude, with Gemini as the backup) describes the issue, picks the department and explains why, and drafts a message and phone script.
+- **Screening:** a photo or wording that plainly isn't a real report (a cartoon, a joke, abuse) is turned away before anything is posted. Five flagged attempts pause that person's posting for a day.
+- **Campus departments stay on campus:** GSU Facilities and Georgia Tech can only be chosen for a pin inside their own campus outline, which the pin map shows.
 - **Send it yourself:** every posted ticket opens an editable email to the department. AVision never sends it.
 - **Photo privacy:** faces and license plates are blurred, and GPS and other hidden details removed, before a photo is stored.
-- **Map** of every ticket, with MARTA stations, GDOT roads, the city boundary and GSU buildings.
+- **Map** of every ticket, with MARTA stations, GDOT roads, the city boundary and GSU buildings, in Soft, Street or Dark style. It opens on the departments that match your profile (your school, MARTA if you ride it).
 - **Issues list** with status tabs, search and sort.
 - **Community voting:** "Fixed" votes move a ticket toward **Likely fixed** and "Still there" votes keep it open. A "Still there" vote also offers a follow-up message to the department.
+- **Notifications and live updates:** you're told when your ticket, or one you voted on, is changed, moved, fixed or removed, and the map and lists update as it happens.
+- **Edit a ticket:** its poster can move the pin or change the department after posting.
 - **Optional Google sign-in:** your tickets and votes follow you, with a profile showing your impact. Guest activity carries over when you sign in, and you can delete your own tickets.
 - **Admins** can delete any ticket and mark tickets as fixed. Grant it with `python admin.py grant "<name>"` from `api/` ([Database](docs/database.md#users)).
 
@@ -61,7 +65,7 @@ Optional: run the photo privacy service to blur photos locally ([Image privacy](
 | Frontend | React 19, Vite, Tailwind CSS v4, Leaflet with OpenStreetMap tiles |
 | Backend | Python FastAPI, psycopg 3 |
 | Database | Tiger Data (TimescaleDB) |
-| AI | Gemini, Microsoft Foundry Agent Service |
+| AI | Claude (Anthropic), with Gemini as the backup |
 | Photo privacy | Local face and plate detection, Pillow blurring |
 | Sign-in | Auth0 with Google |
 | Hosting | Vultr with Caddy, Porkbun domain, GitHub Actions auto-deploy |
