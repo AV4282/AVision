@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id      uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,   -- who is told
     ticket_id    uuid        REFERENCES tickets(id) ON DELETE CASCADE,
     ticket_title text        NOT NULL,
-    kind         text        NOT NULL,   -- still_there, marked_fixed, likely_fixed, fixed, reopened, removed
+    kind         text        NOT NULL,   -- still_there, marked_fixed, likely_fixed, fixed, reopened, reported, moved, rerouted, removed
     yours        boolean     NOT NULL,   -- true: they posted the ticket. false: they voted on it
     actor_id     uuid,                   -- who did it. Never shown; only stops repeats
     created_at   timestamptz NOT NULL DEFAULT now(),

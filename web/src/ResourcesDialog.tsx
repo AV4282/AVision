@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef } from "react"
 import { createPortal } from "react-dom"
-import { Building2, ExternalLink, Mail, MapPin, Phone, Route, TrainFront, X } from "lucide-react"
+import { Building2, ExternalLink, GraduationCap, Mail, MapPin, Phone, Route, TrainFront, X } from "lucide-react"
 import directory from "../../api/data/contacts.json"
 
 const resources = [
   { contact: directory.owners.city_of_atlanta, Icon: MapPin },
   { contact: directory.owners.gsu_facilities, Icon: Building2 },
+  { contact: directory.owners.georgia_tech, Icon: GraduationCap },
   { contact: directory.owners.marta, Icon: TrainFront },
   { contact: directory.owners.gdot, Icon: Route },
 ]

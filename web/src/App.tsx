@@ -20,6 +20,7 @@ import {
   Clock3,
   Eye,
   HelpCircle,
+  Info,
   Home,
   List,
   LogIn,
@@ -40,6 +41,7 @@ import {
   X,
 } from "lucide-react"
 import {
+  clearNotices,
   closeTicket,
   deleteTicket,
   followUpReport,
@@ -62,14 +64,19 @@ import {
 } from "./api"
 import { useAccount } from "./auth"
 import PhotoViewer from "./PhotoViewer"
+import MoreInfoDialog from "./MoreInfoDialog"
+import MoveTicket from "./MoveTicket"
 import ReportForm from "./ReportForm"
 import OnboardingQuestions from "./OnboardingQuestions"
 import ReportReady, { type ReportToSend } from "./ReportReady"
 import { ThemeToggle } from "./theme"
 import PrivacyDialog from "./PrivacyDialog"
+import NotificationPreferencesDialog from "./NotificationPreferencesDialog"
+import { useNotificationPreferences } from "./notification-preferences"
 import ResourcesDialog from "./ResourcesDialog"
 
 import { mapOwner, ticketMarker } from "./ticket-map"
+import { WELCOME_PHOTOS } from "./welcome-photos"
 import type { AvisionMapOwner } from "./components/avision-map/types"
 const AvisionMap = lazy(() => import("./components/avision-map/AvisionMap"))
 type View = "onboarding" | "map" | "issues" | "profile"
@@ -168,7 +175,8 @@ function useLiveTickets(state: TicketsState): { connected: boolean; bellNudge: n
     const stop = watchLive({
       onEvent(event) {
         const known = ticketsNow.current.find((ticket) => ticket.id === event.id)
-        if (known && (known.mine || known.myVote)) setBellNudge((count) => count + 1)
+        const concernsMe = !!known && (known.mine || known.myVote !== null)
+        if (concernsMe) setBellNudge((count) => count + 1)
         window.clearTimeout(waiting[event.id])
         delete waiting[event.id]
         if (event.type === "ticket_deleted") {
@@ -178,7 +186,12 @@ function useLiveTickets(state: TicketsState): { connected: boolean; bellNudge: n
         waiting[event.id] = window.setTimeout(() => {
           delete waiting[event.id]
           getTicket(event.id)
-            .then((fresh) => (fresh ? upsertTicket(fresh) : removeTicket(event.id)))
+            .then((fresh) => {
+              if (!fresh) return removeTicket(event.id)
+              upsertTicket(fresh)
+              // A ticket this page hadn't loaded yet can still be the viewer's own.
+              if (!concernsMe && (fresh.mine || fresh.myVote !== null)) setBellNudge((count) => count + 1)
+            })
             .catch(() => {}) // shown as it was; the next change or reload fixes it
         }, LIVE_SETTLE_MS)
       },
@@ -267,6 +280,18 @@ function Brand({ compact = false }: { compact?: boolean }) {
  * have one (uploaded here, or from their Google account), otherwise their
  * initials. Falls back to the initials if the picture won't load.
  */
+/**
+ * What kind of member someone is, as shown under their name: "Admin" for an
+ * admin (granted with api/admin.py), otherwise "Community member". One place,
+ * so the sidebar and the profile always agree.
+ */
+function memberLabel(signedIn: boolean, member: Member | null): string {
+  if (!signedIn) return "Not signed in"
+  if (member?.role === "admin") return "Admin"
+  if (member?.role === "facilities_staff") return "Facilities staff"
+  return "Community member"
+}
+
 function AvatarFace({ member, initials }: { member: Member | null; initials: string }) {
   const picture = photoLink(member?.avatarUrl ?? null)
   const [broken, setBroken] = useState<string | null>(null)
@@ -297,6 +322,67 @@ function StatusPill({ status }: { status: Status }) {
   )
 }
 
+// How long each photo stays before the next one fades in.
+const WELCOME_PHOTO_SECONDS = 8
+
+/**
+ * The slow slideshow behind the welcome text. One photo at a time, each fading
+ * into the next while drifting slightly. Purely decoration, so screen readers
+ * skip the pictures; the credit line under them is real text.
+ */
+function WelcomePhotos() {
+  const [index, setIndex] = useState(0)
+  const count = WELCOME_PHOTOS.length
+  useEffect(() => {
+    // People who asked their device for less motion keep the first photo.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    const timer = window.setInterval(
+      () => setIndex((shown) => (shown + 1) % count),
+      WELCOME_PHOTO_SECONDS * 1000,
+    )
+    return () => window.clearInterval(timer)
+  }, [count])
+  const photo = WELCOME_PHOTOS[index]
+
+  return (
+    <>
+      <div className="story-photos" aria-hidden="true">
+        {WELCOME_PHOTOS.map((each, position) => {
+          // Only the photo on screen and its neighbours are loaded: the next one
+          // so it is ready to fade in, the last one so it can fade out.
+          const near =
+            position === index ||
+            position === (index + 1) % count ||
+            position === (index + count - 1) % count
+          return near ? (
+            <img
+              key={each.file}
+              src={`${import.meta.env.BASE_URL}welcome/${each.file}`}
+              className={position === index ? "shown" : undefined}
+              alt=""
+              decoding="async"
+            />
+          ) : null
+        })}
+      </div>
+      <p className="story-photo-credit">
+        {photo.label} · Photo:{" "}
+        <a href={photo.link} target="_blank" rel="noreferrer">
+          {photo.by}
+        </a>
+        ,{" "}
+        {"termsLink" in photo ? (
+          <a href={photo.termsLink} target="_blank" rel="noreferrer">
+            {photo.terms}
+          </a>
+        ) : (
+          photo.terms
+        )}
+      </p>
+    </>
+  )
+}
+
 function Onboarding({ onContinue }: { onContinue: () => void }) {
   const auth = useAccount()
   const [step, setStep] = useState(0)
@@ -306,14 +392,35 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
       eyebrow: "See it. Share it. Fix it.",
       title: "A more accessible city starts with you.",
       body: "Turn everyday accessibility barriers into mapped, trackable tickets—and help your community follow them through to a fix.",
+      example: {
+        photo: PLACEHOLDER_PHOTO,
+        alt: "City sidewalk beside a street",
+        finding: "Possible barrier",
+        owner: "City of Atlanta",
+        place: "Courtland St NE",
+      },
     },
     {
       eyebrow: "One photo is enough",
       title: "Report barriers in a few simple steps.",
       body: "Upload a photo, confirm the location, and review the possible barrier. AVision routes your ticket to the right public agency.",
+      example: {
+        photo: `${import.meta.env.BASE_URL}welcome/gsu-library-plaza.jpg`,
+        alt: "A brick plaza between buildings on Georgia State's campus",
+        finding: "Possible hazard",
+        owner: "GSU Facilities",
+        place: "Library Plaza",
+      },
     },
   ]
   const panel = panels[step]
+  // After the first change of introduction, the example ticket swaps in quickly
+  // instead of replaying its slow first entrance.
+  const [swapped, setSwapped] = useState(false)
+  const showStep = (next: number) => {
+    setSwapped(true)
+    setStep(next)
+  }
 
   return (
     <main className="onboarding-shell">
@@ -329,6 +436,7 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
 
       <section className="onboarding-grid">
         <div className="onboarding-story">
+          <WelcomePhotos />
           <div className="story-glow one" />
           <div className="story-glow two" />
           <div className="story-map-lines" />
@@ -354,24 +462,23 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
             </h1>
             <p className="story-copy">{panel.body}</p>
           </div>
-          <div className="story-ticket-card">
-            <div className="mini-photo">
-              <img
-                src={PLACEHOLDER_PHOTO}
-                alt="City sidewalk beside a street"
-              />
+          {/* Each introduction has its own example ticket. The keys make the
+              photo scan, the tag and the routing play again for the new one. */}
+          <div className={swapped ? "story-ticket-card swapped" : "story-ticket-card"}>
+            <div className="mini-photo" key={`photo-${step}`}>
+              <img src={panel.example.photo} alt={panel.example.alt} />
               <span className="ai-badge">
-                <Sparkles size={12} /> Possible barrier
+                <Sparkles size={12} /> {panel.example.finding}
               </span>
             </div>
-            <div>
+            <div key={`text-${step}`}>
               <span className="mini-label">ROUTED TO</span>
-              <strong>City of Atlanta</strong>
+              <strong>{panel.example.owner}</strong>
               <span className="mini-address">
-                <MapPin size={13} /> Courtland St NE
+                <MapPin size={13} /> {panel.example.place}
               </span>
             </div>
-            <CheckCircle2 className="mini-check" size={22} />
+            <CheckCircle2 className="mini-check" size={22} key={`check-${step}`} />
           </div>
           <div className="story-controls">
             <div className="story-dots">
@@ -380,13 +487,13 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
                   aria-label={`Show introduction ${index + 1}`}
                   className={index === step ? "story-dot active" : "story-dot"}
                   key={index}
-                  onClick={() => setStep(index)}
+                  onClick={() => showStep(index)}
                 />
               ))}
             </div>
             <button
               className="circle-control"
-              onClick={() => setStep(step === panels.length - 1 ? 0 : step + 1)}
+              onClick={() => showStep(step === panels.length - 1 ? 0 : step + 1)}
               aria-label="Next introduction"
             >
               <ArrowRight size={18} />
@@ -458,6 +565,7 @@ function Sidebar({
   openCount,
   onReport,
   onResources,
+  onMoreInfo,
 }: {
   view: View
   setView: (view: View) => void
@@ -466,6 +574,8 @@ function Sidebar({
   openCount: number
   onReport: () => void
   onResources: (opener: HTMLButtonElement) => void
+  /** Opens "More information" (where the map's data comes from). */
+  onMoreInfo: (opener: HTMLButtonElement) => void
 }) {
   const { account, member, signOut } = useAccount()
   const navigate = (next: View) => {
@@ -556,6 +666,16 @@ function Sidebar({
           >
             <HelpCircle size={18} /> Help & resources
           </button>
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={(event) => {
+              onClose()
+              onMoreInfo(event.currentTarget)
+            }}
+          >
+            <Info size={18} /> More information
+          </button>
         </nav>
         <div className="sidebar-account" ref={accountArea}>
           {accountMenu && (
@@ -605,7 +725,7 @@ function Sidebar({
             </span>
             <span className="who">
               <strong>{account?.name ?? "Guest"}</strong>
-              <small>{account ? "Community member" : "Not signed in"}</small>
+              <small>{memberLabel(!!account, member)}</small>
             </span>
             <ChevronDown size={16} className={accountMenu ? "turned" : undefined} />
           </button>
@@ -632,6 +752,16 @@ function noticeText(notice: Notice): string {
       return notice.yours
         ? "Your ticket was marked fixed by an admin."
         : "A ticket you voted on was marked fixed by an admin."
+    case "reported":
+      return "Someone else sent a report about your ticket."
+    case "moved":
+      return notice.yours
+        ? "Your ticket was moved to a new spot by an admin."
+        : "A ticket you voted on was moved to a new spot on the map."
+    case "rerouted":
+      return notice.yours
+        ? "Your ticket was sent to a different department by an admin."
+        : "A ticket you voted on was sent to a different department."
     case "reopened":
       return "Your ticket was reopened. Someone says it is still there."
     case "removed":
@@ -659,7 +789,8 @@ function NotificationBell({
   /** Goes up when a live update says there may be news, so the bell checks right away. */
   nudge: number
 }) {
-  const { member } = useAccount()
+  const { account, member } = useAccount()
+  const { inApp, myReports } = useNotificationPreferences(account?.id ?? null)
   const [notices, setNotices] = useState<Notice[]>([])
   const [unread, setUnread] = useState(0)
   const [open, setOpen] = useState(false)
@@ -667,24 +798,34 @@ function NotificationBell({
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
   const wrap = useRef<HTMLDivElement>(null)
   const lastUnread = useRef(0)
+  const refreshNotices = useRef<() => void>(() => {})
   const news = useRef(onNews)
   news.current = onNews
-
-  const check = useCallback(() => {
-    listNotices()
-      .then((found) => {
-        setNotices(found.items)
-        setUnread(found.unread)
-        if (found.unread > lastUnread.current) news.current()
-        lastUnread.current = found.unread
-      })
-      .catch(() => {}) // no news is fine; the next check tries again
-  }, [])
+  const visibleNotices = inApp ? notices.filter((notice) => myReports || !notice.yours) : []
+  const visibleUnread = !inApp ? 0 : myReports ? unread : visibleNotices.filter((notice) => !notice.read).length
 
   // Check now, on a timer, and whenever the person comes back to the page.
   // Signing in changes whose notifications these are, so that checks again too.
+  // Preferences hide notices in the bell; polling still refreshes ticket status.
   const memberId = member?.id
+  const accountId = account?.id
   useEffect(() => {
+    let cancelled = false
+    setNotices([])
+    setUnread(0)
+    lastUnread.current = 0
+    const check = () => {
+      listNotices()
+        .then((found) => {
+          if (cancelled) return
+          setNotices(found.items)
+          setUnread(found.unread)
+          if (found.unread > lastUnread.current) news.current()
+          lastUnread.current = found.unread
+        })
+        .catch(() => {}) // no news is fine; the next check tries again
+    }
+    refreshNotices.current = check
     check()
     const whenSeen = () => {
       if (document.visibilityState === "visible") check()
@@ -693,20 +834,24 @@ function NotificationBell({
     document.addEventListener("visibilitychange", whenSeen)
     window.addEventListener("focus", whenSeen)
     return () => {
+      cancelled = true
+      refreshNotices.current = () => {}
       window.clearInterval(timer)
       document.removeEventListener("visibilitychange", whenSeen)
       window.removeEventListener("focus", whenSeen)
     }
-  }, [check, memberId])
+  }, [accountId, memberId])
 
   useEffect(() => {
-    if (nudge > 0) check()
-  }, [nudge, check])
+    if (nudge > 0) refreshNotices.current()
+  }, [nudge])
 
   const close = useCallback(() => {
     setOpen(false)
     setFresh(new Set())
   }, [])
+
+  useEffect(close, [close, accountId, memberId, inApp, myReports])
 
   useEffect(() => {
     if (!open) return
@@ -730,15 +875,43 @@ function NotificationBell({
       return
     }
     // Opening the list is seeing it: the count clears here and on the server.
-    const unseen = notices.filter((notice) => !notice.read).map((notice) => notice.id)
+    const unseen = visibleNotices.filter((notice) => !notice.read).map((notice) => notice.id)
     setFresh(new Set(unseen))
     setOpen(true)
     if (unseen.length > 0) {
       setUnread((count) => Math.max(0, count - unseen.length))
       lastUnread.current = Math.max(0, lastUnread.current - unseen.length)
-      setNotices((list) => list.map((notice) => ({ ...notice, read: true })))
+      setNotices((list) => list.map((notice) => unseen.includes(notice.id) ? { ...notice, read: true } : notice))
       markNoticesRead(unseen).catch(() => {})
     }
+  }
+
+  // Clearing takes effect on screen at once. If the server didn't get it, the
+  // next check brings back whatever is still there.
+  const checkAgain = () => refreshNotices.current()
+
+  // "Clear all" clears what is listed. Notifications hidden by the person's
+  // preferences are not on screen, so they are left alone.
+  function clearAll() {
+    const gone = new Set(visibleNotices.map((notice) => notice.id))
+    const goneUnread = visibleNotices.filter((notice) => !notice.read).length
+    const nothingHidden = gone.size === notices.length
+    setNotices((list) => list.filter((notice) => !gone.has(notice.id)))
+    setFresh(new Set())
+    setUnread((count) => Math.max(0, count - goneUnread))
+    lastUnread.current = Math.max(0, lastUnread.current - goneUnread)
+    // With nothing hidden, the server is told "all", which also covers older
+    // ones beyond the list shown here.
+    clearNotices(nothingHidden ? undefined : [...gone]).then(checkAgain, checkAgain)
+  }
+
+  function clearOne(notice: Notice) {
+    setNotices((list) => list.filter((each) => each.id !== notice.id))
+    if (!notice.read) {
+      setUnread((count) => Math.max(0, count - 1))
+      lastUnread.current = Math.max(0, lastUnread.current - 1)
+    }
+    clearNotices([notice.id]).then(checkAgain, checkAgain)
   }
 
   return (
@@ -746,28 +919,38 @@ function NotificationBell({
       <button
         className="icon-button"
         onClick={toggle}
-        aria-label={unread > 0 ? `Notifications, ${unread} new` : "Notifications"}
+        aria-label={visibleUnread > 0 ? `Notifications, ${visibleUnread} new` : "Notifications"}
         aria-haspopup="true"
         aria-expanded={open}
       >
         <Bell size={19} />
-        {unread > 0 && (
+        {visibleUnread > 0 && (
           <span className="notice-count" aria-hidden="true">
-            {unread > 9 ? "9+" : unread}
+            {visibleUnread > 9 ? "9+" : visibleUnread}
           </span>
         )}
       </button>
       {open && (
         <section className="notice-panel" aria-label="Notifications">
-          <h2>Notifications</h2>
-          {notices.length === 0 ? (
+          <div className="notice-head">
+            <h2>Notifications</h2>
+            {visibleNotices.length > 0 && (
+              <button type="button" className="notice-clear" onClick={clearAll}>
+                Clear all
+              </button>
+            )}
+          </div>
+          {!inApp ? (
+            <p className="notice-empty">In-app notifications are off in this browser. Turn them on in My profile → Notification preferences.</p>
+          ) : visibleNotices.length === 0 ? (
             <p className="notice-empty">
-              Nothing yet. You’ll see it here when someone votes on a ticket you
-              posted, or when a ticket you voted on is marked fixed or removed.
+              {myReports
+                ? "Nothing yet. You’ll see it here when someone votes on a ticket you posted, or when a ticket you voted on is marked fixed or removed."
+                : "Nothing yet. Updates to tickets you posted are hidden. You’ll see updates here when a ticket you voted on is marked fixed or removed."}
             </p>
           ) : (
             <ul>
-              {notices.map((notice) => {
+              {visibleNotices.map((notice) => {
                 const isNew = fresh.has(notice.id) || !notice.read
                 const body = (
                   <>
@@ -785,6 +968,7 @@ function NotificationBell({
                     {ticketId ? (
                       <button
                         type="button"
+                        className="notice-row"
                         onClick={() => {
                           close()
                           onOpenTicket(ticketId)
@@ -793,8 +977,17 @@ function NotificationBell({
                         {body}
                       </button>
                     ) : (
-                      <div>{body}</div>
+                      <div className="notice-row">{body}</div>
                     )}
+                    <button
+                      type="button"
+                      className="notice-dismiss"
+                      onClick={() => clearOne(notice)}
+                      aria-label={`Clear this notification about ${notice.ticketTitle}`}
+                      title="Clear"
+                    >
+                      <X size={14} />
+                    </button>
                   </li>
                 )
               })}
@@ -813,7 +1006,6 @@ function AppHeader({
   setView,
   onOpenTicket,
   onNews,
-  live,
   bellNudge,
 }: {
   title: string
@@ -822,8 +1014,6 @@ function AppHeader({
   setView: (view: View) => void
   onOpenTicket: (ticketId: string) => void
   onNews: () => void
-  /** True while the page is receiving live updates. */
-  live: boolean
   bellNudge: number
 }) {
   const { account, member } = useAccount()
@@ -839,12 +1029,6 @@ function AppHeader({
         </div>
       </div>
       <div className="header-actions">
-        {live && (
-          <span className="live-pill" title="This page updates by itself when tickets change">
-            <i aria-hidden="true" />
-            Live
-          </span>
-        )}
         <ThemeToggle />
         <NotificationBell onOpenTicket={onOpenTicket} onNews={onNews} nudge={bellNudge} />
         <button
@@ -898,6 +1082,10 @@ function TicketDetail({
     }
   }
 
+  // Fixing the ticket's spot or department after posting. `moveNote` says how it went.
+  const [moving, setMoving] = useState(false)
+  const [moveNote, setMoveNote] = useState<string | null>(null)
+
   async function removeTicket() {
     if (deleting) return
     setDeleting(true)
@@ -933,7 +1121,13 @@ function TicketDetail({
     setFollowUpError(null)
     try {
       const drafted = await followUpReport(ticket)
-      setFollowUp({ contact: drafted.contact, report: drafted.report, reason: null, kind: "followUp" })
+      setFollowUp({
+        contact: drafted.contact,
+        report: drafted.report,
+        reason: null,
+        kind: "followUp",
+        ticketId: ticket.id,
+      })
       setFollowUpStep("idle")
     } catch (err) {
       setFollowUpError(err instanceof Error ? err.message : "Couldn’t write the follow-up")
@@ -1127,6 +1321,16 @@ function TicketDetail({
               <div className="ticket-actions">
                 <button
                   type="button"
+                  className="move-ticket-button"
+                  onClick={() => {
+                    setMoveNote(null)
+                    setMoving(true)
+                  }}
+                >
+                  <MapPin size={15} /> Edit ticket
+                </button>
+                <button
+                  type="button"
                   className="delete-ticket-button"
                   onClick={() => setConfirmingDelete(true)}
                 >
@@ -1167,6 +1371,29 @@ function TicketDetail({
                 </div>
               </div>
             )}
+            {moveNote && (
+              <p className="move-note" role="status">
+                <Check size={14} aria-hidden="true" /> {moveNote}
+              </p>
+            )}
+            {/* On top of everything, wherever this ticket is shown. */}
+            {moving &&
+              createPortal(
+                <MoveTicket
+                  ticket={ticket}
+                  onClose={() => setMoving(false)}
+                  onMoved={(updated) => {
+                    setMoving(false)
+                    setMoveNote(
+                      updated.owner !== ticket.owner
+                        ? `Ticket updated. It is now routed to ${updated.owner}.`
+                        : "Ticket updated.",
+                    )
+                    onTicketChange(updated)
+                  }}
+                />,
+                document.body,
+              )}
             {deleteError && (
               <p className="vote-error" role="alert">
                 {deleteError}
@@ -1418,7 +1645,12 @@ function MapView({
               mapPage.current?.scrollIntoView({ block: "start" })
             }
           }}
-          onTicketChange={state.replaceTicket}
+          onTicketChange={(updated) => {
+            state.replaceTicket(updated)
+            // Moving a ticket can change its department. Keep it on the map
+            // even if that department was switched off in Filters.
+            if (!filter.shown.includes(updated.owner)) filter.setShown([...filter.shown, updated.owner])
+          }}
           onViewFull={() => onOpen(selected.id)}
           onDeleted={state.removeTicket}
         />
@@ -1690,6 +1922,9 @@ function ProfileView({
   const [tab, setTab] = useState<"tickets" | "votes">("tickets")
   const [privacyOpener, setPrivacyOpener] = useState<HTMLButtonElement | null>(null)
   const closePrivacy = useCallback(() => setPrivacyOpener(null), [])
+  const [notificationOpener, setNotificationOpener] = useState<HTMLButtonElement | null>(null)
+  const closeNotifications = useCallback(() => setNotificationOpener(null), [])
+  useEffect(closeNotifications, [closeNotifications, account?.id])
   const joined = member
     ? new Date(member.joinedAt).toLocaleDateString(undefined, {
         month: "long",
@@ -1742,15 +1977,8 @@ function ProfileView({
         <div className="profile-identity">
           <div>
             <h2>{account?.name ?? "Guest"}</h2>
-            <span className="member-badge">
-              <ShieldCheck size={14} />{" "}
-              {!account
-                ? "Not signed in"
-                : member?.role === "admin"
-                  ? "Admin"
-                  : member?.role === "facilities_staff"
-                    ? "Facilities staff"
-                    : "Community member"}
+            <span className={member?.role === "admin" ? "member-badge admin" : "member-badge"}>
+              <ShieldCheck size={14} /> {memberLabel(!!account, member)}
             </span>
           </div>
           <p>
@@ -1908,10 +2136,12 @@ function ProfileView({
           </div>
           <div className="account-card">
             <h3>Account</h3>
-            <button>
-              <Bell size={17} /> Notification preferences{" "}
-              <ArrowRight size={16} />
-            </button>
+            {account && (
+              <button type="button" aria-haspopup="dialog" onClick={(event) => setNotificationOpener(event.currentTarget)}>
+                <Bell size={17} aria-hidden="true" /> Notification preferences{" "}
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            )}
             <button type="button" aria-haspopup="dialog" onClick={(event) => setPrivacyOpener(event.currentTarget)}>
               <ShieldCheck size={17} /> Privacy & security{" "}
               <ArrowRight size={16} />
@@ -1930,6 +2160,9 @@ function ProfileView({
       </div>
       {privacyOpener && (
         <PrivacyDialog key={account?.id ?? "guest"} onClose={closePrivacy} opener={privacyOpener} />
+      )}
+      {account && notificationOpener && (
+        <NotificationPreferencesDialog key={account.id} accountId={account.id} onClose={closeNotifications} opener={notificationOpener} />
       )}
     </section>
   )
@@ -1985,6 +2218,8 @@ export default function App() {
   const [view, setView] = useState<View>("onboarding")
   const [menuOpen, setMenuOpen] = useState(false)
   const [resourcesOpener, setResourcesOpener] = useState<HTMLButtonElement | null>(null)
+  const [moreInfoOpener, setMoreInfoOpener] = useState<HTMLButtonElement | null>(null)
+  const closeMoreInfo = useCallback(() => setMoreInfoOpener(null), [])
   const menuOpener = useRef<HTMLButtonElement | null>(null)
   const openMenu = useCallback((opener: HTMLButtonElement) => {
     menuOpener.current = opener
@@ -2061,6 +2296,7 @@ export default function App() {
         }
         onReport={openReport}
         onResources={setResourcesOpener}
+        onMoreInfo={setMoreInfoOpener}
       />
       <main className="app-main">
         <AppHeader
@@ -2074,7 +2310,6 @@ export default function App() {
             setOpenId(id)
           }}
           onNews={reloadTickets}
-          live={live.connected}
           bellNudge={live.bellNudge}
         />
         {page === "map" && (
@@ -2132,7 +2367,7 @@ export default function App() {
             setSelectedId(ticket.id)
             setReportOpen(false)
             setView("map")
-            setToSend(drafted)
+            setToSend(drafted && { ...drafted, ticketId: ticket.id })
           }}
         />
       )}
@@ -2144,6 +2379,7 @@ export default function App() {
           fallbackOpener={menuOpener.current}
         />
       )}
+      {moreInfoOpener && <MoreInfoDialog onClose={closeMoreInfo} opener={moreInfoOpener} />}
     </div>
   )
 }

@@ -31,7 +31,6 @@ import type {
   MapCoordinates,
   NeighborhoodData,
   StationData,
-  SourceInfo,
   AvisionMapStatus,
   AvisionMapMarker,
   AvisionMapOwner,
@@ -415,18 +414,10 @@ export default function AvisionMap({
     }
   }
 
-  const [sourcesOpen, setSourcesOpen] = useState(false)
-
-  const [retrievedDate, setRetrievedDate] = useState("Date unavailable")
-
-  const [dataSources, setDataSources] = useState<SourceInfo[]>([])
-
   const [selectedNeighborhood, setSelectedNeighborhood] =
     useState<string | null>(null)
 
   const search = useRef<HTMLDivElement>(null)
-
-  const sources = useRef<HTMLDialogElement>(null)
 
   const base = dataUrl.replace(/\/$/, "")
 
@@ -500,51 +491,6 @@ export default function AvisionMap({
 
     void load()
 
-    setRetrievedDate("Date unavailable")
-
-    setDataSources([])
-
-    fetch(`${base}/sources.json`, { signal: controller.signal })
-
-      .then((response) => (response.ok ? response.json() : null))
-
-      .then((source) => {
-        if (!controller.signal.aborted && Array.isArray(source?.datasets)) {
-          setDataSources(
-            source.datasets.filter(
-              (item: SourceInfo) =>
-                typeof item?.label === "string" &&
-                typeof item.url === "string" &&
-                item.url.startsWith("https://") &&
-                typeof item.description === "string" &&
-                typeof item.dateNote === "string" &&
-                !Number.isNaN(new Date(item.retrievedAt).valueOf()),
-            ),
-          )
-        }
-
-        const value = source?.retrievedDate ?? source?.retrievedAt
-
-        if (
-          !controller.signal.aborted &&
-          value &&
-          !Number.isNaN(new Date(value).valueOf())
-        )
-          setRetrievedDate(
-            new Date(value).toLocaleDateString("en-US", {
-              year: "numeric",
-
-              month: "long",
-
-              day: "numeric",
-
-              timeZone: "UTC",
-            }),
-          )
-      })
-
-      .catch(() => {})
-
     return () => controller.abort()
   }, [base, dataRetry])
 
@@ -557,12 +503,6 @@ export default function AvisionMap({
 
     return () => document.removeEventListener("pointerdown", closeSearch)
   }, [])
-
-  useEffect(() => {
-    if (sourcesOpen && !sources.current?.open) sources.current?.showModal()
-
-    if (!sourcesOpen && sources.current?.open) sources.current?.close()
-  }, [sourcesOpen])
 
   const neighborhoods = useMemo(
     () =>
@@ -1201,88 +1141,7 @@ export default function AvisionMap({
             {showLegend ? "Hide legend" : "Show legend"}
           </button>
         </span>
-        <button
-          type="button"
-          className="avision-map-sources"
-          onClick={() => setSourcesOpen(true)}
-        >
-          Data sources
-        </button>
       </div>
-      <dialog
-        ref={sources}
-        className="avision-map-source-dialog"
-        onCancel={() => setSourcesOpen(false)}
-        onClose={() => setSourcesOpen(false)}
-      >
-        <div className="avision-map-dialog-heading">
-          <h2>Map sources</h2>
-          <button
-            type="button"
-            aria-label="Close map sources"
-            onClick={() => setSourcesOpen(false)}
-          >
-            ×
-          </button>
-        </div>
-        <p>
-          Streets:{" "}
-          <a
-            href="https://www.openstreetmap.org/copyright"
-            target="_blank"
-            rel="noreferrer"
-          >
-            OpenStreetMap
-          </a>
-          . Soft and Street use the same tiles with different colors.
-        </p>
-        <p>
-          Neighborhoods and station points:{" "}
-          <a
-            href="https://gis.atlantaga.gov/dpcd/rest/services/OpenDataService1/MapServer"
-            target="_blank"
-            rel="noreferrer"
-          >
-            City of Atlanta GIS
-          </a>
-          , downloaded {retrievedDate}. Individual features may have been
-          updated earlier.
-        </p>
-        <p>
-          The pilot outline is a team-defined GSU and MARTA area. It doesn’t
-          show campus property lines or agency ownership.
-        </p>
-        {dataSources.map((source) => (
-          <p key={source.id}>
-            <a href={source.url} target="_blank" rel="noreferrer">
-              {source.label}
-            </a>
-            , retrieved{" "}
-            {new Date(source.retrievedAt).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-              timeZone: "UTC",
-            })}
-            . {source.dateNote} {source.description}
-            {source.buildingList && (
-              <>
-                {" "}
-                <a href={source.buildingList} target="_blank" rel="noreferrer">
-                  GSU building list
-                </a>
-                .
-              </>
-            )}
-          </p>
-        ))}
-        {!dataSources.length && (
-          <p>
-            Additional layer source metadata is unavailable. See the bundled
-            sources.json for provenance.
-          </p>
-        )}
-      </dialog>
     </section>
   )
 }

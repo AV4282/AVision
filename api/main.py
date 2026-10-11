@@ -34,6 +34,7 @@ import db  # first: it loads api/.env, which the modules below read their settin
 import agent
 import auth
 import gemini
+import geocode
 import live
 import photos
 import routing
@@ -545,6 +546,102 @@ def delete_ticket(
         photos.delete(photos.name_in(photo_url))
 
 
+@app.post("/tickets/{ticket_id}/reports", response_model=Ticket)
+def report_sent(
+    ticket_id: UUID, authorization: AuthorizationHeader = None, guest_id: UserIdHeader = None
+):
+    """Note that the caller went to send a report about this ticket. Returns the ticket.
+
+    Called when they press one of the send buttons on the drafted message. Each
+    person counts once per ticket, and the poster is already the first report,
+    so calling this again (or as the poster) changes nothing.
+    """
+    try:
+        ticket, counted = db.record_report(ticket_id, caller(authorization, guest_id, required=True))
+    except db.UnknownUser:
+        raise HTTPException(401, "Unknown X-User-Id; get a new one from POST /guests")
+    if ticket is None:
+        raise HTTPException(404, "Ticket not found")
+    if counted:
+        live.publish("ticket_changed", ticket_id)
+    return ticket
+
+
+class MoveIn(BaseModel):
+    """Where to put a ticket instead, and optionally which department it should go to."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    lat: float = Field(ge=-90, le=90, examples=[33.7531])
+    lng: float = Field(ge=-180, le=180, examples=[-84.3853])
+    # The address or landmark to show. Left out, the nearest address is looked up.
+    address: str | None = Field(default=None, max_length=200, examples=["Courtland St SE & Gilmer St SE"])
+    # The department the person picked. Left out, it only changes if the move calls for it.
+    owner: Owner | None = Field(default=None, examples=[None])
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def blank_to_none(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
+
+
+@app.post("/tickets/{ticket_id}/location", response_model=Ticket)
+def move_ticket(
+    ticket_id: UUID,
+    body: MoveIn,
+    authorization: AuthorizationHeader = None,
+    guest_id: UserIdHeader = None,
+):
+    """Fix a ticket's location and/or its department. Only its poster can, or an admin.
+
+    Send the ticket's current lat and lng to leave it where it is. A new spot has
+    to be inside the area AVision covers.
+
+    With `owner`, the ticket goes to that department. Without it, the department
+    only changes when the move calls for it: the old spot was why the ticket went
+    where it did (a campus, a MARTA station) and the new spot belongs to a
+    different one. A department the AI or the person chose for another reason is
+    left alone.
+    """
+    user_id = caller(authorization, guest_id, required=True)
+    before = db.get_ticket(ticket_id)
+    if before is None:
+        raise HTTPException(404, "Ticket not found")
+    moved = (before["lat"], before["lng"]) != (body.lat, body.lng)
+    if moved:
+        require_covered(body.lat, body.lng)
+    new_owner = None
+    if body.owner:
+        if body.owner in routing.UNAVAILABLE:
+            raise HTTPException(422, "That department isn't set up on this server yet. Choose another one.")
+        new_owner = body.owner
+    elif moved:
+        by_old_spot = routing.find_owner(before["lat"], before["lng"])["owner"]
+        by_new_spot = routing.find_owner(body.lat, body.lng)["owner"]
+        if before["owner"] == by_old_spot and by_new_spot != by_old_spot:
+            new_owner = by_new_spot
+    # A spot that didn't move keeps its address unless a new one was typed.
+    address = body.address or (geocode.address_for(body.lat, body.lng) if moved else before["address"])
+    try:
+        ticket = db.move_ticket(
+            ticket_id,
+            user_id,
+            body.lat,
+            body.lng,
+            address,
+            owner=new_owner,
+            admin=db.is_admin(user_id),
+        )
+    except LookupError:
+        raise HTTPException(404, "Ticket not found")
+    except db.NotYours:
+        raise HTTPException(403, "Only the person who posted this ticket can change it")
+    except db.TicketMerged:
+        raise HTTPException(409, "This ticket was merged into another; change that one")
+    live.publish("ticket_changed", ticket_id)
+    return ticket
+
+
 @app.post("/tickets/{ticket_id}/close", response_model=Ticket)
 def close_ticket(ticket_id: UUID, authorization: AuthorizationHeader = None):
     """Mark a ticket as fixed. Admins only. Returns the updated ticket.
@@ -606,7 +703,8 @@ async def events():
 # ---------- notifications ----------
 class Notification(BaseModel):
     id: UUID
-    # still_there, marked_fixed, likely_fixed, fixed, reopened or removed (see sql/005_notifications.sql)
+    # still_there, marked_fixed, likely_fixed, fixed, reopened, reported, moved, rerouted or
+    # removed (see sql/005_notifications.sql)
     kind: str
     # True when the reader posted the ticket, false when they only voted on it.
     yours: bool
@@ -642,6 +740,27 @@ def read_notifications(
 ):
     """Mark notifications as seen. Ones that aren't the caller's are left alone."""
     db.mark_notifications_read(caller(authorization, guest_id, required=True), body.ids)
+
+
+class ClearIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # The notifications to delete. Left out, all of the caller's are deleted.
+    ids: list[UUID] | None = Field(default=None, max_length=100)
+
+
+@app.post("/notifications/clear", status_code=204)
+def clear_notifications(
+    body: ClearIn | None = None,
+    authorization: AuthorizationHeader = None,
+    guest_id: UserIdHeader = None,
+):
+    """Delete the caller's notifications: the ones listed, or all of them.
+
+    Ones that aren't the caller's are left alone. The tickets are not affected.
+    """
+    db.clear_notifications(
+        caller(authorization, guest_id, required=True), body.ids if body else None
+    )
 
 
 @app.post("/uploads", response_model=Photo, status_code=201)
