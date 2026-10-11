@@ -25,7 +25,6 @@ import {
   Maximize2,
   MapPin,
   Menu,
-  Navigation,
   Plus,
   Search,
   Settings,
@@ -168,9 +167,11 @@ const ownerColors: Record<Ticket["owner"], string> = {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className="brand">
-      <div className="brand-mark" aria-hidden="true">
-        <Navigation size={compact ? 17 : 20} strokeWidth={2.6} />
-      </div>
+      <img
+        className={compact ? "brand-mark compact" : "brand-mark"}
+        src="/logo.svg"
+        alt=""
+      />
       <span className={compact ? "brand-name compact" : "brand-name"}>
         AVision
       </span>

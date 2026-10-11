@@ -1,6 +1,9 @@
 {
   "title": "AVision | Atlanta accessibility map",
   "description": "Streamline ticket management with a user-friendly interface featuring onboarding, map and list views for issues, and a profile page for tracking user tickets.",
+  "icons": {
+    "icon": "/logo.svg"
+  },
   "robots": {
     "index": false
   },
