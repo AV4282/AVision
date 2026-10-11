@@ -1,6 +1,6 @@
 # AVision map geography
 
-The website uses one map implementation in `web/src/components/avision-map/`. The older `leafletreact-map/` folder contains reference documentation. Geographic layers visualize published data; they never assign ticket ownership, change API owner values, or validate report eligibility.
+The website uses one map implementation in `web/src/components/avision-map/`. Geographic layers visualize published data; they never assign ticket ownership, change API owner values, or validate report eligibility.
 
 ## Snapshots and dates
 
