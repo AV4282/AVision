@@ -63,6 +63,7 @@
   --green: #0b5b50;
   --green-soft: #e5eee9;
   --orange: #f4a261;
+  --lavender: #ddd6fe;
   --orange-soft: #fff2e5;
   --shadow: 0 16px 42px rgba(35, 52, 70, 0.12);
   font-family: "DM Sans", sans-serif;
@@ -1965,14 +1966,14 @@ summary:focus-visible {
   display: grid;
   place-items: center;
   border-radius: 10px;
-  color: var(--on-orange);
-  background: var(--orange);
+  color: var(--blue);
+  background: var(--lavender);
 }
 
 .impact-heading p {
   margin: 0;
   color: var(--green-text);
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.9px;
 }
