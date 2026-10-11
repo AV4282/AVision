@@ -290,6 +290,8 @@ function MapBehavior({
   return null
 }
 
+const LEGEND_KEY = "avision.map.legend" // where the "hide legend" choice is kept
+
 export default function AvisionMap({
   height = 600,
 
@@ -353,6 +355,26 @@ export default function AvisionMap({
   const [showStations, setShowStations] = useState(true)
 
   const [softStyle, setSoftStyle] = useState(true)
+
+  // The legend under the map can be hidden to give the map more room. The
+  // choice is remembered in this browser.
+  const [showLegend, setShowLegend] = useState(() => {
+    try {
+      return localStorage.getItem(LEGEND_KEY) !== "hidden"
+    } catch {
+      return true // storage is blocked in some browsers; the legend just starts shown
+    }
+  })
+
+  function toggleLegend() {
+    const next = !showLegend
+    setShowLegend(next)
+    try {
+      localStorage.setItem(LEGEND_KEY, next ? "shown" : "hidden")
+    } catch {
+      // Not remembered for next time, but it still works for this visit.
+    }
+  }
 
   const [sourcesOpen, setSourcesOpen] = useState(false)
 
@@ -882,8 +904,9 @@ export default function AvisionMap({
           </div>
         )}
       </div>
-      {visibleMarkers.length > 0 && (
+      {showLegend && visibleMarkers.length > 0 && (
         <div
+          id="avision-map-legend"
           className="avision-map-legend"
           role="group"
           aria-label="Issue marker legend"
@@ -1023,6 +1046,17 @@ export default function AvisionMap({
             onClick={() => setSoftStyle(false)}
           >
             Street
+          </button>
+        </span>
+        {/* Styled like the Soft / Street buttons beside it. */}
+        <span className="avision-map-style">
+          <button
+            type="button"
+            aria-expanded={showLegend}
+            aria-controls="avision-map-legend"
+            onClick={toggleLegend}
+          >
+            {showLegend ? "Hide legend" : "Show legend"}
           </button>
         </span>
         <button

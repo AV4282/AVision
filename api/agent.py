@@ -69,6 +69,7 @@ import geocode
 import routing
 
 log = logging.getLogger("avision.agent")
+_server_log = logging.getLogger("uvicorn.error")  # the one logger whose routine lines reach journalctl
 
 FOUNDRY_MODEL = os.getenv("FOUNDRY_MODEL", "gpt-5-mini")
 FOUNDRY_AGENT_NAME = os.getenv("FOUNDRY_AGENT_NAME", "avision-report-agent")
@@ -127,6 +128,7 @@ class Job:
     address: str | None = None
     draft: dict | None = None
     failed: bool = False
+    timings: dict = field(default_factory=dict)  # where the time went (see work_out)
     ready: threading.Event = field(default_factory=threading.Event)  # set when the work is done or has failed
     # The agent's side.
     tool_calls: list[str] = field(default_factory=list)  # the order the agent called them in
@@ -159,6 +161,7 @@ def _ask_gemini(photo: bytes | None, typed: dict | None, facts: list[str], optio
         answer = gemini.report_from_photo(photo, facts, options, hint, typed)
     else:
         answer = gemini.report_from_text(typed, facts, options, hint)
+    answer = {**answer, "cost": gemini.last_cost()}
     with _answers_lock:
         _answers[key] = answer
         while len(_answers) > ANSWERS_KEPT:
@@ -183,6 +186,8 @@ def work_out(
     say what the problem is; at least one is needed for Gemini to help. `owner`
     is the department the person picked by hand; leave it out to have it chosen.
 
+    "timings" is added too: where the time went.
+
     "analysis" is None without a photo. "routing" is {"owner", "rule", "reason",
     "contact", "decided_by"}, where `decided_by` is "gemini", "rules" or
     "person". "draft" is None when Gemini wasn't asked, failed, or found nothing
@@ -192,12 +197,14 @@ def work_out(
     or gemini.GeminiFailed) instead of falling back, because the caller has
     nothing to show without the findings.
     """
+    started = time.monotonic()
     place = address or geocode.address_for(lat, lng)
     options = {owner: routing.CONTACTS[owner]} if owner else routing.emailable()
     # The road only matters for telling a state route from a city street, which
     # only matters while GDOT can be chosen. Skipping the lookup otherwise saves a second.
     road = geocode.nearest_road(lat, lng) if "gdot" in options and not owner else None
     by_rules = routing.find_owner(lat, lng, road)
+    looked_up = time.monotonic()
 
     found = None
     if use_ai and gemini.is_configured() and (photo or typed):
@@ -229,11 +236,19 @@ def work_out(
         }
     else:
         chosen = {**_emailable(by_rules, options), "decided_by": "rules"}
+    # Where the time went, for the log and for anyone wondering why a report was slow.
+    # `gemini` is this request's wait; the request's own figures say how long Google took.
+    timings = {
+        "map_lookups": round(looked_up - started, 1),
+        "gemini": round(time.monotonic() - looked_up, 1),
+        "gemini_request": found.get("cost") if found else None,
+    }
     return {
         "analysis": found.get("analysis") if found else None,
         "routing": chosen,
         "address": place,
         "draft": found["draft"] if found else None,
+        "timings": timings,
     }
 
 
@@ -259,6 +274,7 @@ def _prepare(job: Job):
     """Do the work for a job and store it on the job. Always sets `job.ready`, even on failure."""
     try:
         found = work_out(lat=job.lat, lng=job.lng, photo=job.photo, must_see_photo=True)
+        job.timings = found["timings"]
         job.analysis = found["analysis"]
         job.address = found["address"]
         if job.analysis["is_reportable"]:
@@ -319,6 +335,7 @@ def run(job: Job) -> dict:
     analyzed; nothing useful can be returned without that.
     """
     global _foundry_paused_until
+    started = time.monotonic()
     work = _work_pool.submit(_prepare, job)
     mode = foundry_mode()
     steering = mode is not None and time.monotonic() >= _foundry_paused_until
@@ -326,6 +343,7 @@ def run(job: Job) -> dict:
         _agent_pool.submit(_steer, job, mode)
 
     work.result()  # the report itself; raises if it couldn't be made
+    ready = time.monotonic()
 
     orchestrator = "direct"
     if steering:
@@ -341,6 +359,19 @@ def run(job: Job) -> dict:
             _foundry_paused_until = time.monotonic() + FOUNDRY_PAUSE_SECONDS
     elif mode:
         job.agent_problem = "The Foundry agent is being left out for a minute after an earlier problem."
+    job.timings = {
+        **job.timings,
+        "waiting_for_agent": round(time.monotonic() - ready, 1),
+        "total": round(time.monotonic() - started, 1),
+        "agent_turns": job.turns,
+    }
+    # The agent's problem, if any, stays in the server log; it can name internal details.
+    _server_log.info(
+        "Report worked out (%s): %s%s",
+        orchestrator,
+        json.dumps(job.timings),
+        f" | agent: {job.agent_problem}" if job.agent_problem else "",
+    )
     return _result(job, orchestrator)
 
 
@@ -369,6 +400,7 @@ def _result(job: Job, orchestrator: str) -> dict:
             "summary": f"This doesn't look like a problem to report. {analysis['description']}".strip(),
             "orchestrator": orchestrator,
             "tool_calls": tool_calls,
+            "timings": job.timings,
         }
 
     report = _with_facts(job.draft, job.address, job.lat, job.lng, job.photo_url) if job.draft else None
@@ -381,6 +413,7 @@ def _result(job: Job, orchestrator: str) -> dict:
         "summary": f"Possible issue found: {analysis['title']}. {job.routing['reason']}",
         "orchestrator": orchestrator,
         "tool_calls": tool_calls,
+        "timings": job.timings,
     }
 
 
@@ -454,6 +487,77 @@ def draft_for_ticket(
         "address": found["address"],
         "report": _with_facts(draft, found["address"], lat, lng, photo_url),
         "written_by": "gemini" if found["draft"] else "template",
+        "timings": found["timings"],
+    }
+
+
+def follow_up_for_ticket(ticket: dict, photo_url: str | None = None, use_ai: bool = True) -> dict:
+    """A follow-up message about a ticket that is still there, for its department.
+
+    `ticket` is a row from db.get_ticket(). The department is the ticket's own;
+    nothing is chosen here. Gemini writes the message from the ticket's words;
+    without Gemini a plain one is used. Same shape as draft_for_ticket().
+    """
+    started = time.monotonic()
+    contact = routing.CONTACTS[ticket["owner"]]
+    lat, lng = ticket["lat"], ticket["lng"]
+    place = ticket["address"] or geocode.address_for(lat, lng)
+    where = place or f"map position {lat:.5f}, {lng:.5f}"
+    created = ticket["created_at"]
+    first_reported = f"{created:%B} {created.day}, {created.year}"  # e.g. "October 9, 2026"
+    confirmations = int(ticket["still_there"] or 0)
+    title = ticket["title"].rstrip(". ")
+    details = (ticket["description"] or "").strip()
+
+    draft = None
+    if use_ai and gemini.is_configured():
+        issue = {"title": title, "issue_type": ticket["issue_type"], "description": details}
+        try:
+            draft = gemini.follow_up_message(issue, where, first_reported, confirmations)
+            if not draft["subject"].lower().startswith("follow"):
+                draft["subject"] = f"Follow-up: {draft['subject']}"  # so the department sees at once what it is
+        except gemini.GeminiFailed:
+            log.warning("Gemini couldn't write the follow-up; using the plain message instead")
+    written_by = "gemini" if draft else "template"
+    if draft is None:
+        if details and details[-1] not in ".!?":
+            details += "."
+        others = ""
+        if confirmations > 1:
+            others = f" {confirmations} people have confirmed it through AVision."
+        lines = [
+            "Hello,",
+            f"I am following up on a possible issue that was reported on {first_reported}: {title}."
+            + (f" {details}" if details else ""),
+            f"It is at {where}, and it is still there.{others}",
+            "Could you let me know what is planned and when? Thank you for looking into it.",
+        ]
+        draft = {
+            "subject": f"Follow-up: {title} at {where.split(',')[0]}"[:120],
+            "message": "\n\n".join(lines),
+            "phone_script": f"Hi, I'm following up on a possible issue at {where}: {title}. "
+            f"It was reported on {first_reported} and it is still there.",
+        }
+
+    report = _with_facts(draft, place, lat, lng, photo_url)
+    # One more fact for a follow-up, above the "Sent with AVision" line.
+    body = report["message"].rsplit("\n", 1)
+    report["message"] = f"{body[0]}\nFirst reported: {first_reported}\n{body[1]}"
+    return {
+        "owner": _owner_for_app(
+            {
+                "owner": ticket["owner"],
+                "rule": "ticket_owner",
+                "reason": "This is the department the ticket is filed under.",
+                "contact": contact,
+                "decided_by": "ticket",
+            }
+        ),
+        "contact": _contact_for_app(contact),
+        "address": place,
+        "report": report,
+        "written_by": written_by,
+        "timings": {"total": round(time.monotonic() - started, 1), "gemini_request": gemini.last_cost() if written_by == "gemini" else None},
     }
 
 

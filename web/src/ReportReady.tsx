@@ -8,6 +8,8 @@ export type ReportToSend = {
   report: DraftedReport
   /** Why this department, in plain words. Null when the person picked it themselves. */
   reason: string | null
+  /** "followUp" for a ticket that is still there; otherwise this is a ticket that was just posted. */
+  kind?: "new" | "followUp"
 }
 
 /**
@@ -19,18 +21,23 @@ export default function ReportReady({
   contact,
   report,
   reason,
+  kind = "new",
   onClose,
 }: ReportToSend & { onClose: () => void }) {
   const [subject, setSubject] = useState(report.subject)
   const [message, setMessage] = useState(report.message)
   const [copied, setCopied] = useState(false)
 
+  // Escape closes this box only. It can sit on top of an open ticket, which
+  // also listens for Escape, so the key is caught first and goes no further.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
+      if (event.key !== "Escape") return
+      event.stopImmediatePropagation()
+      onClose()
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
   }, [onClose])
 
   async function copyMessage() {
@@ -68,8 +75,10 @@ export default function ReportReady({
       >
         <div className="report-header">
           <div>
-            <p className="eyebrow">TICKET POSTED</p>
-            <h2 id="report-ready-title">Now tell {contact.name}</h2>
+            <p className="eyebrow">{kind === "followUp" ? "FOLLOW-UP" : "TICKET POSTED"}</p>
+            <h2 id="report-ready-title">
+              {kind === "followUp" ? `Follow up with ${contact.name}` : `Now tell ${contact.name}`}
+            </h2>
           </div>
           <button
             type="button"
@@ -82,8 +91,9 @@ export default function ReportReady({
         </div>
 
         <p className="ready-intro">
-          Your ticket is on the map. AVision doesn’t send reports for you, so
-          here is a message to send yourself. Change anything you like first.
+          {kind === "followUp"
+            ? "Here is a follow-up written from this ticket. AVision doesn’t send it for you, so send it yourself. Change anything you like first."
+            : "Your ticket is on the map. AVision doesn’t send reports for you, so here is a message to send yourself. Change anything you like first."}
         </p>
 
         <div className="ready-to">

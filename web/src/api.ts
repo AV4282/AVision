@@ -534,7 +534,7 @@ type ApiChosenOwner = {
   name: string
   rule: string
   reason: string
-  decided_by: "gemini" | "rules" | "person"
+  decided_by: "gemini" | "rules" | "person" | "ticket"
 }
 
 /** Whether the server has photo analysis set up, so the form knows to offer it. */
@@ -583,8 +583,8 @@ export type TicketDraft = {
   owner: Owner
   /** Why that department, in plain words. */
   ownerReason: string
-  /** "gemini": the AI chose it. "rules": fixed map rules did. "person": picked in the form. */
-  decidedBy: "gemini" | "rules" | "person"
+  /** "gemini": the AI chose it. "rules": fixed map rules did. "person": picked in the form. "ticket": the ticket's own. */
+  decidedBy: "gemini" | "rules" | "person" | "ticket"
   contact: OwnerContact
   report: DraftedReport
 }
@@ -624,6 +624,31 @@ export async function draftReport(ticket: {
     contact: OwnerContact
     report: DraftedReport
   }>("POST", "/draft", { body, auth: false })
+  return {
+    owner: OWNER_FROM_API[drafted.owner.id],
+    ownerReason: drafted.owner.reason,
+    decidedBy: drafted.owner.decided_by,
+    contact: drafted.contact,
+    report: drafted.report,
+  }
+}
+
+/**
+ * Asks the server for a follow-up message about a ticket that is still there,
+ * written from the ticket and addressed to its department. Nothing is saved or
+ * sent. Takes a few seconds.
+ */
+export async function followUpReport(ticket: Ticket): Promise<TicketDraft> {
+  const body = {
+    // The message mentions the photo, so this has to be a full link. No link for the stock picture.
+    photo_url:
+      ticket.image === PLACEHOLDER_PHOTO ? null : new URL(ticket.image, window.location.origin).href,
+  }
+  const drafted = await request<{
+    owner: ApiChosenOwner
+    contact: OwnerContact
+    report: DraftedReport
+  }>("POST", `/tickets/${ticket.id}/follow-up`, { body, auth: false })
   return {
     owner: OWNER_FROM_API[drafted.owner.id],
     ownerReason: drafted.owner.reason,

@@ -24,6 +24,7 @@ The full plan is in [docs/AVision Design Doc.md](docs/AVision%20Design%20Doc.md)
 | 911 banner on the report form | ✅ Working |
 | Report agent: photo analysis, choosing the department, report drafting | ✅ Built. "Fill in the form from this photo" appears once `GEMINI_API_KEY` is set on the server; see [Report agent](#report-agent) |
 | Message to the department | ✅ Every posted ticket opens a drafted email, editable, with a button that opens it in the person's own email addressed to the department (GSU Facilities, ATL311 or MARTA Customer Service). AVision never sends it |
+| Follow-up | ✅ Voting "Still there" offers to write a follow-up email to the ticket's department, from the ticket's own details (`POST /tickets/{id}/follow-up`). Same editable box and email button; AVision never sends it |
 | Database (reports, hotspots, users, tickets, votes) on Tiger Cloud | ✅ Live |
 | Photo privacy service (blurs faces and plates) | ✅ Connected: the ticket API sends every upload through it when `PHOTO_PRIVACY_URL` is set, and refuses the photo if it can't be checked. `deploy.sh` sets it up on the server when there is enough memory |
 
@@ -178,6 +179,7 @@ Also `--accounts` (delete signed-in accounts too), `--reports` (delete reports t
 | GET | `/uploads/{name}` | Serves a stored photo |
 | GET | `/analyze/status` | Says whether photo analysis is set up |
 | POST | `/analyze` | Runs the report agent on an uploaded photo: `{"photo": "<name>.jpg", "lat": ..., "lng": ...}`. Saves nothing |
+| POST | `/tickets/{id}/follow-up` | Writes a follow-up message about a ticket that is still there, for its department. Saves and sends nothing |
 | POST | `/draft` | For a ticket about to be posted (`title`, `issue_type`, `lat`, `lng`, optional `address`, `description`, `photo`, `owner`): picks the department and writes the message to send it. Saves and sends nothing |
 
 **Who is asking:** signed-in callers send `Authorization: Bearer <Auth0 access token>`, and their tickets and votes are saved under their account. Everyone else sends `X-User-Id` with a guest ID from `POST /guests`; only guest IDs are accepted that way. When someone signs in, the web app sends its guest ID to `POST /me` once, and that guest's tickets and votes move to the account. The web app handles all of this automatically.

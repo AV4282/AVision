@@ -19,6 +19,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -89,6 +90,27 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+
+
+def _running_version() -> str | None:
+    """The short id of the git commit this code was started from, or None if that can't be read."""
+    try:
+        git = Path(__file__).parent.parent / ".git"
+        head = (git / "HEAD").read_text().strip()
+        if not head.startswith("ref: "):
+            return head[:7]
+        ref = head[5:]
+        if (git / ref).is_file():
+            return (git / ref).read_text().strip()[:7]
+        for line in (git / "packed-refs").read_text().splitlines():
+            if line.endswith(" " + ref):
+                return line[:7]
+    except OSError:
+        pass
+    return None
+
+
+VERSION = _running_version()
 
 
 # ---------- models ----------
@@ -290,7 +312,8 @@ def caller(
 @app.get("/health")
 def health():
     # photo_privacy: whether uploads go through the face and plate blurring service.
-    return {"ok": db.ping(), "photo_privacy": bool(photos.PRIVACY_URL)}
+    # version: the commit this server is running, to tell whether a deploy has landed.
+    return {"ok": db.ping(), "photo_privacy": bool(photos.PRIVACY_URL), "version": VERSION}
 
 
 @app.post("/me", response_model=Me)
@@ -499,7 +522,11 @@ def _take_analysis_slot():
 @app.get("/analyze/status")
 def analyze_status():
     """Whether photo analysis is set up, so the web app knows to offer it."""
-    return {"available": gemini.is_configured(), "orchestrator": agent.foundry_mode() or "direct"}
+    return {
+        "available": gemini.is_configured(),
+        "orchestrator": agent.foundry_mode() or "direct",
+        "model": gemini.GEMINI_MODEL,
+    }
 
 
 @app.post("/analyze")
@@ -549,5 +576,28 @@ def draft(body: DraftIn):
         photo=path.read_bytes() if path else None,
         photo_url=body.photo_url if path else None,
         owner=body.owner,
+        use_ai=gemini.is_configured() and _analysis_slot() is None,
+    )
+
+
+class FollowUpIn(BaseModel):
+    # The ticket photo's public link, to put in the message. Optional.
+    photo_url: str | None = Field(default=None, max_length=1000, pattern=r"^https?://\S+$", examples=[None])
+
+
+@app.post("/tickets/{ticket_id}/follow-up")
+def follow_up(ticket_id: UUID, body: FollowUpIn | None = None):
+    """A follow-up message about a ticket that is still there, for its department.
+
+    The web app offers this after someone votes "Still there", then shows the
+    message for them to edit and send from their own email. Nothing is saved or
+    sent here. Gemini writes it from the ticket; without Gemini a plain one is used.
+    """
+    ticket = db.get_ticket(ticket_id)
+    if ticket is None:
+        raise HTTPException(404, "Ticket not found")
+    return agent.follow_up_for_ticket(
+        ticket,
+        photo_url=body.photo_url if body and ticket["photo_url"] else None,
         use_ai=gemini.is_configured() and _analysis_slot() is None,
     )

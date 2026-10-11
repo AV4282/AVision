@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom"
 import {
   Fragment,
   lazy,
@@ -28,6 +29,7 @@ import {
   Menu,
   Plus,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -38,6 +40,7 @@ import {
 } from "lucide-react"
 import {
   deleteTicket,
+  followUpReport,
   listTickets,
   PLACEHOLDER_PHOTO,
   vote,
@@ -519,13 +522,41 @@ function TicketDetail({
   const hasPhoto = ticket.image !== PLACEHOLDER_PHOTO
   const photoAlt = hasPhoto ? `Photo of: ${ticket.title}` : "City sidewalk beside a street"
 
+  // After a "Still there" vote: offer to write a follow-up to the department.
+  // "asking" shows the question, "writing" while the message is drafted, and
+  // `followUp` holds the finished message for the send box.
+  const [followUpStep, setFollowUpStep] = useState<"idle" | "asking" | "writing">("idle")
+  const [followUp, setFollowUp] = useState<ReportToSend | null>(null)
+  const [followUpError, setFollowUpError] = useState<string | null>(null)
+
+  async function writeFollowUp() {
+    if (followUpStep === "writing") return
+    setFollowUpStep("writing")
+    setFollowUpError(null)
+    try {
+      const drafted = await followUpReport(ticket)
+      setFollowUp({ contact: drafted.contact, report: drafted.report, reason: null, kind: "followUp" })
+      setFollowUpStep("idle")
+    } catch (err) {
+      setFollowUpError(err instanceof Error ? err.message : "Couldn’t write the follow-up")
+      setFollowUpStep("asking")
+    }
+  }
+
   // Counts and status come back from the server, so the UI never guesses them.
   async function castVote(choice: VoteChoice) {
-    if (pending || ticket.myVote === choice) return
+    if (pending) return
+    if (ticket.myVote === choice) {
+      // Already voted "Still there": pressing it again brings the follow-up offer back.
+      if (choice === "still_there" && followUpStep === "idle") setFollowUpStep("asking")
+      return
+    }
     setPending(choice)
     setVoteError(null)
     try {
       onTicketChange(await vote(ticket.id, choice))
+      setFollowUpStep(choice === "still_there" ? "asking" : "idle")
+      setFollowUpError(null)
     } catch (err) {
       setVoteError(
         err instanceof Error ? err.message : "Your vote didn’t go through",
@@ -627,6 +658,44 @@ function TicketDetail({
               {voteError}
             </p>
           )}
+          {followUpStep !== "idle" && (
+            <div className="follow-up-offer" role="group" aria-label="Send a follow-up">
+              <p>
+                <strong>Thanks. Want to follow up with {ticket.owner}?</strong> AVision
+                writes the email from this ticket and you send it yourself.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setFollowUpStep("idle")}
+                  disabled={followUpStep === "writing"}
+                >
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={writeFollowUp}
+                  disabled={followUpStep === "writing"}
+                >
+                  <Send size={14} />
+                  {followUpStep === "writing" ? "Writing it…" : "Write follow-up"}
+                </button>
+              </div>
+              {followUpError && (
+                <p className="vote-error" role="alert">
+                  {followUpError}
+                </p>
+              )}
+            </div>
+          )}
+          {/* On top of everything, wherever this ticket is shown (side panel or its own box). */}
+          {followUp &&
+            createPortal(
+              <ReportReady {...followUp} onClose={() => setFollowUp(null)} />,
+              document.body,
+            )}
         </div>
         {onViewFull && (
           <button className="view-ticket-button" onClick={onViewFull}>

@@ -77,8 +77,8 @@ export function ThemeToggle() {
       aria-pressed={dark}
       title={`Switch to ${dark ? "light" : "dark"} mode`}
     >
-      {dark ? <Moon size={17} aria-hidden="true" /> : <Sun size={17} aria-hidden="true" />}
-      <span>{dark ? "Dark" : "Light"}</span>
+      {/* Icon only: a moon while dark mode is on, a sun while it's off. The label above is for screen readers. */}
+      {dark ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}
     </button>
   )
 }

@@ -142,13 +142,12 @@
 }
 
 .theme-toggle {
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 12px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
   flex-shrink: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -184,10 +183,7 @@
 
 @media (max-width: 520px) {
   .onboarding-actions { gap: 10px; }
-  .onboarding-actions .theme-toggle { padding: 0; }
-  .onboarding-actions .theme-toggle span { display: none; }
   .app-header .header-actions { gap: 8px; }
-  .header-actions .theme-toggle { padding: 0 8px; }
 }
 
 * {
@@ -1197,6 +1193,38 @@ summary:focus-visible {
 .vote-buttons button:disabled {
   cursor: progress;
   opacity: 0.7;
+}
+
+/* After a "Still there" vote: the offer to write a follow-up. */
+.follow-up-offer {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--findings-line);
+  border-radius: 10px;
+  color: var(--slate);
+  background: var(--findings-surface);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.follow-up-offer p {
+  margin: 0;
+}
+
+.follow-up-offer strong {
+  color: var(--ink);
+}
+
+.follow-up-offer > div {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+}
+
+.follow-up-offer .primary-button {
+  min-height: 36px;
 }
 
 .vote-error {

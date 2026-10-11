@@ -5,6 +5,7 @@ What Gemini does for a report, in ONE request per report:
                        words, if any) -> what the issue is, which department it
                        goes to and why, and a message and phone script to send
   report_from_text()   the same without a photo, from the person's words alone
+  follow_up_message()  a follow-up about a ticket that is still there
 
 Doing it all in one request is what keeps a report quick (one round trip, not
 three) and cheap (the free allowance is counted per request).
@@ -144,6 +145,15 @@ the department, along with what the photo shows. is_reportable is still about th
 If there is nothing to report (the photo shows no problem and the person described none), leave subject, message \
 and phone_script empty."""
 
+FOLLOW_UP_INSTRUCTIONS = f"""{INTRODUCTION} A problem that was reported earlier is still there, and someone \
+wants to follow up with the department about it. You write that follow-up for them to send.
+
+{WRITE_RULES}
+- Say plainly that this is a follow-up: the problem was reported before, when, and that it is still there.
+- If other people have confirmed it is still there, say how many.
+- Ask what is planned and when, politely. Do not complain or blame.
+- Start the subject with "Follow-up:"."""
+
 TEXT_INSTRUCTIONS = f"""{INTRODUCTION} For one new report, described in the person's own words, you do two \
 things in a single answer: choose the department it goes to, and write the report.
 
@@ -176,6 +186,24 @@ def is_configured() -> bool:
 
 
 _thinking_refused = False  # set if the model turns the thinking setting down, so it isn't sent again
+
+# How long this thread's latest request took and what it used, so a slow report
+# can be explained: {"seconds", "thinking_tokens", "answer_tokens"}. See last_cost().
+_latest = threading.local()
+
+
+def _note_cost(reply, seconds: float):
+    used = getattr(reply, "usage_metadata", None)
+    _latest.cost = {
+        "seconds": round(seconds, 1),
+        "thinking_tokens": getattr(used, "thoughts_token_count", None),
+        "answer_tokens": getattr(used, "candidates_token_count", None),
+    }
+
+
+def last_cost() -> dict | None:
+    """What the latest Gemini request made from this thread took, or None if there wasn't one."""
+    return getattr(_latest, "cost", None)
 
 
 def _ask(contents, instructions: str, shape: type[BaseModel]):
@@ -216,6 +244,7 @@ def _ask(contents, instructions: str, shape: type[BaseModel]):
                 reply = send(thinking)
             else:
                 raise
+        _note_cost(reply, time.monotonic() - started)
         return shape.model_validate_json(reply.text or "")
     except NotConfigured:
         raise
@@ -316,6 +345,23 @@ def report_from_text(issue: dict, location: list[str], departments: dict, sugges
         + "\n\n" + _place_and_departments(location, departments, suggestion)
     )
     return _choice_and_draft(_ask(asked, TEXT_INSTRUCTIONS, _answer_shape(departments, with_photo=False)).model_dump())
+
+
+def follow_up_message(issue: dict, place: str, first_reported: str, confirmations: int) -> dict:
+    """A follow-up about a ticket that is still there, as a dict with the Draft fields.
+
+    `issue` is the ticket in words (see _issue_lines), `first_reported` is the
+    date it was posted, written out, and `confirmations` is how many people
+    have said it is still there.
+    """
+    asked = (
+        "The ticket\n" + "\n".join(_issue_lines(issue))
+        + f"\nPlace: {place}"
+        + f"\nFirst reported through AVision: {first_reported}"
+        + f"\nPeople who have confirmed it is still there: {confirmations}"
+    )
+    draft = _ask(f"Write the follow-up for this ticket.\n\n{asked}", FOLLOW_UP_INSTRUCTIONS, Draft).model_dump()
+    return {key: _strip_contacts(text) for key, text in draft.items()}
 
 
 def _choice_and_draft(answer: dict) -> dict:
