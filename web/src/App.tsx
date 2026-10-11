@@ -1711,9 +1711,7 @@ function ProfileView({
 
   return (
     <section className="profile-page page-content">
-      <div className="profile-cover">
-        <div className="cover-pattern" />
-      </div>
+      <div className="profile-cover" />
       <div className="profile-summary">
         <div className="large-avatar-wrap">
           <div className="large-avatar">
@@ -1869,8 +1867,8 @@ function ProfileView({
         <aside className="profile-side">
           <div className="impact-card">
             <div className="impact-heading">
-              <span>
-                <Sparkles size={18} />
+              <span className="impact-emoji" aria-hidden="true">
+                ✊
               </span>
               <div>
                 <p>YOUR COMMUNITY IMPACT</p>
