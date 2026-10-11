@@ -18,6 +18,7 @@ Built for the Social Good track at Hacklanta '26 (Oct 9–11, Georgia State Univ
 - **Issues list** with status tabs, search and sort.
 - **Community voting:** "Fixed" votes move a ticket toward **Likely fixed** and "Still there" votes keep it open. A "Still there" vote also offers a follow-up message to the department.
 - **Optional Google sign-in:** your tickets and votes follow you, with a profile showing your impact. Guest activity carries over when you sign in, and you can delete your own tickets.
+- **Admins** can delete any ticket and mark tickets as fixed. Grant it with `python admin.py grant "<name>"` from `api/` ([Database](docs/database.md#users)).
 
 ## Repo layout
 
