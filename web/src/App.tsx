@@ -41,6 +41,7 @@ import {
   X,
 } from "lucide-react"
 import {
+  clearNotices,
   closeTicket,
   deleteTicket,
   followUpReport,
@@ -75,6 +76,7 @@ import { useNotificationPreferences } from "./notification-preferences"
 import ResourcesDialog from "./ResourcesDialog"
 
 import { mapOwner, ticketMarker } from "./ticket-map"
+import { WELCOME_PHOTOS } from "./welcome-photos"
 import type { AvisionMapOwner } from "./components/avision-map/types"
 const AvisionMap = lazy(() => import("./components/avision-map/AvisionMap"))
 type View = "onboarding" | "map" | "issues" | "profile"
@@ -173,7 +175,8 @@ function useLiveTickets(state: TicketsState): { connected: boolean; bellNudge: n
     const stop = watchLive({
       onEvent(event) {
         const known = ticketsNow.current.find((ticket) => ticket.id === event.id)
-        if (known && (known.mine || known.myVote)) setBellNudge((count) => count + 1)
+        const concernsMe = !!known && (known.mine || known.myVote !== null)
+        if (concernsMe) setBellNudge((count) => count + 1)
         window.clearTimeout(waiting[event.id])
         delete waiting[event.id]
         if (event.type === "ticket_deleted") {
@@ -183,7 +186,12 @@ function useLiveTickets(state: TicketsState): { connected: boolean; bellNudge: n
         waiting[event.id] = window.setTimeout(() => {
           delete waiting[event.id]
           getTicket(event.id)
-            .then((fresh) => (fresh ? upsertTicket(fresh) : removeTicket(event.id)))
+            .then((fresh) => {
+              if (!fresh) return removeTicket(event.id)
+              upsertTicket(fresh)
+              // A ticket this page hadn't loaded yet can still be the viewer's own.
+              if (!concernsMe && (fresh.mine || fresh.myVote !== null)) setBellNudge((count) => count + 1)
+            })
             .catch(() => {}) // shown as it was; the next change or reload fixes it
         }, LIVE_SETTLE_MS)
       },
@@ -314,62 +322,6 @@ function StatusPill({ status }: { status: Status }) {
   )
 }
 
-// The photos behind the welcome text: Atlanta, the two campuses AVision covers,
-// and people out fixing and using the street. Files are in web/public/welcome.
-// Every photo is free to use; `by` and `link` give its credit, shown on screen.
-// The Georgia State photo's license (CC BY-SA) requires that credit, so keep it.
-const WELCOME_PHOTOS = [
-  {
-    file: "atlanta-skyline.jpg",
-    label: "Atlanta",
-    by: "Joey Kyber",
-    link: "https://unsplash.com/photos/timelapse-photo-of-highway-during-golden-hour-45FJgZMXCK8",
-    terms: "Unsplash",
-  },
-  {
-    file: "street-repair.jpg",
-    label: "Street repair crew",
-    by: "Nicolas J Leclercq",
-    link: "https://unsplash.com/photos/WJg2bynUWOk",
-    terms: "Unsplash",
-  },
-  {
-    file: "gsu-library-plaza.jpg",
-    label: "Georgia State University",
-    by: "Hwi.padam",
-    link: "https://commons.wikimedia.org/wiki/File:GSU_Library_Plaza.jpg",
-    terms: "CC BY-SA 4.0",
-    termsLink: "https://creativecommons.org/licenses/by-sa/4.0",
-  },
-  {
-    file: "crosswalk.jpg",
-    label: "People crossing the street",
-    by: "Gabe",
-    link: "https://unsplash.com/photos/people-crossing-gray-road-t--Oc97rSm8",
-    terms: "Unsplash",
-  },
-  {
-    file: "georgia-tech-tower.jpg",
-    label: "Georgia Tech",
-    by: "Mistercontributer",
-    link: "https://commons.wikimedia.org/wiki/File:Tech_Tower_-_June_2024.jpg",
-    terms: "Wikimedia Commons",
-  },
-  {
-    file: "paving-crew.jpg",
-    label: "Paving crew",
-    by: "Christian Agbede",
-    link: "https://unsplash.com/photos/construction-workers-operate-asphalt-paving-machinery-on-road-U4penYTuR04",
-    terms: "Unsplash",
-  },
-  {
-    file: "atlanta-aerial.jpg",
-    label: "Atlanta",
-    by: "Lance Asper",
-    link: "https://unsplash.com/photos/a-city-with-tall-buildings-9fxD3UW_C1I",
-    terms: "Unsplash",
-  },
-] as const
 // How long each photo stays before the next one fades in.
 const WELCOME_PHOTO_SECONDS = 8
 
@@ -440,14 +392,35 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
       eyebrow: "See it. Share it. Fix it.",
       title: "A more accessible city starts with you.",
       body: "Turn everyday accessibility barriers into mapped, trackable tickets—and help your community follow them through to a fix.",
+      example: {
+        photo: PLACEHOLDER_PHOTO,
+        alt: "City sidewalk beside a street",
+        finding: "Possible barrier",
+        owner: "City of Atlanta",
+        place: "Courtland St NE",
+      },
     },
     {
       eyebrow: "One photo is enough",
       title: "Report barriers in a few simple steps.",
       body: "Upload a photo, confirm the location, and review the possible barrier. AVision routes your ticket to the right public agency.",
+      example: {
+        photo: `${import.meta.env.BASE_URL}welcome/gsu-library-plaza.jpg`,
+        alt: "A brick plaza between buildings on Georgia State's campus",
+        finding: "Possible hazard",
+        owner: "GSU Facilities",
+        place: "Library Plaza",
+      },
     },
   ]
   const panel = panels[step]
+  // After the first change of introduction, the example ticket swaps in quickly
+  // instead of replaying its slow first entrance.
+  const [swapped, setSwapped] = useState(false)
+  const showStep = (next: number) => {
+    setSwapped(true)
+    setStep(next)
+  }
 
   return (
     <main className="onboarding-shell">
@@ -489,24 +462,23 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
             </h1>
             <p className="story-copy">{panel.body}</p>
           </div>
-          <div className="story-ticket-card">
-            <div className="mini-photo">
-              <img
-                src={PLACEHOLDER_PHOTO}
-                alt="City sidewalk beside a street"
-              />
+          {/* Each introduction has its own example ticket. The keys make the
+              photo scan, the tag and the routing play again for the new one. */}
+          <div className={swapped ? "story-ticket-card swapped" : "story-ticket-card"}>
+            <div className="mini-photo" key={`photo-${step}`}>
+              <img src={panel.example.photo} alt={panel.example.alt} />
               <span className="ai-badge">
-                <Sparkles size={12} /> Possible barrier
+                <Sparkles size={12} /> {panel.example.finding}
               </span>
             </div>
-            <div>
+            <div key={`text-${step}`}>
               <span className="mini-label">ROUTED TO</span>
-              <strong>City of Atlanta</strong>
+              <strong>{panel.example.owner}</strong>
               <span className="mini-address">
-                <MapPin size={13} /> Courtland St NE
+                <MapPin size={13} /> {panel.example.place}
               </span>
             </div>
-            <CheckCircle2 className="mini-check" size={22} />
+            <CheckCircle2 className="mini-check" size={22} key={`check-${step}`} />
           </div>
           <div className="story-controls">
             <div className="story-dots">
@@ -515,13 +487,13 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
                   aria-label={`Show introduction ${index + 1}`}
                   className={index === step ? "story-dot active" : "story-dot"}
                   key={index}
-                  onClick={() => setStep(index)}
+                  onClick={() => showStep(index)}
                 />
               ))}
             </div>
             <button
               className="circle-control"
-              onClick={() => setStep(step === panels.length - 1 ? 0 : step + 1)}
+              onClick={() => showStep(step === panels.length - 1 ? 0 : step + 1)}
               aria-label="Next introduction"
             >
               <ArrowRight size={18} />
@@ -780,10 +752,16 @@ function noticeText(notice: Notice): string {
       return notice.yours
         ? "Your ticket was marked fixed by an admin."
         : "A ticket you voted on was marked fixed by an admin."
+    case "reported":
+      return "Someone else sent a report about your ticket."
     case "moved":
       return notice.yours
         ? "Your ticket was moved to a new spot by an admin."
         : "A ticket you voted on was moved to a new spot on the map."
+    case "rerouted":
+      return notice.yours
+        ? "Your ticket was sent to a different department by an admin."
+        : "A ticket you voted on was sent to a different department."
     case "reopened":
       return "Your ticket was reopened. Someone says it is still there."
     case "removed":
@@ -908,6 +886,34 @@ function NotificationBell({
     }
   }
 
+  // Clearing takes effect on screen at once. If the server didn't get it, the
+  // next check brings back whatever is still there.
+  const checkAgain = () => refreshNotices.current()
+
+  // "Clear all" clears what is listed. Notifications hidden by the person's
+  // preferences are not on screen, so they are left alone.
+  function clearAll() {
+    const gone = new Set(visibleNotices.map((notice) => notice.id))
+    const goneUnread = visibleNotices.filter((notice) => !notice.read).length
+    const nothingHidden = gone.size === notices.length
+    setNotices((list) => list.filter((notice) => !gone.has(notice.id)))
+    setFresh(new Set())
+    setUnread((count) => Math.max(0, count - goneUnread))
+    lastUnread.current = Math.max(0, lastUnread.current - goneUnread)
+    // With nothing hidden, the server is told "all", which also covers older
+    // ones beyond the list shown here.
+    clearNotices(nothingHidden ? undefined : [...gone]).then(checkAgain, checkAgain)
+  }
+
+  function clearOne(notice: Notice) {
+    setNotices((list) => list.filter((each) => each.id !== notice.id))
+    if (!notice.read) {
+      setUnread((count) => Math.max(0, count - 1))
+      lastUnread.current = Math.max(0, lastUnread.current - 1)
+    }
+    clearNotices([notice.id]).then(checkAgain, checkAgain)
+  }
+
   return (
     <div className="notice-wrap" ref={wrap}>
       <button
@@ -926,7 +932,14 @@ function NotificationBell({
       </button>
       {open && (
         <section className="notice-panel" aria-label="Notifications">
-          <h2>Notifications</h2>
+          <div className="notice-head">
+            <h2>Notifications</h2>
+            {visibleNotices.length > 0 && (
+              <button type="button" className="notice-clear" onClick={clearAll}>
+                Clear all
+              </button>
+            )}
+          </div>
           {!inApp ? (
             <p className="notice-empty">In-app notifications are off in this browser. Turn them on in My profile → Notification preferences.</p>
           ) : visibleNotices.length === 0 ? (
@@ -955,6 +968,7 @@ function NotificationBell({
                     {ticketId ? (
                       <button
                         type="button"
+                        className="notice-row"
                         onClick={() => {
                           close()
                           onOpenTicket(ticketId)
@@ -963,8 +977,17 @@ function NotificationBell({
                         {body}
                       </button>
                     ) : (
-                      <div>{body}</div>
+                      <div className="notice-row">{body}</div>
                     )}
+                    <button
+                      type="button"
+                      className="notice-dismiss"
+                      onClick={() => clearOne(notice)}
+                      aria-label={`Clear this notification about ${notice.ticketTitle}`}
+                      title="Clear"
+                    >
+                      <X size={14} />
+                    </button>
                   </li>
                 )
               })}
@@ -1059,7 +1082,7 @@ function TicketDetail({
     }
   }
 
-  // Moving the pin, for a ticket put in the wrong spot. `moveNote` says how it went.
+  // Fixing the ticket's spot or department after posting. `moveNote` says how it went.
   const [moving, setMoving] = useState(false)
   const [moveNote, setMoveNote] = useState<string | null>(null)
 
@@ -1098,7 +1121,13 @@ function TicketDetail({
     setFollowUpError(null)
     try {
       const drafted = await followUpReport(ticket)
-      setFollowUp({ contact: drafted.contact, report: drafted.report, reason: null, kind: "followUp" })
+      setFollowUp({
+        contact: drafted.contact,
+        report: drafted.report,
+        reason: null,
+        kind: "followUp",
+        ticketId: ticket.id,
+      })
       setFollowUpStep("idle")
     } catch (err) {
       setFollowUpError(err instanceof Error ? err.message : "Couldn’t write the follow-up")
@@ -1298,7 +1327,7 @@ function TicketDetail({
                     setMoving(true)
                   }}
                 >
-                  <MapPin size={15} /> Edit location
+                  <MapPin size={15} /> Edit ticket
                 </button>
                 <button
                   type="button"
@@ -1357,8 +1386,8 @@ function TicketDetail({
                     setMoving(false)
                     setMoveNote(
                       updated.owner !== ticket.owner
-                        ? `Location updated. This spot belongs to ${updated.owner}, so the ticket is now routed there.`
-                        : "Location updated.",
+                        ? `Ticket updated. It is now routed to ${updated.owner}.`
+                        : "Ticket updated.",
                     )
                     onTicketChange(updated)
                   }}
@@ -2340,7 +2369,7 @@ export default function App() {
             setSelectedId(ticket.id)
             setReportOpen(false)
             setView("map")
-            setToSend(drafted)
+            setToSend(drafted && { ...drafted, ticketId: ticket.id })
           }}
         />
       )}

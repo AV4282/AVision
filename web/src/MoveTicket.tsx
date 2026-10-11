@@ -1,17 +1,18 @@
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react"
 import { X } from "lucide-react"
 import AddressField from "./AddressField"
-import { moveTicket, NO_ADDRESS, outsideCoverage, type Ticket } from "./api"
+import { moveTicket, NO_ADDRESS, outsideCoverage, OWNERS, type Owner, type Ticket } from "./api"
 import { nearestAddress } from "./geocode"
 import type { ReportLocation } from "./ReportLocationPicker"
 
 const ReportLocationPicker = lazy(() => import("./ReportLocationPicker"))
 
 /**
- * Lets a ticket's poster (or an admin) put it somewhere else on the map, for
- * when the pin went in the wrong spot. The same pin map as the report form:
- * tap the map, drag the pin, use the device's location, or pick an address.
- * Nothing changes until Save.
+ * Lets a ticket's poster (or an admin) fix it after posting: put the pin
+ * somewhere else, for when it went in the wrong spot, and/or send the ticket to
+ * a different department. The same pin map as the report form: tap the map,
+ * drag the pin, use the device's location, or pick an address. Nothing changes
+ * until Save.
  */
 export default function MoveTicket({
   ticket,
@@ -20,11 +21,16 @@ export default function MoveTicket({
 }: {
   ticket: Ticket
   onClose: () => void
-  /** Called with the updated ticket once the new spot is saved. */
+  /** Called with the updated ticket once the changes are saved. */
   onMoved: (ticket: Ticket) => void
 }) {
   const [location, setLocation] = useState<ReportLocation>({ lat: ticket.lat, lng: ticket.lng })
-  const [address, setAddress] = useState(ticket.address === NO_ADDRESS ? "" : ticket.address)
+  const startAddress = ticket.address === NO_ADDRESS ? "" : ticket.address
+  const [address, setAddress] = useState(startAddress)
+  const [owner, setOwner] = useState<Owner>(ticket.owner)
+  // Whether the person chose the department themselves. If they didn't, the
+  // server may still change it to match a new spot (see api/main.py).
+  const [ownerChosen, setOwnerChosen] = useState(false)
   // Once the person types their own words, a pin move no longer replaces them.
   const addressEdited = useRef(false)
   // A pin placed by picking an address already has its address.
@@ -37,6 +43,7 @@ export default function MoveTicket({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const moved = location.lat !== ticket.lat || location.lng !== ticket.lng
+  const changed = moved || owner !== ticket.owner || address.trim() !== startAddress.trim()
 
   // Escape closes this box only. It sits on top of the open ticket, which also
   // listens for Escape, so the key is caught first and goes no further.
@@ -123,7 +130,7 @@ export default function MoveTicket({
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (saving || !moved || outside) return
+    if (saving || !changed || outside) return
     setSaving(true)
     setError(null)
     try {
@@ -132,10 +139,11 @@ export default function MoveTicket({
           lat: Number(location.lat.toFixed(6)),
           lng: Number(location.lng.toFixed(6)),
           address: address.trim(),
+          owner: ownerChosen ? owner : undefined,
         }),
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn’t move the ticket")
+      setError(err instanceof Error ? err.message : "Couldn’t save the changes")
       setSaving(false)
     }
   }
@@ -156,26 +164,51 @@ export default function MoveTicket({
       >
         <div className="report-header">
           <div>
-            <p className="eyebrow">EDIT LOCATION</p>
-            <h2 id="move-ticket-title">Move this ticket</h2>
+            <p className="eyebrow">EDIT TICKET</p>
+            <h2 id="move-ticket-title">Fix the location or department</h2>
           </div>
           <button
             type="button"
             className="dialog-close"
             onClick={onClose}
             disabled={saving}
-            aria-label="Close without moving"
+            aria-label="Close without saving"
           >
             <X size={18} />
           </button>
         </div>
 
         <p className="ready-intro">
-          Put the pin where the issue really is: tap the map, drag the pin, or
-          pick an address. Nothing changes until you save.
+          Change which department this goes to, or put the pin where the issue
+          really is: tap the map, drag the pin, or pick an address. Nothing
+          changes until you save.
         </p>
 
         <fieldset className="form-grid report-fields" disabled={saving}>
+          <label className="form-field full">
+            <span>Who should fix it?</span>
+            <select
+              value={owner}
+              onChange={(event) => {
+                setOwner(event.target.value as Owner)
+                setOwnerChosen(true)
+              }}
+            >
+              {OWNERS.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                  {name === ticket.owner ? " (now)" : ""}
+                </option>
+              ))}
+            </select>
+            {!ownerChosen && (
+              <small className="field-note">
+                Moving the pin onto a campus or a MARTA station can change this
+                for you. Choose one here to set it yourself.
+              </small>
+            )}
+          </label>
+
           <label className="form-field full">
             <span>
               Address or landmark <em>optional</em>
@@ -235,8 +268,8 @@ export default function MoveTicket({
           <button type="button" className="text-button" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button type="submit" className="primary-button" disabled={saving || !moved || outside !== null}>
-            {saving ? "Saving…" : moved ? "Save new location" : "Move the pin first"}
+          <button type="submit" className="primary-button" disabled={saving || !changed || outside !== null}>
+            {saving ? "Saving…" : changed ? "Save changes" : "Nothing changed yet"}
           </button>
         </div>
       </form>

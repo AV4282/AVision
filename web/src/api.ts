@@ -813,7 +813,7 @@ export async function draftReport(ticket: {
  */
 export type Notice = {
   id: string
-  /** still_there, marked_fixed, likely_fixed, fixed, reopened, moved or removed. */
+  /** still_there, marked_fixed, likely_fixed, fixed, reopened, reported, moved, rerouted or removed. */
   kind: string
   /** True when the viewer posted the ticket, false when they voted on it. */
   yours: boolean
@@ -851,6 +851,14 @@ export async function listNotices(): Promise<{ unread: number; items: Notice[] }
   }
 }
 
+/**
+ * Deletes the viewer's notifications for good: the ones listed, or all of them
+ * when no list is given. The tickets themselves are not touched.
+ */
+export async function clearNotices(ids?: string[]): Promise<void> {
+  await request<void>("POST", "/notifications/clear", { body: ids ? { ids } : {} })
+}
+
 /** Marks notifications as seen, so they stop counting on the bell. */
 export async function markNoticesRead(ids: string[]): Promise<void> {
   if (ids.length > 0) await request<void>("POST", "/notifications/read", { body: { ids } })
@@ -885,16 +893,32 @@ export async function deleteTicket(ticketId: string): Promise<void> {
 }
 
 /**
- * Moves a ticket to another spot on the map. Only its poster can, or an admin.
- * The server may also change its department, when the new spot belongs to a
- * different one (say, moved off a campus).
+ * Changes where a ticket is and/or which department it goes to. Only its
+ * poster can, or an admin. Send the ticket's own position to leave it in place.
+ *
+ * Without `owner`, the server only changes the department when a move calls
+ * for it (the new spot belongs to a different one, say off a campus).
  */
 export async function moveTicket(
   ticketId: string,
-  to: { lat: number; lng: number; address: string },
+  to: { lat: number; lng: number; address: string; owner?: Owner },
 ): Promise<Ticket> {
-  const body = { lat: to.lat, lng: to.lng, address: to.address || null }
+  const body = {
+    lat: to.lat,
+    lng: to.lng,
+    address: to.address || null,
+    owner: to.owner ? OWNER_TO_API[to.owner] : null,
+  }
   return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/location`, { body }))
+}
+
+/**
+ * Tells the server the viewer went to send a report about a ticket (they
+ * pressed one of the send buttons on its drafted message). Each person counts
+ * once, so calling it again is harmless. Returns the ticket with its new count.
+ */
+export async function reportSent(ticketId: string): Promise<Ticket> {
+  return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/reports`))
 }
 
 /** Marks a ticket as fixed. Admins only. */

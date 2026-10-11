@@ -41,6 +41,11 @@ HAS_MORE_PHOTOS = False
 # is known to exist. Without it nobody is notified, and everything else still works.
 HAS_NOTIFICATIONS = False
 
+# Who has sent a report about a ticket is kept in its own table
+# (sql/007_ticket_reports.sql). True once it is known to exist. Without it the
+# report count simply stays as it is.
+HAS_TICKET_REPORTS = False
+
 # tickets.owner only accepts 'georgia_tech' once sql/006_georgia_tech.sql has run.
 # Until it is known to, nothing is routed to Georgia Tech (see main.py's lifespan).
 HAS_GEORGIA_TECH = False
@@ -54,13 +59,14 @@ def ensure_schema():
     isn't allowed to), the API carries on without that feature: one photo per
     ticket, no notifications, or no Georgia Tech tickets.
     """
-    global HAS_MORE_PHOTOS, HAS_NOTIFICATIONS, HAS_GEORGIA_TECH
+    global HAS_MORE_PHOTOS, HAS_NOTIFICATIONS, HAS_GEORGIA_TECH, HAS_TICKET_REPORTS
     with pool.connection() as conn:
         for name in (
             "004_admin.sql",
             "004_more_photos.sql",
             "005_notifications.sql",
             "006_georgia_tech.sql",
+            "007_ticket_reports.sql",
         ):
             try:
                 conn.execute((HERE / "sql" / name).read_text(encoding="utf-8"))
@@ -80,6 +86,13 @@ def ensure_schema():
             conn.execute(
                 """SELECT 1 FROM information_schema.tables
                    WHERE table_schema = current_schema() AND table_name = 'notifications'"""
+            ).fetchone()
+            is not None
+        )
+        HAS_TICKET_REPORTS = (
+            conn.execute(
+                """SELECT 1 FROM information_schema.tables
+                   WHERE table_schema = current_schema() AND table_name = 'ticket_reports'"""
             ).fetchone()
             is not None
         )
@@ -261,6 +274,16 @@ def claim_guest(member_id, guest_id):
             "UPDATE ticket_votes SET user_id = %s WHERE user_id = %s", (member_id, guest_id)
         ).rowcount
         conn.execute("UPDATE reports SET user_id = %s WHERE user_id = %s", (member_id, guest_id))
+        if HAS_TICKET_REPORTS:
+            # Reports the guest sent become the member's, once per ticket.
+            conn.execute(
+                """DELETE FROM ticket_reports g USING ticket_reports m
+                   WHERE g.user_id = %s AND m.user_id = %s AND m.ticket_id = g.ticket_id""",
+                (guest_id, member_id),
+            )
+            conn.execute(
+                "UPDATE ticket_reports SET user_id = %s WHERE user_id = %s", (member_id, guest_id)
+            )
         if HAS_NOTIFICATIONS:
             # Before the guest goes, or their notifications would go with them.
             conn.execute(
@@ -413,15 +436,16 @@ def create_ticket(ticket, user_id=None):
 
 
 def move_ticket(ticket_id, user_id, lat, lng, address, owner=None, admin=False):
-    """Put a ticket somewhere else on the map. Only its poster can, or an admin.
+    """Change where a ticket is, and/or which department it goes to.
 
-    `owner` is the department to switch to when the new spot belongs to a
-    different one, or None to leave it as it is. Returns the updated ticket, or
-    raises LookupError / NotYours / TicketMerged.
+    Only its poster can, or an admin. `owner` is the department to switch to,
+    or None to leave it as it is. Returns the updated ticket, or raises
+    LookupError / NotYours / TicketMerged.
     """
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT created_by, status FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,)
+            "SELECT created_by, status, lat, lng, owner FROM tickets WHERE id = %s FOR UPDATE",
+            (ticket_id,),
         ).fetchone()
         if row is None:
             raise LookupError(ticket_id)
@@ -436,10 +460,52 @@ def move_ticket(ticket_id, user_id, lat, lng, address, owner=None, admin=False):
                WHERE id = %(id)s""",
             {"id": ticket_id, "lat": lat, "lng": lng, "address": address, "owner": owner},
         )
-        # The people who voted on it are told, and the poster too when an admin moved it.
-        _notify(conn, _TELL_VOTERS, ticket_id, user_id, "moved")
-        _notify(conn, _TELL_POSTER, ticket_id, user_id, "moved")
+        # The people who voted on it are told what changed, and the poster too
+        # when it was an admin who changed it.
+        changes = []
+        if (row["lat"], row["lng"]) != (lat, lng):
+            changes.append("moved")
+        if owner is not None and owner != row["owner"]:
+            changes.append("rerouted")
+        for kind in changes:
+            _notify(conn, _TELL_VOTERS, ticket_id, user_id, kind)
+            _notify(conn, _TELL_POSTER, ticket_id, user_id, kind)
         return get_ticket(ticket_id, user_id, conn)
+
+
+def record_report(ticket_id, user_id):
+    """Note that this person went to send a report about the ticket.
+
+    Each person counts once per ticket. The poster's own report is the "1" the
+    ticket starts with, so only other people add to tickets.report_count.
+    Returns (ticket, counted), or (None, False) if the ticket doesn't exist.
+    """
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT created_by, status FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,)
+        ).fetchone()
+        if row is None:
+            return None, False
+        counted = False
+        if HAS_TICKET_REPORTS and row["status"] != "merged":
+            try:
+                first_time = conn.execute(
+                    """INSERT INTO ticket_reports (ticket_id, user_id) VALUES (%s, %s)
+                       ON CONFLICT DO NOTHING""",
+                    (ticket_id, user_id),
+                ).rowcount
+            except errors.ForeignKeyViolation:
+                raise UnknownUser from None
+            if first_time and row["created_by"] != user_id:
+                counted = True
+                conn.execute(
+                    """UPDATE tickets SET report_count = report_count + 1,
+                           last_seen_at = now(), updated_at = now()
+                       WHERE id = %s""",
+                    (ticket_id,),
+                )
+                _notify(conn, _TELL_POSTER, ticket_id, user_id, "reported")
+        return get_ticket(ticket_id, user_id, conn), counted
 
 
 def close_ticket(ticket_id, user_id):
@@ -591,6 +657,21 @@ def list_notifications(user_id, limit=30):
             (user_id,),
         ).fetchone()["n"]
     return {"unread": unread, "items": items}
+
+
+def clear_notifications(user_id, ids=None):
+    """Delete a person's notifications: the ones listed, or all of them when none are.
+
+    Only their own are ever touched. Returns how many were deleted.
+    """
+    if not HAS_NOTIFICATIONS or (ids is not None and not ids):
+        return 0
+    with pool.connection() as conn:
+        if ids is None:
+            return conn.execute("DELETE FROM notifications WHERE user_id = %s", (user_id,)).rowcount
+        return conn.execute(
+            "DELETE FROM notifications WHERE user_id = %s AND id = ANY(%s)", (user_id, list(ids))
+        ).rowcount
 
 
 def mark_notifications_read(user_id, ids):

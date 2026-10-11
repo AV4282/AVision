@@ -1,8 +1,9 @@
 import { useEffect, useId, useState } from "react"
 import { createPortal } from "react-dom"
-import { Database, X } from "lucide-react"
+import { Camera, Database, X } from "lucide-react"
 import type { SourceInfo } from "./components/avision-map/types"
 import useModalDialog from "./useModalDialog"
+import { WELCOME_PHOTOS } from "./welcome-photos"
 
 // Where the map's bundled data lives, with sources.json describing each file.
 const DATA_URL = `${import.meta.env.BASE_URL}avision-map`
@@ -18,7 +19,7 @@ const longDate = (value: string | number) =>
 /**
  * "More information", opened from the sidebar beside Help & resources. It
  * holds where the map's data comes from, which used to be a "Data sources"
- * button on the map itself.
+ * button on the map itself, and who took the photos on the welcome screen.
  */
 export default function MoreInfoDialog({ onClose, opener }: {
   onClose: () => void
@@ -76,7 +77,7 @@ export default function MoreInfoDialog({ onClose, opener }: {
         <div>
           <p className="eyebrow">ABOUT THE MAP</p>
           <h2 id={titleId}>More information</h2>
-          <p id={descriptionId}>Where the map’s data comes from.</p>
+          <p id={descriptionId}>Where the map’s data and the welcome photos come from.</p>
         </div>
         <button ref={closeRef} type="button" className="dialog-close" onClick={onClose} aria-label="Close more information">
           <X size={20} aria-hidden="true" />
@@ -133,6 +134,29 @@ export default function MoreInfoDialog({ onClose, opener }: {
               bundled sources.json for where each layer came from.
             </p>
           )}
+        </section>
+        <section aria-label="Photo credits">
+          <h3>
+            <Camera size={17} aria-hidden="true" /> Photo credits
+          </h3>
+          <p>The photos on the welcome screen, all free to use:</p>
+          {WELCOME_PHOTOS.map((photo) => (
+            <p key={photo.file}>
+              {photo.label}:{" "}
+              <a href={photo.link} target="_blank" rel="noreferrer">
+                {photo.by}
+              </a>
+              ,{" "}
+              {"termsLink" in photo ? (
+                <a href={photo.termsLink} target="_blank" rel="noreferrer">
+                  {photo.terms}
+                </a>
+              ) : (
+                photo.terms
+              )}
+              .
+            </p>
+          ))}
         </section>
       </div>
     </dialog>,

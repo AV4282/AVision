@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Check, Copy, ExternalLink, Mail, Phone, Send, X } from "lucide-react"
-import type { DraftedReport, OwnerContact } from "./api"
+import { reportSent, type DraftedReport, type OwnerContact } from "./api"
 import { useAccount } from "./auth"
 import { useReportNamePreference } from "./report-preferences"
 
@@ -12,6 +12,8 @@ export type ReportToSend = {
   reason: string | null
   /** "followUp" for a ticket that is still there; otherwise this is a ticket that was just posted. */
   kind?: "new" | "followUp"
+  /** The ticket this message is about, so sending it can count toward the ticket's reports. */
+  ticketId?: string
 }
 
 /**
@@ -24,6 +26,7 @@ export default function ReportReady({
   report,
   reason,
   kind = "new",
+  ticketId,
   onClose,
 }: ReportToSend & { onClose: () => void }) {
   const { account } = useAccount()
@@ -35,6 +38,19 @@ export default function ReportReady({
     return includeName && name ? `${report.message}\n\n${name}` : report.message
   })
   const [copied, setCopied] = useState(false)
+
+  // Pressing any of the send buttons (email, Gmail, the web form, the phone
+  // number) counts this person as having reported the ticket. Once is enough;
+  // the server ignores repeats anyway. The page hears the new count through
+  // live updates, so nothing here waits for the answer.
+  const counted = useRef(false)
+  function noteSent() {
+    if (!ticketId || counted.current) return
+    counted.current = true
+    reportSent(ticketId).catch(() => {
+      counted.current = false // try again on the next press
+    })
+  }
 
   // Escape closes this box only. It can sit on top of an open ticket, which
   // also listens for Escape, so the key is caught first and goes no further.
@@ -136,12 +152,12 @@ export default function ReportReady({
 
         <div className="ready-actions">
           {mailto && (
-            <a className="primary-button" href={mailto}>
+            <a className="primary-button" href={mailto} onClick={noteSent}>
               <Send size={15} /> Email {contact.name}
             </a>
           )}
           {gmail && (
-            <a className="secondary-button" href={gmail} target="_blank" rel="noreferrer">
+            <a className="secondary-button" href={gmail} target="_blank" rel="noreferrer" onClick={noteSent}>
               <Mail size={15} /> Open in Gmail
             </a>
           )}
@@ -155,6 +171,7 @@ export default function ReportReady({
               href={contact.web}
               target="_blank"
               rel="noreferrer"
+              onClick={noteSent}
             >
               <ExternalLink size={15} /> {contact.web_label ?? "Open their website"}
             </a>
@@ -165,7 +182,9 @@ export default function ReportReady({
           <div className="ready-call">
             <p>
               <Phone size={14} aria-hidden="true" /> <strong>Or call</strong>{" "}
-              <a href={`tel:${contact.phone.replace(/[^\d+]/g, "")}`}>{contact.phone}</a>
+              <a href={`tel:${contact.phone.replace(/[^\d+]/g, "")}`} onClick={noteSent}>
+                {contact.phone}
+              </a>
               {contact.phone_note && <span> {contact.phone_note}</span>}
               {contact.hours && <span> Open {contact.hours.replace(/\.$/, "")}.</span>}
             </p>
