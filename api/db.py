@@ -17,6 +17,7 @@ from psycopg_pool import ConnectionPool
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")
 load_dotenv(HERE / "sql" / ".env")
+load_dotenv(HERE.parent / ".env")
 
 pool = ConnectionPool(
     os.environ["DATABASE_URL"],

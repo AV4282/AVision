@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")
 load_dotenv(HERE / "sql" / ".env")
+load_dotenv(HERE.parent / ".env")
 
 # Show the agent's own warnings and errors (for example, why Foundry failed).
 logging.basicConfig(level=logging.WARNING, format="      %(name)s: %(message)s")

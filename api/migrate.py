@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")
 load_dotenv(HERE / "sql" / ".env")
+load_dotenv(HERE.parent / ".env")
 
 CHECKS = {
     "tables": """
