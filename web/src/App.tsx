@@ -202,13 +202,11 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
       eyebrow: "See it. Share it. Fix it.",
       title: "A more accessible city starts with you.",
       body: "Turn everyday accessibility barriers into mapped, trackable tickets—and help your community follow them through to a fix.",
-      icon: <MapPin size={28} />,
     },
     {
       eyebrow: "One photo is enough",
       title: "Report barriers in a few simple steps.",
       body: "Upload a photo, confirm the location, and review the possible barrier. AVision routes your ticket to the right public agency.",
-      icon: <Camera size={28} />,
     },
   ]
   const panel = panels[step]
@@ -231,7 +229,6 @@ function Onboarding({ onContinue }: { onContinue: () => void }) {
           <div className="story-glow two" />
           <div className="story-map-lines" />
           <div className="story-content">
-            <div className="story-icon">{panel.icon}</div>
             <p className="eyebrow light">{panel.eyebrow}</p>
             <h1>{panel.title}</h1>
             <p className="story-copy">{panel.body}</p>
