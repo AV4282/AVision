@@ -19,7 +19,10 @@ A React Leaflet map (Leaflet 1.x, react-leaflet 5) with OpenStreetMap tiles. `Ap
 - **Ticket pins** at their stored coordinates, colored and lettered by owner, with a separate status badge. Selecting one opens the ticket details and voting.
 - **Reference layers**, each toggled from the Layers menu: MARTA corridor stations (on by default), GDOT roads, the Atlanta city boundary, six GSU buildings, neighborhoods and an illustrative pilot outline.
 - **Search** across neighborhoods, the five corridor stations and the GSU buildings. It doesn't geocode arbitrary addresses.
-- **Area views** (Atlanta, GSU + MARTA, GSU), Soft and Street styles, a Data sources dialog and OpenStreetMap attribution.
+- **Area views:** Atlanta, GSU + MARTA, GSU and Georgia Tech.
+- **Map styles:** Soft, Street and Dark.
+- **More information:** opened from the sidebar, with map data sources
+  and welcome-photo credits. OpenStreetMap attribution remains on the map.
 
 **Owner colors:**
 
@@ -27,6 +30,7 @@ A React Leaflet map (Leaflet 1.x, react-leaflet 5) with OpenStreetMap tiles. `Ap
 |---|---|---|
 | City of Atlanta / ATL311 | `#0039A6` | C |
 | GSU Facilities | `#97CAEB` | G |
+| Georgia Tech | `#8F713D` | T |
 | MARTA | `#FDBE43` | M |
 | GDOT | `#F4A261` | D |
 | Unknown | `#334155` | ? |
