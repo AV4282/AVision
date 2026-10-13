@@ -602,7 +602,7 @@ export default function ReportForm({
               <small className="field-note photo-checked" role="status">
                 <ShieldCheck size={13} aria-hidden="true" />
                 {hiddenSummary(storedPhotos)
-                  ? `Hidden before saving: ${hiddenSummary(storedPhotos)}. Tap a photo to check.`
+                  ? "Some details were hidden before saving. Tap a photo to check."
                   : "No faces or license plates were found. Tap a photo to check."}
               </small>
             ) : (
