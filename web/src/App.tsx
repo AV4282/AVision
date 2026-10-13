@@ -1585,15 +1585,16 @@ function TicketModal({
   )
 }
 
-/** The departments whose tickets a person's onboarding answers point to, or null for no preference. */
-function ownersForProfile(member: Member | null): Owner[] | null {
-  if (!member) return null
-  const picks = new Set<Owner>()
-  const campus = member.isStudent ? schoolOwner(member.school) : null
-  if (campus) picks.add(campus)
-  if (member.takesMarta) picks.add("MARTA")
-  // In the same order as everywhere else.
-  return picks.size > 0 ? OWNERS.filter((owner) => picks.has(owner)) : null
+/** The departments shown on the map to start with, for everyone. */
+const DEFAULT_OWNERS: readonly Owner[] = ["City of Atlanta", "GDOT"]
+
+/** The departments a person's onboarding answers add to the defaults (their campus, MARTA if they ride it), or [] for none. */
+function ownersFromProfile(member: Member | null): Owner[] {
+  const picks: Owner[] = []
+  const campus = member?.isStudent ? schoolOwner(member.school) : null
+  if (campus) picks.push(campus)
+  if (member?.takesMarta) picks.push("MARTA")
+  return picks.filter((owner) => !DEFAULT_OWNERS.includes(owner))
 }
 
 type OwnerFilter = {
@@ -1610,10 +1611,9 @@ type OwnerFilter = {
 }
 
 /**
- * Which departments' tickets the map shows. It starts from the onboarding
- * answers (a GSU student who rides MARTA sees GSU and MARTA tickets first) and
- * the person can switch the others on. Guests, and people who haven't answered,
- * start with everything.
+ * Which departments' tickets the map shows. It starts with the City of Atlanta
+ * and GDOT, plus what the onboarding answers point to (a GSU student who rides
+ * MARTA also sees GSU Facilities and MARTA), and the person can switch the others on.
  *
  * Lives in App, not the map page, so a choice survives a visit to another page.
  */
@@ -1657,24 +1657,26 @@ function useOwnerFilter(
   tickets: Ticket[],
   selectedId: string | null,
 ): OwnerFilter {
+  const addedByProfile = useMemo(() => ownersFromProfile(member), [member?.isStudent, member?.school, member?.takesMarta])
+  // In the same order as everywhere else.
   const fromProfile = useMemo(
-    () => ownersForProfile(member),
-    [member?.id, member?.isStudent, member?.school, member?.takesMarta],
+    () => OWNERS.filter((owner) => DEFAULT_OWNERS.includes(owner) || addedByProfile.includes(owner)),
+    [addedByProfile],
   )
   // The profile only sets the filter the first time. After that, whatever the
   // person switches on or off is remembered in this browser, per person, and
   // comes back on every visit. New profile answers start it over from the profile.
   const person = member?.id ?? "guest"
-  const profileKey = fromProfile ? fromProfile.join("|") : ""
+  const profileKey = fromProfile.join("|")
   const [shown, setShownNow] = useState<readonly Owner[]>(
-    () => rememberedFilter(person, profileKey)?.shown ?? fromProfile ?? OWNERS,
+    () => rememberedFilter(person, profileKey)?.shown ?? fromProfile,
   )
   const [statuses, setStatusesNow] = useState<readonly Status[]>(
     () => rememberedFilter(person, profileKey)?.statuses ?? STATUSES,
   )
   useEffect(() => {
     const kept = rememberedFilter(person, profileKey)
-    setShownNow(kept?.shown ?? fromProfile ?? OWNERS)
+    setShownNow(kept?.shown ?? fromProfile)
     setStatusesNow(kept?.statuses ?? STATUSES)
   }, [person, profileKey])
 
@@ -1714,7 +1716,7 @@ function useOwnerFilter(
   }, [selectedId, tickets, reveal])
 
   const untouched =
-    fromProfile !== null &&
+    addedByProfile.length > 0 &&
     fromProfile.length === shown.length &&
     fromProfile.every((owner) => shown.includes(owner))
   return { shown, setShown, statuses, setStatuses, reveal, note: untouched ? "picked from your profile" : null }

@@ -8,7 +8,8 @@ import { GEORGIA_TECH_SCHOOL, GSU_SCHOOL, schoolOwner, type Member } from "./api
 // When opened from "Edit profile", the person can also change their name.
 //
 // The answers decide which tickets the map shows first (see useOwnerFilter in
-// App.tsx): the person's school's tickets, and MARTA's if they ride it.
+// App.tsx): the City of Atlanta's and GDOT's for everyone, plus the person's
+// school's, and MARTA's if they ride it.
 
 // The schools AVision covers. Any other school is typed in under "Another school".
 const SCHOOLS = [
