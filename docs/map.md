@@ -17,6 +17,9 @@ A React Leaflet map (Leaflet 1.x, react-leaflet 5) with OpenStreetMap tiles. `Ap
 **What it shows:**
 
 - **Ticket pins** at their stored coordinates, colored and lettered by owner, with a separate status badge. Selecting one opens the ticket details and voting.
+- **Ticket filters:** use Filters to choose which departments and ticket
+  statuses appear. Show all restores tickets hidden by those filters.
+  Layers controls reference data such as stations and roads.
 - **Reference layers**, each toggled from the Layers menu: MARTA corridor stations (on by default), GDOT roads, the Atlanta city boundary, six GSU buildings, neighborhoods and an illustrative pilot outline.
 - **Search** across neighborhoods, the five corridor stations and the GSU buildings. It doesn't geocode arbitrary addresses.
 - **Area views:** Atlanta, GSU + MARTA, GSU and Georgia Tech.
