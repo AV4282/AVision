@@ -40,10 +40,16 @@ import {
   User,
   Trash2,
   X,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
+  RefreshCw,
 } from "lucide-react"
 import {
   clearNotices,
   closeTicket,
+  resetCounts,
+  serverVersion,
   deleteTicket,
   followUpReport,
   campusOutlines,
@@ -71,6 +77,7 @@ import PhotoViewer from "./PhotoViewer"
 import MoreInfoDialog from "./MoreInfoDialog"
 import MoveTicket from "./MoveTicket"
 import Backdrop from "./Backdrop"
+import AdSlot, { AD_SLOTS } from "./AdSlot"
 import ReportForm from "./ReportForm"
 import ScreeningNotice from "./ScreeningNotice"
 import OnboardingQuestions from "./OnboardingQuestions"
@@ -168,6 +175,85 @@ const LIVE_SETTLE_MS = 150
  * time the bell should check for news (a change to a ticket the viewer posted
  * or voted on).
  */
+// How often to ask the server which version it is running, besides right
+// after the live connection comes back (a deploy restarts the server, so that
+// happens within seconds of an update).
+const VERSION_CHECK_MS = 5 * 60_000
+// How long the "updated" notice shows before the page refreshes itself.
+const REFRESH_AFTER_MS = 10_000
+
+/**
+ * Tells the person when the developers have pushed an update, and refreshes
+ * the page to get it. The refresh waits while a form or box is open, so
+ * nothing half-written is lost, and anyone can press Refresh now or Later.
+ */
+function useUpdateNotice(connected: boolean): { updated: boolean; refresh: () => void; later: () => void } {
+  const [updated, setUpdated] = useState(false)
+  const loadedVersion = useRef<string | null>(null)
+  const dismissed = useRef(false)
+
+  const check = useCallback(async () => {
+    const now = await serverVersion()
+    if (!now) return
+    if (loadedVersion.current === null) loadedVersion.current = now
+    else if (now !== loadedVersion.current && !dismissed.current) setUpdated(true)
+  }, [])
+
+  useEffect(() => {
+    check()
+    const timer = window.setInterval(check, VERSION_CHECK_MS)
+    const onShow = () => {
+      if (document.visibilityState === "visible") check()
+    }
+    document.addEventListener("visibilitychange", onShow)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onShow)
+    }
+  }, [check])
+
+  // The live connection coming back is usually the server restarting after a deploy.
+  const wasConnected = useRef(connected)
+  useEffect(() => {
+    if (connected && !wasConnected.current) check()
+    wasConnected.current = connected
+  }, [connected, check])
+
+  const refresh = useCallback(() => window.location.reload(), [])
+  const later = useCallback(() => {
+    dismissed.current = true
+    setUpdated(false)
+  }, [])
+
+  // Refresh on its own after a moment, once nothing is open on top of the page.
+  useEffect(() => {
+    if (!updated) return
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      const busy = document.querySelector(".modal-backdrop, dialog[open], .photo-viewer")
+      if (Date.now() - started >= REFRESH_AFTER_MS && !busy) window.location.reload()
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [updated])
+
+  return { updated, refresh, later }
+}
+
+function UpdateNotice({ onRefresh, onLater }: { onRefresh: () => void; onLater: () => void }) {
+  return (
+    <div className="update-notice" role="status" aria-live="polite">
+      <RefreshCw size={16} aria-hidden="true" />
+      <span>AVision was updated. The page will refresh in a moment to get the latest.</span>
+      <button type="button" className="primary-button" onClick={onRefresh}>
+        Refresh now
+      </button>
+      <button type="button" className="text-button" onClick={onLater}>
+        Later
+      </button>
+    </div>
+  )
+}
+
 function useLiveTickets(state: TicketsState): { connected: boolean; bellNudge: number } {
   const [connected, setConnected] = useState(false)
   const [bellNudge, setBellNudge] = useState(0)
@@ -753,6 +839,7 @@ function Sidebar({
             <Plus size={16} /> Report an issue
           </button>
         </div>
+        <AdSlot slot={AD_SLOTS.sidebar} format="rectangle" className="ad-sidebar" />
         <nav className="support-nav">
           <button
             type="button"
@@ -1187,6 +1274,24 @@ function TicketDetail({
     }
   }
 
+  // Admins can wipe the counts: every vote, and the report count back to 1.
+  const [confirmingReset, setConfirmingReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  async function wipeCounts() {
+    if (resetting) return
+    setResetting(true)
+    setCloseError(null)
+    try {
+      onTicketChange(await resetCounts(ticket.id))
+      setConfirmingReset(false)
+      setMoveNote("Counts reset. Votes are cleared and the report count is back to 1.")
+    } catch (err) {
+      setCloseError(err instanceof Error ? err.message : "Couldn’t reset the counts")
+    } finally {
+      setResetting(false)
+    }
+  }
+
   // Editing the ticket after posting: its words, photos, spot or department. `moveNote` says how it went.
   const [moving, setMoving] = useState(false)
   const [moveNote, setMoveNote] = useState<string | null>(null)
@@ -1208,6 +1313,16 @@ function TicketDetail({
   const hasPhoto = ticket.images.length > 0
   // A ticket can have up to five photos; this is the one showing.
   const [photoIndex, setPhotoIndex] = useState(0)
+  // With several photos, the arrows on the photo (and the arrow keys, and a
+  // swipe) go to the one before or after, and round again at either end.
+  const severalPhotos = ticket.images.length > 1
+  const photoCount = ticket.images.length
+  const stepPhoto = useCallback(
+    (by: -1 | 1) => setPhotoIndex((now) => (Math.min(now, photoCount - 1) + by + photoCount) % photoCount),
+    [photoCount],
+  )
+  const photoTouch = useRef<number | null>(null)
+  const justSwiped = useRef(false)
   const shownPhoto = ticket.images[Math.min(photoIndex, ticket.images.length - 1)] ?? ticket.image
   const photoAlt = hasPhoto
     ? `Photo ${ticket.images.length > 1 ? `${photoIndex + 1} of ${ticket.images.length} ` : ""}of: ${ticket.title}`
@@ -1276,7 +1391,29 @@ function TicketDetail({
       >
         <X size={18} />
       </button>
-      <div className="detail-photo">
+      <div
+        className="detail-photo"
+        onTouchStart={(event) => {
+          photoTouch.current = event.touches[0].clientX
+        }}
+        onTouchEnd={(event) => {
+          const moved = photoTouch.current === null ? 0 : event.changedTouches[0].clientX - photoTouch.current
+          photoTouch.current = null
+          if (severalPhotos && Math.abs(moved) > 45) {
+            stepPhoto(moved > 0 ? -1 : 1)
+            // Some phones follow a swipe with a tap. Ignore one for a moment, so it doesn't open the photo.
+            justSwiped.current = true
+            window.setTimeout(() => {
+              justSwiped.current = false
+            }, 350)
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!severalPhotos || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return
+          event.preventDefault()
+          stepPhoto(event.key === "ArrowLeft" ? -1 : 1)
+        }}
+      >
         <img src={shownPhoto} alt={photoAlt} />
         <div className="photo-count">
           <Camera size={14} /> {ticket.reports}{" "}
@@ -1287,12 +1424,33 @@ function TicketDetail({
           <button
             type="button"
             className="photo-open"
-            onClick={() => setViewingPhoto(true)}
+            onClick={() => {
+              if (!justSwiped.current) setViewingPhoto(true)
+            }}
           >
             <span>
               <Maximize2 size={13} /> View photo
             </span>
           </button>
+        )}
+        {/* Several photos: arrows at the sides go through them, round and round. */}
+        {severalPhotos && (
+          <>
+            <button
+              type="button"
+              className="photo-step previous"
+              onClick={() => stepPhoto(-1)}
+              aria-label="Previous photo"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <button type="button" className="photo-step next" onClick={() => stepPhoto(1)} aria-label="Next photo">
+              <ChevronRight size={20} />
+            </button>
+            <span className="photo-position" aria-live="polite">
+              {photoIndex + 1} / {ticket.images.length}
+            </span>
+          </>
         )}
       </div>
       {ticket.images.length > 1 && (
@@ -1316,6 +1474,8 @@ function TicketDetail({
           src={shownPhoto}
           alt={photoAlt}
           onClose={() => setViewingPhoto(false)}
+          onStep={severalPhotos ? stepPhoto : undefined}
+          position={severalPhotos ? `${photoIndex + 1} / ${ticket.images.length}` : undefined}
         />
       )}
       <div className="detail-body">
@@ -1462,6 +1622,18 @@ function TicketDetail({
                     <CheckCircle2 size={15} /> {closing ? "Marking as fixed…" : "Mark as fixed"}
                   </button>
                 )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="reset-counts-button"
+                    onClick={() => {
+                      setMoveNote(null)
+                      setConfirmingReset(true)
+                    }}
+                  >
+                    <RotateCcw size={15} /> Reset counts
+                  </button>
+                )}
               </div>
             ) : (
               <div className="delete-confirm" role="group" aria-label="Confirm delete">
@@ -1483,6 +1655,33 @@ function TicketDetail({
                     autoFocus
                   >
                     <Trash2 size={15} /> {deleting ? "Deleting…" : "Yes, delete"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {confirmingReset && (
+              <div className="delete-confirm" role="group" aria-label="Confirm reset">
+                <p>
+                  Reset this ticket’s counts? Every “Still there” and “Fixed” vote is removed and the report
+                  count goes back to 1.
+                </p>
+                <div>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setConfirmingReset(false)}
+                    disabled={resetting}
+                  >
+                    Keep them
+                  </button>
+                  <button
+                    type="button"
+                    className="delete-ticket-button danger"
+                    onClick={wipeCounts}
+                    disabled={resetting}
+                    autoFocus
+                  >
+                    <RotateCcw size={15} /> {resetting ? "Resetting…" : "Yes, reset"}
                   </button>
                 </div>
               </div>
@@ -2085,6 +2284,7 @@ function IssuesView({
           </div>
         )}
       </div>
+      <AdSlot slot={AD_SLOTS.issues} format="horizontal" className="ad-page" />
     </section>
   )
 }
@@ -2387,6 +2587,7 @@ function ProfileView({
           </div>
         </aside>
       </div>
+      <AdSlot slot={AD_SLOTS.profile} format="horizontal" className="ad-page" />
       {privacyOpener && (
         <PrivacyDialog key={account?.id ?? "guest"} onClose={closePrivacy} opener={privacyOpener} />
       )}
@@ -2461,6 +2662,7 @@ export default function App() {
   const [openId, setOpenId] = useState<string | null>(null)
   const ticketsState = useTickets()
   const live = useLiveTickets(ticketsState)
+  const update = useUpdateNotice(live.connected)
   // Opened from a link to one ticket (the link in the messages people send to
   // departments): go straight to that ticket, past the welcome screen. It is
   // fetched on its own in case it is older than the list goes back. Then the
@@ -2648,6 +2850,7 @@ export default function App() {
       )}
       {screening && <ScreeningNotice problem={screening} onClose={closeScreening} />}
       {toSend && <ReportReady {...toSend} onClose={closeToSend} />}
+      {update.updated && <UpdateNotice onRefresh={update.refresh} onLater={update.later} />}
       {resourcesOpener && (
         <ResourcesDialog
           onClose={closeResources}

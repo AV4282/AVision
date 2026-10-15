@@ -1,0 +1,80 @@
+import { useEffect, useRef, useState } from "react"
+
+/**
+ * One Google AdSense ad unit. Ads are on only when the build has the
+ * publisher id (VITE_ADSENSE_CLIENT in web/.env, "ca-pub-..."), and a slot
+ * shows only when its own id is set, so a missing id leaves no gap. The
+ * AdSense script itself is loaded once in index.html, also from that id.
+ *
+ * Where ads go, and where they don't (AdSense policy): beside or under the
+ * content, never over the map, in the report form, or on a ticket's photo,
+ * and never styled so they look like part of the app.
+ */
+// AVision's own AdSense ids. These are public (they are in every page that
+// shows an ad), so they live here; the VITE_ADSENSE_* settings override them,
+// e.g. VITE_ADSENSE_CLIENT="" to build without ads.
+const setting = (value: string | undefined, fallback: string) => (value === undefined ? fallback : value.trim())
+
+export const ADSENSE_CLIENT = setting(import.meta.env.VITE_ADSENSE_CLIENT, "ca-pub-9613332564332030")
+
+/** Where each ad sits. The slot ids come from AdSense, one per ad unit. */
+export const AD_SLOTS = {
+  /** "Sidebar": bottom of the left menu, above Help & resources (desktop only). */
+  sidebar: setting(import.meta.env.VITE_ADSENSE_SLOT_SIDEBAR, "6802886452"),
+  /** "Under Issues": under the issues list. */
+  issues: setting(import.meta.env.VITE_ADSENSE_SLOT_ISSUES, "8712979906"),
+  /** "Under the profile": under the profile page. */
+  profile: setting(import.meta.env.VITE_ADSENSE_SLOT_PROFILE, "6056780998"),
+}
+
+declare global {
+  interface Window {
+    adsbygoogle?: unknown[]
+  }
+}
+
+export default function AdSlot({ slot, format = "auto", className = "" }: {
+  slot: string
+  /** AdSense ad format: "auto" fits the space; "horizontal" or "rectangle" fix the shape. */
+  format?: "auto" | "horizontal" | "rectangle" | "vertical"
+  className?: string
+}) {
+  const ins = useRef<HTMLModElement>(null)
+  // The box only shows once AdSense has put an ad in it. Until then, and when
+  // there is none (the site not approved yet, nothing to match, an ad blocker),
+  // there is no empty frame and no "Advertisement" label over nothing.
+  const [filled, setFilled] = useState(false)
+
+  // Ask AdSense to fill this unit once it is on the page. A unit that was
+  // already filled (React drawing it twice in dev) is left alone.
+  useEffect(() => {
+    const unit = ins.current
+    if (!ADSENSE_CLIENT || !slot || !unit) return
+    const watcher = new MutationObserver(() => setFilled(unit.getAttribute("data-ad-status") === "filled"))
+    watcher.observe(unit, { attributes: true, attributeFilter: ["data-ad-status"] })
+    if (!unit.getAttribute("data-adsbygoogle-status")) {
+      try {
+        ;(window.adsbygoogle = window.adsbygoogle || []).push({})
+      } catch {
+        // The script is blocked or hasn't loaded: the space stays empty.
+      }
+    }
+    return () => watcher.disconnect()
+  }, [slot])
+
+  if (!ADSENSE_CLIENT || !slot) return null
+  return (
+    <div className={`ad-slot ${className}`.trim()} aria-label="Advertisement" hidden={!filled}>
+      <span className="ad-label">Advertisement</span>
+      <ins
+        ref={ins}
+        className="adsbygoogle"
+        style={{ display: "block" }}
+        data-ad-client={ADSENSE_CLIENT}
+        data-ad-slot={slot}
+        data-ad-format={format}
+        data-full-width-responsive="true"
+      />
+    </div>
+  )
+}

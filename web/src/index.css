@@ -1047,6 +1047,110 @@ summary:focus-visible {
   cursor: pointer;
 }
 
+/* ---------- "AVision was updated" notice (App.tsx, useUpdateNotice) ---------- */
+.update-notice {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  translate: -50% 0;
+  width: min(560px, calc(100% - 24px));
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+}
+
+.update-notice svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.update-notice span {
+  flex: 1 1 220px;
+}
+
+.update-notice .primary-button {
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+@media (max-width: 800px) {
+  .update-notice {
+    bottom: calc(76px + env(safe-area-inset-bottom)); /* above the tab bar */
+  }
+}
+
+/* ---------- Ads (AdSlot.tsx) ---------- */
+/* Plainly marked, with a border, so an ad never looks like part of the app. */
+.ad-slot {
+  margin: 14px 0 0;
+  padding: 6px 8px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.ad-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ad-slot .adsbygoogle {
+  min-height: 90px;
+}
+
+/* In the sidebar: takes the spare space above Help & resources, and goes away
+   with the sidebar on phones, where the menu slides over the page. */
+.ad-sidebar {
+  margin-top: auto;
+}
+
+/* Help & resources sits under a shown ad; with no ad it takes the spare space itself. */
+.ad-sidebar:not([hidden]) + .support-nav {
+  margin-top: 14px;
+}
+
+/* Hidden until an ad is in it, but still on the page so AdSense can fill it. */
+.ad-slot[hidden] {
+  display: block;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+.ad-sidebar .adsbygoogle {
+  min-height: 250px;
+}
+
+/* Under a page's content. */
+.ad-page {
+  margin: 20px 0 8px;
+}
+
+@media (max-width: 800px) {
+  .ad-sidebar {
+    display: none;
+  }
+}
+
 .support-nav {
   margin-top: auto;
   display: flex;
@@ -1644,6 +1748,54 @@ summary:focus-visible {
   outline-offset: -4px;
 }
 
+/* Arrows over a ticket's photo, to go through its photos. Also used on the
+   photo opened full size, where they are larger (see below). */
+.photo-step {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  translate: 0 -50%;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: white;
+  background: rgba(17, 27, 38, 0.62);
+  cursor: pointer;
+}
+
+.photo-step.previous {
+  left: 8px;
+}
+
+.photo-step.next {
+  right: 8px;
+}
+
+.photo-step:hover,
+.photo-step:focus-visible {
+  background: var(--blue);
+}
+
+/* "2 / 5", top left of the photo. */
+.photo-position {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 13px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: white;
+  background: rgba(17, 27, 38, 0.72);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 /* ---------- Photo opened full size ---------- */
 .photo-viewer {
   position: fixed;
@@ -1677,6 +1829,37 @@ summary:focus-visible {
   color: var(--ink);
   background: var(--surface);
   cursor: pointer;
+}
+
+.photo-viewer .photo-step {
+  width: 46px;
+  height: 46px;
+  position: fixed;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.photo-viewer .photo-step:hover,
+.photo-viewer .photo-step:focus-visible {
+  color: white;
+  background: var(--blue);
+}
+
+.photo-viewer .photo-step.previous {
+  left: 14px;
+}
+
+.photo-viewer .photo-step.next {
+  right: 14px;
+}
+
+.photo-viewer .photo-position {
+  position: fixed;
+  top: 22px;
+  left: 50%;
+  translate: -50% 0;
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 .detail-body {
@@ -4285,6 +4468,26 @@ summary:focus-visible {
 .ticket-actions > button {
   flex: 1 1 auto;
   justify-content: center;
+}
+
+/* Admin: wipes a ticket's votes and report count. Same shape as Edit ticket. */
+.reset-counts-button {
+  min-height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reset-counts-button:hover {
+  background: var(--hover);
 }
 
 .mark-fixed-button {
