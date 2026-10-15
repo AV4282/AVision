@@ -10,16 +10,21 @@ import { useEffect, useRef } from "react"
  * content, never over the map, in the report form, or on a ticket's photo,
  * and never styled so they look like part of the app.
  */
-export const ADSENSE_CLIENT = (import.meta.env.VITE_ADSENSE_CLIENT ?? "").trim()
+// AVision's own AdSense ids. These are public (they are in every page that
+// shows an ad), so they live here; the VITE_ADSENSE_* settings override them,
+// e.g. VITE_ADSENSE_CLIENT="" to build without ads.
+const setting = (value: string | undefined, fallback: string) => (value === undefined ? fallback : value.trim())
+
+export const ADSENSE_CLIENT = setting(import.meta.env.VITE_ADSENSE_CLIENT, "ca-pub-9613332564332030")
 
 /** Where each ad sits. The slot ids come from AdSense, one per ad unit. */
 export const AD_SLOTS = {
-  /** Bottom of the left menu, above Help & resources (desktop only). */
-  sidebar: (import.meta.env.VITE_ADSENSE_SLOT_SIDEBAR ?? "").trim(),
-  /** Under the issues list. */
-  issues: (import.meta.env.VITE_ADSENSE_SLOT_ISSUES ?? "").trim(),
-  /** Under the profile page. */
-  profile: (import.meta.env.VITE_ADSENSE_SLOT_PROFILE ?? "").trim(),
+  /** "Sidebar": bottom of the left menu, above Help & resources (desktop only). */
+  sidebar: setting(import.meta.env.VITE_ADSENSE_SLOT_SIDEBAR, "6802886452"),
+  /** "Under Issues": under the issues list. */
+  issues: setting(import.meta.env.VITE_ADSENSE_SLOT_ISSUES, "8712979906"),
+  /** "Under the profile": under the profile page. */
+  profile: setting(import.meta.env.VITE_ADSENSE_SLOT_PROFILE, "6056780998"),
 }
 
 declare global {

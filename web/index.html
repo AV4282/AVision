@@ -25,7 +25,8 @@
          (see src/AdSlot.tsx); without it, nothing loads. Paste the same id into
          AdSense's "add your site" step, which only needs this script present. -->
     <script type="module">
-      const client = (import.meta.env.VITE_ADSENSE_CLIENT ?? "").trim()
+      // Same default as src/AdSlot.tsx.
+      const client = (import.meta.env.VITE_ADSENSE_CLIENT ?? "ca-pub-9613332564332030").trim()
       if (client) {
         const s = document.createElement("script")
         s.async = true
