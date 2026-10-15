@@ -114,7 +114,7 @@ Read from `.env` at the repo root, `api/.env` or `api/sql/.env`; the full list i
 
 | Setting | Default | Does |
 |---|---|---|
-| `DATABASE_URL` | required | Tiger Cloud connection string |
+| `DATABASE_URL` | required | Supabase Session pooler connection string |
 | `ALLOWED_ORIGINS` | `http://localhost:8443` | Sites allowed to call the API from a browser, comma-separated |
 | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` | match `web/src/auth0-config.ts` | Where sign-in tokens come from |
 | `FIXED_VOTE_THRESHOLD` | `2` | Fixed votes needed for `likely_fixed` |

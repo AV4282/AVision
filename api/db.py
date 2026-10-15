@@ -1,7 +1,7 @@
 """
 Database access for the ticket API.
 
-One shared pool of up to 5 connections to Tiger Cloud (DATABASE_URL, sslmode=require).
+One shared pool of up to 5 connections to Supabase (DATABASE_URL, the Session pooler).
 Rows come back as dicts. Endpoints are plain `def`, so this uses the sync pool:
 async psycopg needs a non-default event loop on Windows.
 """

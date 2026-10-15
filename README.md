@@ -63,7 +63,7 @@ Optional: run the photo privacy service to blur photos locally ([Image privacy](
 |---|---|
 | Frontend | React 19, Vite, Tailwind CSS v4, Leaflet with OpenStreetMap tiles |
 | Backend | Python FastAPI, psycopg 3 |
-| Database | Tiger Data (TimescaleDB) |
+| Database | Supabase (PostgreSQL) |
 | AI | Claude (Anthropic), with Gemini as the backup |
 | Photo privacy | Local face and plate detection, Pillow blurring |
 | Sign-in | Auth0 with Google |
