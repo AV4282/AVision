@@ -1047,6 +1047,55 @@ summary:focus-visible {
   cursor: pointer;
 }
 
+/* ---------- Ads (AdSlot.tsx) ---------- */
+/* Plainly marked, with a border, so an ad never looks like part of the app. */
+.ad-slot {
+  margin: 14px 0 0;
+  padding: 6px 8px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.ad-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ad-slot .adsbygoogle {
+  min-height: 90px;
+}
+
+/* In the sidebar: takes the spare space above Help & resources, and goes away
+   with the sidebar on phones, where the menu slides over the page. */
+.ad-sidebar {
+  margin-top: auto;
+}
+
+.ad-sidebar + .support-nav {
+  margin-top: 14px;
+}
+
+.ad-sidebar .adsbygoogle {
+  min-height: 250px;
+}
+
+/* Under a page's content. */
+.ad-page {
+  margin: 20px 0 8px;
+}
+
+@media (max-width: 800px) {
+  .ad-sidebar {
+    display: none;
+  }
+}
+
 .support-nav {
   margin-top: auto;
   display: flex;
@@ -1644,6 +1693,54 @@ summary:focus-visible {
   outline-offset: -4px;
 }
 
+/* Arrows over a ticket's photo, to go through its photos. Also used on the
+   photo opened full size, where they are larger (see below). */
+.photo-step {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  translate: 0 -50%;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: white;
+  background: rgba(17, 27, 38, 0.62);
+  cursor: pointer;
+}
+
+.photo-step.previous {
+  left: 8px;
+}
+
+.photo-step.next {
+  right: 8px;
+}
+
+.photo-step:hover,
+.photo-step:focus-visible {
+  background: var(--blue);
+}
+
+/* "2 / 5", top left of the photo. */
+.photo-position {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 13px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: white;
+  background: rgba(17, 27, 38, 0.72);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 /* ---------- Photo opened full size ---------- */
 .photo-viewer {
   position: fixed;
@@ -1677,6 +1774,37 @@ summary:focus-visible {
   color: var(--ink);
   background: var(--surface);
   cursor: pointer;
+}
+
+.photo-viewer .photo-step {
+  width: 46px;
+  height: 46px;
+  position: fixed;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.photo-viewer .photo-step:hover,
+.photo-viewer .photo-step:focus-visible {
+  color: white;
+  background: var(--blue);
+}
+
+.photo-viewer .photo-step.previous {
+  left: 14px;
+}
+
+.photo-viewer .photo-step.next {
+  right: 14px;
+}
+
+.photo-viewer .photo-position {
+  position: fixed;
+  top: 22px;
+  left: 50%;
+  translate: -50% 0;
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 .detail-body {

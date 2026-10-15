@@ -40,6 +40,8 @@ import {
   User,
   Trash2,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import {
   clearNotices,
@@ -71,6 +73,7 @@ import PhotoViewer from "./PhotoViewer"
 import MoreInfoDialog from "./MoreInfoDialog"
 import MoveTicket from "./MoveTicket"
 import Backdrop from "./Backdrop"
+import AdSlot, { AD_SLOTS } from "./AdSlot"
 import ReportForm from "./ReportForm"
 import ScreeningNotice from "./ScreeningNotice"
 import OnboardingQuestions from "./OnboardingQuestions"
@@ -753,6 +756,7 @@ function Sidebar({
             <Plus size={16} /> Report an issue
           </button>
         </div>
+        <AdSlot slot={AD_SLOTS.sidebar} format="rectangle" className="ad-sidebar" />
         <nav className="support-nav">
           <button
             type="button"
@@ -1208,6 +1212,16 @@ function TicketDetail({
   const hasPhoto = ticket.images.length > 0
   // A ticket can have up to five photos; this is the one showing.
   const [photoIndex, setPhotoIndex] = useState(0)
+  // With several photos, the arrows on the photo (and the arrow keys, and a
+  // swipe) go to the one before or after, and round again at either end.
+  const severalPhotos = ticket.images.length > 1
+  const photoCount = ticket.images.length
+  const stepPhoto = useCallback(
+    (by: -1 | 1) => setPhotoIndex((now) => (Math.min(now, photoCount - 1) + by + photoCount) % photoCount),
+    [photoCount],
+  )
+  const photoTouch = useRef<number | null>(null)
+  const justSwiped = useRef(false)
   const shownPhoto = ticket.images[Math.min(photoIndex, ticket.images.length - 1)] ?? ticket.image
   const photoAlt = hasPhoto
     ? `Photo ${ticket.images.length > 1 ? `${photoIndex + 1} of ${ticket.images.length} ` : ""}of: ${ticket.title}`
@@ -1276,7 +1290,29 @@ function TicketDetail({
       >
         <X size={18} />
       </button>
-      <div className="detail-photo">
+      <div
+        className="detail-photo"
+        onTouchStart={(event) => {
+          photoTouch.current = event.touches[0].clientX
+        }}
+        onTouchEnd={(event) => {
+          const moved = photoTouch.current === null ? 0 : event.changedTouches[0].clientX - photoTouch.current
+          photoTouch.current = null
+          if (severalPhotos && Math.abs(moved) > 45) {
+            stepPhoto(moved > 0 ? -1 : 1)
+            // Some phones follow a swipe with a tap. Ignore one for a moment, so it doesn't open the photo.
+            justSwiped.current = true
+            window.setTimeout(() => {
+              justSwiped.current = false
+            }, 350)
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!severalPhotos || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return
+          event.preventDefault()
+          stepPhoto(event.key === "ArrowLeft" ? -1 : 1)
+        }}
+      >
         <img src={shownPhoto} alt={photoAlt} />
         <div className="photo-count">
           <Camera size={14} /> {ticket.reports}{" "}
@@ -1287,12 +1323,33 @@ function TicketDetail({
           <button
             type="button"
             className="photo-open"
-            onClick={() => setViewingPhoto(true)}
+            onClick={() => {
+              if (!justSwiped.current) setViewingPhoto(true)
+            }}
           >
             <span>
               <Maximize2 size={13} /> View photo
             </span>
           </button>
+        )}
+        {/* Several photos: arrows at the sides go through them, round and round. */}
+        {severalPhotos && (
+          <>
+            <button
+              type="button"
+              className="photo-step previous"
+              onClick={() => stepPhoto(-1)}
+              aria-label="Previous photo"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <button type="button" className="photo-step next" onClick={() => stepPhoto(1)} aria-label="Next photo">
+              <ChevronRight size={20} />
+            </button>
+            <span className="photo-position" aria-live="polite">
+              {photoIndex + 1} / {ticket.images.length}
+            </span>
+          </>
         )}
       </div>
       {ticket.images.length > 1 && (
@@ -1316,6 +1373,8 @@ function TicketDetail({
           src={shownPhoto}
           alt={photoAlt}
           onClose={() => setViewingPhoto(false)}
+          onStep={severalPhotos ? stepPhoto : undefined}
+          position={severalPhotos ? `${photoIndex + 1} / ${ticket.images.length}` : undefined}
         />
       )}
       <div className="detail-body">
@@ -2085,6 +2144,7 @@ function IssuesView({
           </div>
         )}
       </div>
+      <AdSlot slot={AD_SLOTS.issues} format="horizontal" className="ad-page" />
     </section>
   )
 }
@@ -2387,6 +2447,7 @@ function ProfileView({
           </div>
         </aside>
       </div>
+      <AdSlot slot={AD_SLOTS.profile} format="horizontal" className="ad-page" />
       {privacyOpener && (
         <PrivacyDialog key={account?.id ?? "guest"} onClose={closePrivacy} opener={privacyOpener} />
       )}
