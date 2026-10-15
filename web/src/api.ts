@@ -372,6 +372,22 @@ const LIVE_RETRY_MAX_MS = 30_000
  * sign-in is sent with it. If it can't be reached the page still works; it just
  * goes back to showing changes on the next reload.
  */
+/**
+ * The version of the site the server is running (its git commit), or null when
+ * the server can't say. It changes when the developers push an update, so a
+ * page that was loaded before can tell and refresh.
+ */
+export async function serverVersion(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_URL}/health`, { cache: "no-store" })
+    if (!res.ok) return null
+    const health = (await res.json()) as { version?: string | null }
+    return typeof health.version === "string" && health.version ? health.version : null
+  } catch {
+    return null
+  }
+}
+
 export function watchLive(handlers: {
   onEvent: (event: LiveEvent) => void
   /** Connected again after being cut off. Anything may have changed in between. */

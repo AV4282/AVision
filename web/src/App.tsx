@@ -43,11 +43,13 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCcw,
+  RefreshCw,
 } from "lucide-react"
 import {
   clearNotices,
   closeTicket,
   resetCounts,
+  serverVersion,
   deleteTicket,
   followUpReport,
   campusOutlines,
@@ -173,6 +175,85 @@ const LIVE_SETTLE_MS = 150
  * time the bell should check for news (a change to a ticket the viewer posted
  * or voted on).
  */
+// How often to ask the server which version it is running, besides right
+// after the live connection comes back (a deploy restarts the server, so that
+// happens within seconds of an update).
+const VERSION_CHECK_MS = 5 * 60_000
+// How long the "updated" notice shows before the page refreshes itself.
+const REFRESH_AFTER_MS = 10_000
+
+/**
+ * Tells the person when the developers have pushed an update, and refreshes
+ * the page to get it. The refresh waits while a form or box is open, so
+ * nothing half-written is lost, and anyone can press Refresh now or Later.
+ */
+function useUpdateNotice(connected: boolean): { updated: boolean; refresh: () => void; later: () => void } {
+  const [updated, setUpdated] = useState(false)
+  const loadedVersion = useRef<string | null>(null)
+  const dismissed = useRef(false)
+
+  const check = useCallback(async () => {
+    const now = await serverVersion()
+    if (!now) return
+    if (loadedVersion.current === null) loadedVersion.current = now
+    else if (now !== loadedVersion.current && !dismissed.current) setUpdated(true)
+  }, [])
+
+  useEffect(() => {
+    check()
+    const timer = window.setInterval(check, VERSION_CHECK_MS)
+    const onShow = () => {
+      if (document.visibilityState === "visible") check()
+    }
+    document.addEventListener("visibilitychange", onShow)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onShow)
+    }
+  }, [check])
+
+  // The live connection coming back is usually the server restarting after a deploy.
+  const wasConnected = useRef(connected)
+  useEffect(() => {
+    if (connected && !wasConnected.current) check()
+    wasConnected.current = connected
+  }, [connected, check])
+
+  const refresh = useCallback(() => window.location.reload(), [])
+  const later = useCallback(() => {
+    dismissed.current = true
+    setUpdated(false)
+  }, [])
+
+  // Refresh on its own after a moment, once nothing is open on top of the page.
+  useEffect(() => {
+    if (!updated) return
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      const busy = document.querySelector(".modal-backdrop, dialog[open], .photo-viewer")
+      if (Date.now() - started >= REFRESH_AFTER_MS && !busy) window.location.reload()
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [updated])
+
+  return { updated, refresh, later }
+}
+
+function UpdateNotice({ onRefresh, onLater }: { onRefresh: () => void; onLater: () => void }) {
+  return (
+    <div className="update-notice" role="status" aria-live="polite">
+      <RefreshCw size={16} aria-hidden="true" />
+      <span>AVision was updated. The page will refresh in a moment to get the latest.</span>
+      <button type="button" className="primary-button" onClick={onRefresh}>
+        Refresh now
+      </button>
+      <button type="button" className="text-button" onClick={onLater}>
+        Later
+      </button>
+    </div>
+  )
+}
+
 function useLiveTickets(state: TicketsState): { connected: boolean; bellNudge: number } {
   const [connected, setConnected] = useState(false)
   const [bellNudge, setBellNudge] = useState(0)
@@ -2581,6 +2662,7 @@ export default function App() {
   const [openId, setOpenId] = useState<string | null>(null)
   const ticketsState = useTickets()
   const live = useLiveTickets(ticketsState)
+  const update = useUpdateNotice(live.connected)
   // Opened from a link to one ticket (the link in the messages people send to
   // departments): go straight to that ticket, past the welcome screen. It is
   // fetched on its own in case it is older than the list goes back. Then the
@@ -2768,6 +2850,7 @@ export default function App() {
       )}
       {screening && <ScreeningNotice problem={screening} onClose={closeScreening} />}
       {toSend && <ReportReady {...toSend} onClose={closeToSend} />}
+      {update.updated && <UpdateNotice onRefresh={update.refresh} onLater={update.later} />}
       {resourcesOpener && (
         <ResourcesDialog
           onClose={closeResources}

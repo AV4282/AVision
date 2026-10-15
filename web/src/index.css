@@ -1047,6 +1047,47 @@ summary:focus-visible {
   cursor: pointer;
 }
 
+/* ---------- "AVision was updated" notice (App.tsx, useUpdateNotice) ---------- */
+.update-notice {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  translate: -50% 0;
+  width: min(560px, calc(100% - 24px));
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+}
+
+.update-notice svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.update-notice span {
+  flex: 1 1 220px;
+}
+
+.update-notice .primary-button {
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+@media (max-width: 800px) {
+  .update-notice {
+    bottom: calc(76px + env(safe-area-inset-bottom)); /* above the tab bar */
+  }
+}
+
 /* ---------- Ads (AdSlot.tsx) ---------- */
 /* Plainly marked, with a border, so an ad never looks like part of the app. */
 .ad-slot {
