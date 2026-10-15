@@ -902,6 +902,26 @@ def close_ticket(ticket_id: UUID, authorization: AuthorizationHeader = None):
     return ticket
 
 
+@app.post("/tickets/{ticket_id}/reset-counts", response_model=Ticket)
+def reset_counts(ticket_id: UUID, authorization: AuthorizationHeader = None):
+    """Wipe a ticket's counts. Admins only. Returns the updated ticket.
+
+    Every vote is removed and the report count goes back to 1 (the poster's own).
+    A likely-fixed ticket goes back to open; a fixed one stays fixed.
+    """
+    user_id = caller(authorization, None, required=True)
+    if not db.is_admin(user_id):
+        raise HTTPException(403, "Only admins can reset a ticket's counts")
+    try:
+        ticket = db.reset_counts(ticket_id, user_id)
+    except db.TicketMerged:
+        raise HTTPException(409, "This ticket was merged into another")
+    if ticket is None:
+        raise HTTPException(404, "Ticket not found")
+    live.publish("ticket_changed", ticket_id)
+    return ticket
+
+
 @app.post("/tickets/{ticket_id}/votes", response_model=Ticket)
 def vote(
     ticket_id: UUID,

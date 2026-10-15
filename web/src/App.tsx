@@ -42,10 +42,12 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  RotateCcw,
 } from "lucide-react"
 import {
   clearNotices,
   closeTicket,
+  resetCounts,
   deleteTicket,
   followUpReport,
   campusOutlines,
@@ -1191,6 +1193,24 @@ function TicketDetail({
     }
   }
 
+  // Admins can wipe the counts: every vote, and the report count back to 1.
+  const [confirmingReset, setConfirmingReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  async function wipeCounts() {
+    if (resetting) return
+    setResetting(true)
+    setCloseError(null)
+    try {
+      onTicketChange(await resetCounts(ticket.id))
+      setConfirmingReset(false)
+      setMoveNote("Counts reset. Votes are cleared and the report count is back to 1.")
+    } catch (err) {
+      setCloseError(err instanceof Error ? err.message : "Couldn’t reset the counts")
+    } finally {
+      setResetting(false)
+    }
+  }
+
   // Editing the ticket after posting: its words, photos, spot or department. `moveNote` says how it went.
   const [moving, setMoving] = useState(false)
   const [moveNote, setMoveNote] = useState<string | null>(null)
@@ -1521,6 +1541,18 @@ function TicketDetail({
                     <CheckCircle2 size={15} /> {closing ? "Marking as fixed…" : "Mark as fixed"}
                   </button>
                 )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="reset-counts-button"
+                    onClick={() => {
+                      setMoveNote(null)
+                      setConfirmingReset(true)
+                    }}
+                  >
+                    <RotateCcw size={15} /> Reset counts
+                  </button>
+                )}
               </div>
             ) : (
               <div className="delete-confirm" role="group" aria-label="Confirm delete">
@@ -1542,6 +1574,33 @@ function TicketDetail({
                     autoFocus
                   >
                     <Trash2 size={15} /> {deleting ? "Deleting…" : "Yes, delete"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {confirmingReset && (
+              <div className="delete-confirm" role="group" aria-label="Confirm reset">
+                <p>
+                  Reset this ticket’s counts? Every “Still there” and “Fixed” vote is removed and the report
+                  count goes back to 1.
+                </p>
+                <div>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setConfirmingReset(false)}
+                    disabled={resetting}
+                  >
+                    Keep them
+                  </button>
+                  <button
+                    type="button"
+                    className="delete-ticket-button danger"
+                    onClick={wipeCounts}
+                    disabled={resetting}
+                    autoFocus
+                  >
+                    <RotateCcw size={15} /> {resetting ? "Resetting…" : "Yes, reset"}
                   </button>
                 </div>
               </div>

@@ -711,6 +711,37 @@ def close_ticket(ticket_id, user_id):
         return get_ticket(ticket_id, user_id, conn)
 
 
+def reset_counts(ticket_id, user_id):
+    """Wipe a ticket's counts (admins only; the caller checks): every vote, and the
+    report count back to 1 (the poster's own). Returns the ticket, or None if it
+    doesn't exist. Raises TicketMerged for a merged ticket.
+
+    The ticket goes back to open, since its votes were what made it likely
+    fixed; a ticket an admin marked fixed stays fixed.
+    """
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT status FROM tickets WHERE id = %s FOR UPDATE", (ticket_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if row["status"] == "merged":
+            raise TicketMerged
+        conn.execute("DELETE FROM ticket_votes WHERE ticket_id = %s", (ticket_id,))
+        if HAS_TICKET_REPORTS:
+            conn.execute("DELETE FROM ticket_reports WHERE ticket_id = %s", (ticket_id,))
+        conn.execute(
+            """UPDATE tickets
+               SET report_count = 1,
+                   status = CASE WHEN status = 'likely_fixed' THEN 'open' ELSE status END,
+                   updated_at = now()
+               WHERE id = %s""",
+            (ticket_id,),
+        )
+        _notify(conn, _TELL_POSTER, ticket_id, user_id, "edited")
+        return get_ticket(ticket_id, user_id, conn)
+
+
 def cast_vote(ticket_id, user_id, vote, admin=False):
     """Record or change the user's vote, then recompute the ticket's status.
 

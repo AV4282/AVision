@@ -1072,6 +1072,11 @@ export async function closeTicket(ticketId: string): Promise<Ticket> {
   return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/close`))
 }
 
+/** Wipes a ticket's votes and report count. Admins only. */
+export async function resetCounts(ticketId: string): Promise<Ticket> {
+  return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/reset-counts`))
+}
+
 export async function vote(ticketId: string, choice: VoteChoice): Promise<Ticket> {
   return toTicket(await request<ApiTicket>("POST", `/tickets/${ticketId}/votes`, { body: { vote: choice } }))
 }

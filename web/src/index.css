@@ -4429,6 +4429,26 @@ summary:focus-visible {
   justify-content: center;
 }
 
+/* Admin: wipes a ticket's votes and report count. Same shape as Edit ticket. */
+.reset-counts-button {
+  min-height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reset-counts-button:hover {
+  background: var(--hover);
+}
+
 .mark-fixed-button {
   min-height: 36px;
   padding: 0 12px;
