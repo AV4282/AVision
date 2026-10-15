@@ -95,9 +95,6 @@ def reset(conn, include_accounts, include_reports):
         ).rowcount
         if include_accounts:
             done["accounts deleted"] = conn.execute("DELETE FROM users").rowcount
-    if include_reports:
-        # Clear the hotspots view's stored weeks too; it can't refresh inside a transaction.
-        conn.execute("CALL refresh_continuous_aggregate('hotspots_weekly', NULL, NULL)")
     return done
 
 
