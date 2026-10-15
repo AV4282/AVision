@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 
 /**
  * One Google AdSense ad unit. Ads are on only when the build has the
@@ -40,22 +40,31 @@ export default function AdSlot({ slot, format = "auto", className = "" }: {
   className?: string
 }) {
   const ins = useRef<HTMLModElement>(null)
+  // The box only shows once AdSense has put an ad in it. Until then, and when
+  // there is none (the site not approved yet, nothing to match, an ad blocker),
+  // there is no empty frame and no "Advertisement" label over nothing.
+  const [filled, setFilled] = useState(false)
 
   // Ask AdSense to fill this unit once it is on the page. A unit that was
   // already filled (React drawing it twice in dev) is left alone.
   useEffect(() => {
-    if (!ADSENSE_CLIENT || !slot || !ins.current) return
-    if (ins.current.getAttribute("data-adsbygoogle-status")) return
-    try {
-      ;(window.adsbygoogle = window.adsbygoogle || []).push({})
-    } catch {
-      // The script is blocked or hasn't loaded: the space stays empty.
+    const unit = ins.current
+    if (!ADSENSE_CLIENT || !slot || !unit) return
+    const watcher = new MutationObserver(() => setFilled(unit.getAttribute("data-ad-status") === "filled"))
+    watcher.observe(unit, { attributes: true, attributeFilter: ["data-ad-status"] })
+    if (!unit.getAttribute("data-adsbygoogle-status")) {
+      try {
+        ;(window.adsbygoogle = window.adsbygoogle || []).push({})
+      } catch {
+        // The script is blocked or hasn't loaded: the space stays empty.
+      }
     }
+    return () => watcher.disconnect()
   }, [slot])
 
   if (!ADSENSE_CLIENT || !slot) return null
   return (
-    <div className={`ad-slot ${className}`.trim()} aria-label="Advertisement">
+    <div className={`ad-slot ${className}`.trim()} aria-label="Advertisement" hidden={!filled}>
       <span className="ad-label">Advertisement</span>
       <ins
         ref={ins}

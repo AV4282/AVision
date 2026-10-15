@@ -1077,8 +1077,22 @@ summary:focus-visible {
   margin-top: auto;
 }
 
-.ad-sidebar + .support-nav {
+/* Help & resources sits under a shown ad; with no ad it takes the spare space itself. */
+.ad-sidebar:not([hidden]) + .support-nav {
   margin-top: 14px;
+}
+
+/* Hidden until an ad is in it, but still on the page so AdSense can fill it. */
+.ad-slot[hidden] {
+  display: block;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
 }
 
 .ad-sidebar .adsbygoogle {

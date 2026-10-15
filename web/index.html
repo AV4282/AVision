@@ -21,20 +21,9 @@
     <link rel="icon" href="/logo.svg" />
     <meta property="og:title" content="AVision | Atlanta accessibility map" />
     <meta property="og:description" content="Streamline ticket management with a user-friendly interface featuring onboarding, map and list views for issues, and a profile page for tracking user tickets." />
-    <!-- Google AdSense. The publisher id comes from VITE_ADSENSE_CLIENT at build time
-         (see src/AdSlot.tsx); without it, nothing loads. Paste the same id into
-         AdSense's "add your site" step, which only needs this script present. -->
-    <script type="module">
-      // Same default as src/AdSlot.tsx.
-      const client = (import.meta.env.VITE_ADSENSE_CLIENT ?? "ca-pub-9613332564332030").trim()
-      if (client) {
-        const s = document.createElement("script")
-        s.async = true
-        s.crossOrigin = "anonymous"
-        s.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(client)}`
-        document.head.appendChild(s)
-      }
-    </script>
+    <!-- Google AdSense (the ad units are in src/AdSlot.tsx). -->
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9613332564332030"
+     crossorigin="anonymous"></script>
   </head>
   <body>
     <div id="root"></div>
