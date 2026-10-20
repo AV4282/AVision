@@ -87,6 +87,8 @@ import PrivacyDialog from "./PrivacyDialog"
 import NotificationPreferencesDialog from "./NotificationPreferencesDialog"
 import { useNotificationPreferences } from "./notification-preferences"
 import ResourcesDialog from "./ResourcesDialog"
+import Brand from "./Brand"
+import SiteFooter from "./SiteFooter"
 
 import { mapOwner, mapStatus, ticketMarker } from "./ticket-map"
 import { WELCOME_PHOTOS } from "./welcome-photos"
@@ -350,21 +352,6 @@ const ownerColors: Record<Ticket["owner"], string> = {
   "Georgia Tech": "owner-gt",
   MARTA: "owner-marta",
   GDOT: "owner-gdot",
-}
-
-function Brand({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className="brand">
-      <img
-        className={compact ? "brand-mark compact" : "brand-mark"}
-        src="/logo.svg"
-        alt=""
-      />
-      <span className={compact ? "brand-name compact" : "brand-name"}>
-        AVision
-      </span>
-    </div>
-  )
 }
 
 /**
@@ -727,15 +714,10 @@ function Onboarding({
               Continue without an account
             </button>
             <p className="guest-help">
-              You can browse and report anonymously. Voting requires sign-in.
+              You can browse and report without an account. Voting requires sign-in.
             </p>
           </div>
-          {/* Hidden until AVision has written Terms and a Privacy Policy to link to.
-              To show it, remove `hidden` and turn the two <u> into links. */}
-          <p className="legal-copy" hidden>
-            By continuing, you agree to AVision’s <u>Terms</u> and{" "}
-            <u>Privacy Policy</u>.
-          </p>
+          <SiteFooter />
         </div>
       </section>
     </main>
@@ -2818,6 +2800,7 @@ export default function App() {
             onEditAnswers={() => setQuestionsOpen(true)}
           />
         )}
+        <SiteFooter />
       </main>
       <MobileNav view={page} setView={setView} onReport={openReport} onMenu={openMenu} />
       {openTicket && (
