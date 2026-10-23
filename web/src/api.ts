@@ -252,6 +252,8 @@ export type ScreeningProblem = {
   code: "flagged" | "suspended"
   /** What was flagged: the photo, the words, or both. */
   what?: "photo" | "text" | "both"
+  /** Which photos were flagged, 1 being the main one. Empty when only the words were. */
+  photos?: number[]
   /** Why, in a sentence. */
   message: string
   /** Flagged attempts so far, and how many lead to a pause. */
@@ -261,12 +263,21 @@ export type ScreeningProblem = {
   suspendedUntil: string | null
 }
 
+/** "The photo", "Photo 2" or "Photos 1 and 3": which photo a screening problem is about. */
+export function flaggedPhotos(problem: ScreeningProblem): string {
+  const list = problem.photos ?? []
+  if (list.length === 0 || (list.length === 1 && list[0] === 1)) return "The photo"
+  if (list.length === 1) return `Photo ${list[0]}`
+  return `Photos ${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`
+}
+
 /** The screening problem behind an error, or null when the error is something else. */
 export function screeningProblem(err: unknown): ScreeningProblem | null {
   if (!(err instanceof ApiError) || !err.detail || typeof err.detail !== "object") return null
   const detail = err.detail as {
     code?: string
     what?: ScreeningProblem["what"]
+    photos?: number[]
     message?: string
     strikes?: number
     limit?: number
@@ -276,6 +287,7 @@ export function screeningProblem(err: unknown): ScreeningProblem | null {
   return {
     code: detail.code,
     what: detail.what,
+    photos: Array.isArray(detail.photos) ? detail.photos.filter((n) => Number.isInteger(n) && n > 0) : [],
     message: detail.message ?? err.message,
     strikes: detail.strikes,
     limit: detail.limit,

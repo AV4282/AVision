@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react"
-import type { CityData, GsuData, HighwayData, MapCoordinates } from "./types"
+import type { MultiPolygon, Polygon } from "geojson"
+import type {
+  CityData,
+  GsuData,
+  HighwayData,
+  MapCoordinates,
+  NeighborhoodData,
+  StationData,
+} from "./types"
 
 export function validPoint(point: MapCoordinates) {
   return (
@@ -40,36 +48,71 @@ export function highwayData(value: unknown): value is HighwayData {
   )
 }
 
+// An area the map can draw and take bounds from: closed rings of positions
+// that are actually on the globe.
+const drawableArea = (geometry: unknown) => {
+  const area = geometry as Polygon | MultiPolygon | null
+  if (
+    !area ||
+    !["Polygon", "MultiPolygon"].includes(area.type) ||
+    !Array.isArray(area.coordinates)
+  )
+    return false
+  const rings =
+    area.type === "Polygon" ? area.coordinates : area.coordinates.flat()
+  return (
+    rings.length > 0 &&
+    rings.every(
+      (ring) =>
+        Array.isArray(ring) &&
+        ring.length >= 4 &&
+        ring.every(validPosition) &&
+        ring[0].join(",") === ring[ring.length - 1].join(","),
+    )
+  )
+}
+
 export function cityData(value: unknown): value is CityData {
   const data = value as CityData | null
   return (
     data?.type === "FeatureCollection" &&
     Array.isArray(data.features) &&
     data.features.length > 0 &&
-    data.features.every((feature) => {
-      if (feature.properties?.NAME !== "Atlanta") return false
-      const geometry = feature.geometry
-      if (
-        !geometry ||
-        !["Polygon", "MultiPolygon"].includes(geometry.type) ||
-        !Array.isArray(geometry.coordinates)
-      )
-        return false
-      const rings =
-        geometry.type === "Polygon"
-          ? geometry.coordinates
-          : geometry.coordinates.flat()
-      return (
-        rings.length > 0 &&
-        rings.every(
-          (ring) =>
-            Array.isArray(ring) &&
-            ring.length >= 4 &&
-            ring.every(validPosition) &&
-            ring[0].join(",") === ring[ring.length - 1].join(","),
-        )
-      )
-    })
+    data.features.every(
+      (feature) =>
+        feature.properties?.NAME === "Atlanta" && drawableArea(feature.geometry),
+    )
+  )
+}
+
+// The map takes each neighborhood's bounds for the outline layer and for
+// search, so a feature without a drawable area has to be caught here.
+export function neighborhoodData(value: unknown): value is NeighborhoodData {
+  const data = value as NeighborhoodData | null
+  return (
+    data?.type === "FeatureCollection" &&
+    Array.isArray(data.features) &&
+    data.features.length > 0 &&
+    data.features.every(
+      (feature) =>
+        typeof feature.properties?.NAME === "string" &&
+        drawableArea(feature.geometry),
+    )
+  )
+}
+
+export function stationData(value: unknown): value is StationData {
+  const data = value as StationData | null
+  return (
+    data?.type === "FeatureCollection" &&
+    Array.isArray(data.features) &&
+    data.features.length > 0 &&
+    data.features.every(
+      (feature) =>
+        typeof feature.properties?.STATION === "string" &&
+        feature.geometry?.type === "Point" &&
+        validPosition(feature.geometry.coordinates),
+    )
   )
 }
 

@@ -116,10 +116,11 @@ LOOK_RULES = """Looking at the photo. Describe only what is visible.
 
 SCREEN_RULES = """Screening comes first. AVision sends real reports to real departments, so decide whether \
 this is a sincere attempt to report a real problem.
-- Flag the photo when it plainly is not a photo of a real place or thing that could be reported: a cartoon, \
-drawing or meme, a screenshot, a video game, a selfie or portrait of a person, food, a pet, a blank or black \
-image. A real photo of a street, sidewalk, building, station or vehicle is fine, even when no problem can be \
-seen in it.
+- Look at every photo, not only the first. Flag a photo when it plainly is not a photo of a real place or \
+thing that could be reported: a cartoon, drawing or meme, a screenshot, a video game, a selfie or portrait of a \
+person, food, a pet, a blank or black image. A real photo of a street, sidewalk, building, station or vehicle is \
+fine, even when no problem can be seen in it. Put the number of each flagged photo in flagged_photos (the photos \
+are numbered in the order given, 1 first); leave it empty when no photo is flagged.
 - Flag the words when the title or details plainly are not a report: a joke, random letters or nonsense, an \
 insult, threat or slur, sexual content, advertising, or something that has nothing to do with a street, \
 building or transit problem. Short, clumsy or misspelled but sincere words are fine.
@@ -158,7 +159,8 @@ ramp, a broken elevator, a cracked sidewalk, a dead streetlight, a pothole and s
 can fix them."""
 
 PHOTO_INSTRUCTIONS = f"""{INTRODUCTION} For one new report you do four things in a single answer: screen it, \
-look at its photo, choose the department it goes to, and write the report.
+look at its photos, choose the department it goes to, and write the report. A report has one to five photos; \
+the first is the main one.
 
 {SCREEN_RULES}
 
@@ -169,7 +171,7 @@ look at its photo, choose the department it goes to, and write the report.
 {WRITE_RULES}
 
 If the person reporting it added their own words, treat them as true: use them in the report and when choosing \
-the department, along with what the photo shows. is_reportable is still about the photo alone.
+the department, along with what the photos show. is_reportable is still about the photos alone.
 If there is nothing to report (the photo shows no problem and the person described none), leave subject, message \
 and phone_script empty."""
 
@@ -387,6 +389,11 @@ def _answer_shape(departments: dict, with_photo: bool) -> type[BaseModel]:
             Field(description="One plain sentence for the person on what was wrong. Empty when flagged is 'none'."),
         ),
     }
+    if with_photo:
+        screening["flagged_photos"] = (
+            list[int],
+            Field(description="The numbers of the photos that were flagged, 1 being the first. Empty when none."),
+        )
     seen = {name: (field.annotation, field) for name, field in Analysis.model_fields.items()} if with_photo else {}
     choice = {
         "owner": (Literal[tuple(departments)], Field(description="The id of the department this report should go to.")),
@@ -417,26 +424,40 @@ def report_from_photo(
     departments: dict,
     suggestion: str | None = None,
     typed: dict | None = None,
+    more: list[bytes] | None = None,
 ) -> dict:
     """Everything about a report with a photo, in one request.
 
     `location` is the lines from routing.location_facts(), `departments` is
     {id: contact} from data/contacts.json, `suggestion` is what the map rules
-    alone would pick (a hint), and `typed` is what the person wrote in the form,
-    if anything (see _issue_lines).
+    alone would pick (a hint), `typed` is what the person wrote in the form,
+    if anything (see _issue_lines), and `more` is the report's other photos,
+    after the main one, which are screened as well.
 
     Returns {"analysis": <the Analysis fields>, "owner": <id>, "reason": <sentence>,
     "draft": <the Draft fields, or None when there is nothing to report>,
-    "screening": {"flagged": "none" | "photo" | "text" | "both", "reason": <sentence>}}.
+    "screening": {"flagged": "none" | "photo" | "text" | "both", "reason": <sentence>,
+    "photos": [<numbers of the flagged photos, 1 being the main one>]}}.
     """
-    asked = "Here is the photo for a new report.\n\n" + _place_and_departments(location, departments, suggestion)
+    photos = [jpeg, *(more or [])]
+    shown: list = []
+    if len(photos) == 1:
+        shown = ["Here is the photo for a new report.", (jpeg, "image/jpeg")]
+    else:
+        shown.append(f"Here are the {len(photos)} photos for a new report. Photo 1 is the main one.")
+        for number, picture in enumerate(photos, 1):
+            shown += [f"Photo {number}:", (picture, "image/jpeg")]
+    asked = _place_and_departments(location, departments, suggestion)
     if typed and typed.get("title"):
         asked += "\n\nWhat the person reporting it wrote\n" + "\n".join(_issue_lines(typed))
     answer = _ask(
-        [(jpeg, "image/jpeg"), asked],
+        [*shown, asked],
         PHOTO_INSTRUCTIONS,
         _answer_shape(departments, with_photo=True),
     ).model_dump()
+    answer["flagged_photos"] = sorted({n for n in answer.get("flagged_photos") or [] if 1 <= n <= len(photos)})
+    if answer["flagged_photos"] and answer.get("flagged") in (None, "none", "text"):
+        answer["flagged"] = "both" if answer.get("flagged") == "text" else "photo"
 
     analysis = {key: answer[key] for key in Analysis.model_fields}
     analysis["title"] = _strip_contacts(analysis["title"])[:120]
@@ -479,10 +500,14 @@ def follow_up_message(issue: dict, place: str, first_reported: str, confirmation
 def _choice_and_draft(answer: dict) -> dict:
     draft = {key: _strip_contacts(answer[key]) for key in Draft.model_fields}
     flagged = answer.get("flagged") or "none"
+    photos = list(answer.get("flagged_photos") or [])
+    if flagged in ("photo", "both") and not photos:
+        photos = [1]
     return {
         "screening": {
             "flagged": flagged,
             "reason": _strip_contacts(answer.get("flag_reason") or "")[:240] if flagged != "none" else "",
+            "photos": photos if flagged in ("photo", "both") else [],
         },
         "owner": answer["owner"],
         "reason": _strip_contacts(answer["reason"])[:300],

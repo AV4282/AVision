@@ -10,6 +10,7 @@ import {
   OWNERS,
   photoLink,
   photoPath,
+  flaggedPhotos,
   screeningProblem,
   uploadPhoto,
   type BlockedOwners,
@@ -281,11 +282,11 @@ export default function MoveTicket({
     try {
       onMoved(await editTicket(ticket.id, changes))
     } catch (err) {
-      // Screening turned the new words or main photo away: say why, and leave the box open to fix it.
+      // Screening turned the new words or a new photo away: say why, and leave the box open to fix it.
       const problem = screeningProblem(err)
       setError(
         problem?.code === "flagged"
-          ? `Not saved. ${problem.message}` +
+          ? `Not saved. ${problem.what !== "text" ? `${flaggedPhotos(problem)} ${(problem.photos?.length ?? 0) > 1 ? "were" : "was"} flagged. ` : ""}${problem.message}` +
               (problem.suspendedUntil
                 ? " That was one flagged attempt too many, so posting is paused for a day."
                 : problem.strikes && problem.limit

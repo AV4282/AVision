@@ -182,6 +182,8 @@ def require_owner_fits(owner: str, lat: float, lng: float):
 # A report that plainly isn't one (a cartoon for a photo, a joke or abuse for the
 # words) is refused, and the attempt counts against the person: see
 # gemini.SCREEN_RULES for what is flagged and db.flag_attempt for the counting.
+# Every photo on the report is looked at, not only the main one. Admins are
+# refused the same way but never get strikes or a pause.
 # Only the AI can judge that, so when it isn't available nothing is flagged.
 def _photo_key(photo: str | None) -> str | None:
     """The key for a stored photo, from its file name or from a path or link ending in it."""
@@ -197,8 +199,20 @@ def _text_key(user_id, title: str | None, description: str | None) -> str | None
     return "text:" + hashlib.sha256(f"{user_id}|{words}".encode()).hexdigest()[:40]
 
 
+def _more_photo_bytes(links) -> list[bytes]:
+    """The photos these links point at on this server, in order, for the AI to screen. Others are skipped."""
+    pictures = []
+    for link in links or []:
+        path = photos.find(photos.name_in(link) or "")
+        if path is not None:
+            pictures.append(path.read_bytes())
+    return pictures
+
+
 def require_good_standing(user_id):
-    """Refuse someone whose posting is paused, saying until when."""
+    """Refuse someone whose posting is paused, saying until when. Admins are never paused."""
+    if user_id and db.is_admin(user_id):
+        return
     until = db.standing(user_id)["suspended_until"]
     if until is not None:
         raise HTTPException(
@@ -212,15 +226,23 @@ def require_good_standing(user_id):
         )
 
 
-def _refuse_flagged(what: str, reason: str | None, user_id, keys: dict):
-    """Count the attempt and refuse the report, telling the person why and where they stand."""
-    now = db.flag_attempt(user_id, keys, reason)
+def _refuse_flagged(what: str, reason: str | None, user_id, keys: dict, which: list[int] = ()):
+    """Count the attempt and refuse the report, telling the person why and where they stand.
+
+    `which` is the numbers of the flagged photos, 1 being the main one. An
+    admin's attempt is refused the same way but never counted: no strikes, no pause.
+    """
+    if user_id and db.is_admin(user_id):
+        now = {"strikes": 0, "limit": db.FLAG_LIMIT, "suspended_until": None}
+    else:
+        now = db.flag_attempt(user_id, keys, reason)
     until = now["suspended_until"]
     raise HTTPException(
         422,
         {
             "code": "flagged",
             "what": what,
+            "photos": list(which),
             "message": reason
             or ("That photo doesn't look like a real report." if what == "photo" else "That doesn't read like a real report."),
             "strikes": now["strikes"],
@@ -230,26 +252,45 @@ def _refuse_flagged(what: str, reason: str | None, user_id, keys: dict):
     )
 
 
-def screen(result: dict, user_id, photo: str | None, title: str | None, description: str | None):
-    """Refuse what the AI flagged in `result` (from agent.py). Does nothing when all is fine."""
+def screen(
+    result: dict,
+    user_id,
+    photo: str | None,
+    title: str | None,
+    description: str | None,
+    more: list[str | None] = (),
+):
+    """Refuse what the AI flagged in `result` (from agent.py). Does nothing when all is fine.
+
+    `photo` is the main photo and `more` the others, in the order the AI saw
+    them. A None in either place is a photo that isn't held against the person
+    (one that was on the ticket already): it is still refused, but not written down.
+    """
     verdict = result.get("screening") or {}
     what = verdict.get("flagged") or "none"
     if what == "none":
         return
+    names = [photo, *more]
+    which = [n for n in verdict.get("photos") or [1] if 1 <= n <= len(names)] or [1]
     keys = {}
-    if what in ("photo", "both") and _photo_key(photo):
-        keys[_photo_key(photo)] = "photo"
+    if what in ("photo", "both"):
+        for n in which:
+            if _photo_key(names[n - 1]):
+                keys[_photo_key(names[n - 1])] = "photo"
     if what in ("text", "both") and _text_key(user_id, title, description):
         keys[_text_key(user_id, title, description)] = "text"
-    if keys:
-        _refuse_flagged(what, verdict.get("reason"), user_id, keys)
+    _refuse_flagged(what, verdict.get("reason"), user_id, keys, which if what != "text" else [])
 
 
-def refuse_known_flagged(user_id, photo: str | None, title: str | None, description: str | None):
+def refuse_known_flagged(
+    user_id, photo: str | None, title: str | None, description: str | None, more: list[str | None] = ()
+):
     """Refuse a photo or wording that was flagged before, without asking the AI again."""
-    before = db.flagged_reason([_photo_key(photo), _text_key(user_id, title, description)])
+    names = [photo, *more]
+    before = db.flagged_reason([*(_photo_key(name) for name in names), _text_key(user_id, title, description)])
     if before:
-        _refuse_flagged(before["what"], before["reason"], user_id, {})
+        which = [n for n, name in enumerate(names, 1) if _photo_key(name) == before.get("key")]
+        _refuse_flagged(before["what"], before["reason"], user_id, {}, which)
 
 
 # ---------- models ----------
@@ -616,7 +657,9 @@ def create_ticket(
     require_owner_fits(body.owner, body.lat, body.lng)
     user_id = caller(authorization, guest_id)
     require_good_standing(user_id)
-    refuse_known_flagged(user_id, body.photo_url, body.title, body.description)
+    refuse_known_flagged(
+        user_id, body.photo_url, body.title, body.description, [photos.name_in(link) for link in body.more_photo_urls]
+    )
     try:
         ticket = db.create_ticket(body.model_dump(), user_id)
     except db.UnknownUser:
@@ -791,9 +834,9 @@ def edit_ticket(
     """Change anything about a ticket: its title, type, details, photos, spot or department.
 
     Only its poster can, or an admin. Only the fields that are sent change. The
-    spot and department follow the same rules as /location. New words and a new
-    main photo are screened like a new report (see `screen`), so a ticket can't
-    be turned into something that would have been refused.
+    spot and department follow the same rules as /location. New words and new
+    photos are screened like a new report (see `screen`; the AI looks at every
+    photo), so a ticket can't be turned into something that would have been refused.
     """
     user_id = caller(authorization, guest_id, required=True)
     before = db.get_ticket(ticket_id)
@@ -830,22 +873,25 @@ def edit_ticket(
 
     # The photos. One that wasn't on the ticket has to be a stored upload.
     had = list(before["photo_urls"])
-    new_main = None
+    added = []  # photos that weren't on the ticket before
     if body.photos is not None and body.photos != had:
         for photo in body.photos:
             if photo not in had and photos.find(photos.name_in(photo)) is None:
                 raise HTTPException(422, "One of those photos isn't on the server any more. Add it again.")
         changes["photos"] = body.photos
-        if body.photos and body.photos[0] not in had:
-            new_main = body.photos[0]
+        added = [photo for photo in body.photos if photo not in had]
 
-    # New words or a new main photo are screened like a new report.
+    # New words or new photos are screened like a new report. Every photo goes to
+    # the AI; only the new ones are held against the person if flagged.
     if words_changed or "photos" in changes:
         require_good_standing(user_id)
-    if words_changed or new_main:
+    if words_changed or added:
         now = changes["photos"] if "photos" in changes else had
-        path = photos.find(photos.name_in(now[0])) if now else None  # the main photo, for the AI to look at
-        refuse_known_flagged(user_id, new_main, title, description)
+        now = [photo for photo in now if photos.find(photos.name_in(photo) or "")]  # the ones on this server
+        names = [photos.name_in(photo) if photo in added else None for photo in now]
+        paths = [photos.find(photos.name_in(photo) or "") for photo in now]
+        main, more = (names[0], names[1:]) if names else (None, [])
+        refuse_known_flagged(user_id, main, title, description, more)
         if gemini.is_configured() and _analysis_slot() is None:
             result = agent.draft_for_ticket(
                 title=title,
@@ -854,11 +900,16 @@ def edit_ticket(
                 address=changes.get("address", before["address"]),
                 lat=lat,
                 lng=lng,
-                photo=path.read_bytes() if path else None,
+                photo=paths[0].read_bytes() if paths and paths[0] else None,
                 photo_links=[],
                 owner=changes.get("owner", before["owner"]),
+                more_photos=[path.read_bytes() for path in paths[1:] if path] if paths and paths[0] else None,
             )
-            screen(result, user_id, new_main, title if words_changed else None, description if words_changed else None)
+            screen(
+                result, user_id, main,
+                title if words_changed else None, description if words_changed else None,
+                more,
+            )
 
     if not changes:
         return before
@@ -1147,7 +1198,8 @@ def analyze(
     path = photos.find(body.photo)
     if path is None:
         raise HTTPException(404, "Photo not found. Upload it first with POST /uploads.")
-    refuse_known_flagged(user_id, body.photo, None, None)
+    more_names = [photos.name_in(link) for link in body.more_photo_urls]
+    refuse_known_flagged(user_id, body.photo, None, None, more_names)
     if not gemini.is_configured():
         raise HTTPException(503, "Photo analysis isn't set up on this server yet.")
     _take_analysis_slot()
@@ -1158,11 +1210,12 @@ def analyze(
                 lat=body.lat,
                 lng=body.lng,
                 photo_links=[link for link in (body.photo_url, *body.more_photo_urls) if link],
+                more_photos=_more_photo_bytes(body.more_photo_urls),
             )
         )
     except gemini.GeminiFailed as problem:
         raise HTTPException(502, str(problem))
-    screen(result, user_id, body.photo, None, None)
+    screen(result, user_id, body.photo, None, None, [name for name in more_names if name])
     return result
 
 
@@ -1185,7 +1238,9 @@ def draft(body: DraftIn, authorization: AuthorizationHeader = None, guest_id: Us
     if body.owner:
         require_owner_fits(body.owner, body.lat, body.lng)
     path = photos.find(body.photo) if body.photo else None
-    refuse_known_flagged(user_id, body.photo if path else None, body.title, body.description)
+    # The other photos the AI can see are the ones on this server, in order.
+    more_names = [name for name in (photos.name_in(link) for link in body.more_photo_urls) if name and photos.find(name)]
+    refuse_known_flagged(user_id, body.photo if path else None, body.title, body.description, more_names)
     result = agent.draft_for_ticket(
         title=body.title,
         issue_type=body.issue_type,
@@ -1197,9 +1252,10 @@ def draft(body: DraftIn, authorization: AuthorizationHeader = None, guest_id: Us
         photo_links=[link for link in (body.photo_url, *body.more_photo_urls) if link],
         owner=body.owner,
         use_ai=gemini.is_configured() and _analysis_slot() is None,
+        more_photos=_more_photo_bytes(body.more_photo_urls) if path else None,
     )
     # The report is screened before the person is handed a message to send.
-    screen(result, user_id, body.photo if path else None, body.title, body.description)
+    screen(result, user_id, body.photo if path else None, body.title, body.description, more_names if path else [])
     return result
 
 

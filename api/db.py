@@ -647,7 +647,7 @@ def flagged_reason(keys):
         return None
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT what, reason FROM flagged_attempts WHERE key = ANY(%s) ORDER BY flagged_at LIMIT 1",
+            "SELECT key, what, reason FROM flagged_attempts WHERE key = ANY(%s) ORDER BY flagged_at LIMIT 1",
             (keys,),
         ).fetchone()
     return row

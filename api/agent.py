@@ -122,6 +122,7 @@ class Job:
     lat: float
     lng: float
     photo_links: list[str] = field(default_factory=list)  # public links to the ticket's photos, for the message
+    more_photos: list[bytes] = field(default_factory=list)  # the other photos, after the main one, screened too
     # Filled in by _prepare(), once, for everyone to read.
     analysis: dict | None = None
     routing: dict | None = None
@@ -148,10 +149,15 @@ _answers_lock = threading.Lock()
 ANSWERS_KEPT = 200
 
 
-def _ask_gemini(photo: bytes | None, typed: dict | None, facts: list[str], options: dict, hint: str | None) -> dict:
+def _ask_gemini(
+    photo: bytes | None, typed: dict | None, facts: list[str], options: dict, hint: str | None, more: list[bytes] = ()
+) -> dict:
     """The one Gemini request for a report (see gemini.py). Repeats of the same question come from memory."""
     asked = hashlib.sha256()
     asked.update(photo or b"")
+    for picture in more:
+        asked.update(b"|")
+        asked.update(picture)
     asked.update(json.dumps([typed, facts, list(options), hint], sort_keys=True).encode())
     key = asked.hexdigest()
     with _answers_lock:
@@ -159,7 +165,7 @@ def _ask_gemini(photo: bytes | None, typed: dict | None, facts: list[str], optio
             _answers.move_to_end(key)
             return _answers[key]
     if photo:
-        answer = gemini.report_from_photo(photo, facts, options, hint, typed)
+        answer = gemini.report_from_photo(photo, facts, options, hint, typed, list(more))
     else:
         answer = gemini.report_from_text(typed, facts, options, hint)
     answer = {**answer, "cost": gemini.last_cost()}
@@ -180,12 +186,15 @@ def work_out(
     owner: str | None = None,
     use_ai: bool = True,
     must_see_photo: bool = False,
+    more_photos: list[bytes] | None = None,
 ) -> dict:
     """Everything about one report: {"analysis", "routing", "address", "draft"}.
 
     `photo` and `typed` (what the person wrote: title, issue_type, description)
     say what the problem is; at least one is needed for Gemini to help. `owner`
     is the department the person picked by hand; leave it out to have it chosen.
+    `more_photos` are the report's other photos, after the main one; the AI
+    screens every photo, not only the first.
 
     "timings" is added too: where the time went.
 
@@ -215,7 +224,9 @@ def work_out(
     if use_ai and gemini.is_configured() and (photo or typed):
         hint = by_rules["contact"]["short_name"] if by_rules["owner"] in options and not owner else None
         try:
-            found = _ask_gemini(photo, typed, routing.location_facts(lat, lng, road, place), options, hint)
+            found = _ask_gemini(
+                photo, typed, routing.location_facts(lat, lng, road, place), options, hint, more_photos or []
+            )
         except gemini.GeminiFailed:
             if must_see_photo:
                 raise
@@ -281,7 +292,9 @@ def _emailable(by_rules: dict, options: dict) -> dict:
 def _prepare(job: Job):
     """Do the work for a job and store it on the job. Always sets `job.ready`, even on failure."""
     try:
-        found = work_out(lat=job.lat, lng=job.lng, photo=job.photo, must_see_photo=True)
+        found = work_out(
+            lat=job.lat, lng=job.lng, photo=job.photo, must_see_photo=True, more_photos=job.more_photos
+        )
         job.timings = found["timings"]
         job.screening = found["screening"]
         job.analysis = found["analysis"]
@@ -476,6 +489,7 @@ def draft_for_ticket(
     photo_links: list[str] | None = None,
     owner: str | None = None,
     use_ai: bool = True,
+    more_photos: list[bytes] | None = None,
 ) -> dict:
     """The department and a ready-to-edit message for a ticket, from what the person typed.
 
@@ -488,7 +502,10 @@ def draft_for_ticket(
     fill-in-the-blanks one. The result says which happened.
     """
     typed = {"title": title, "issue_type": issue_type, "description": description or ""}
-    found = work_out(lat=lat, lng=lng, photo=photo, typed=typed, address=address, owner=owner, use_ai=use_ai)
+    found = work_out(
+        lat=lat, lng=lng, photo=photo, typed=typed, address=address, owner=owner, use_ai=use_ai,
+        more_photos=more_photos if photo else None,
+    )
     draft = found["draft"]
     if draft is None:
         seen = found["analysis"] if found["analysis"] and found["analysis"]["is_reportable"] else None

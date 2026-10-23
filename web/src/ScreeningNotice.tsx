@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import { Ban, TriangleAlert } from "lucide-react"
-import type { ScreeningProblem } from "./api"
+import { flaggedPhotos, type ScreeningProblem } from "./api"
 
 // "Oct 12 at 3:40 PM", in the viewer's own time zone.
 function when(iso: string) {
@@ -11,10 +11,13 @@ function when(iso: string) {
   return `${day} at ${time}`
 }
 
-const WHAT = {
-  photo: "The photo was flagged.",
-  text: "The wording was flagged.",
-  both: "The photo and the wording were flagged.",
+// "The photo was flagged." or "Photo 2 was flagged.": every photo on a report is screened.
+function what(problem: ScreeningProblem): string {
+  const photo = flaggedPhotos(problem)
+  const plural = photo.startsWith("Photos")
+  if (problem.what === "text") return "The wording was flagged."
+  if (problem.what === "both") return `${photo} and the wording were flagged.`
+  return `${photo} ${plural ? "were" : "was"} flagged.`
 }
 
 /**
@@ -68,7 +71,7 @@ export default function ScreeningNotice({ problem, onClose }: {
         <div id="screening-text">
           {flagged && (
             <p className="screening-reason">
-              {problem.what && <strong>{WHAT[problem.what]} </strong>}
+              {problem.what && <strong>{what(problem)} </strong>}
               {problem.message}
             </p>
           )}
