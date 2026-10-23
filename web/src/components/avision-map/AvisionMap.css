@@ -203,6 +203,29 @@
   white-space: normal;
   box-shadow: 0 2px 6px #18364b44;
 }
+.avision-map-locate {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 2px 6px #18364b22;
+}
+.avision-map-locate:hover { background: #E5EEE9; }
+.avision-map-locate:disabled { cursor: wait; }
+.avision-map-location-status:not(:empty) {
+  padding: 8px 12px;
+  border-bottom: 1px solid #E5EEE9;
+  font-size: 13px;
+}
+.avision-map-location-status { flex-shrink: 0; }
 .avision-map-widget .avision-leaflet-map {
   height: 100%;
   width: 100%;
@@ -529,6 +552,7 @@
   .avision-map-results button,
   .avision-map-views button,
   .avision-map-fit-reports,
+  .avision-map-locate,
   .avision-map-style button,
   .avision-map-sources,
   .avision-map-layer-menu summary,
@@ -546,6 +570,7 @@
   .avision-map-results .avision-search-active,
   .avision-map-views button:hover,
   .avision-map-fit-reports:hover:enabled,
+  .avision-map-locate:hover,
   .avision-map-sources:hover,
   .avision-map-layer-menu summary span,
   .avision-map-dialog-heading button
@@ -560,7 +585,7 @@
   border-color: var(--accent);
 }
 
-:root[data-theme="dark"] :is(.avision-map-toolbar, .avision-map-options, .avision-map-legend) {
+:root[data-theme="dark"] :is(.avision-map-toolbar, .avision-map-options, .avision-map-legend, .avision-map-location-status) {
   border-color: var(--line);
 }
 
@@ -607,6 +632,7 @@
 
 :root[data-theme="dark"] :is(.avision-map-search > input,
   .avision-map-views button, .avision-map-fit-reports, .avision-map-style button,
+  .avision-map-views button, .avision-map-locate, .avision-map-style button,
   .avision-map-sources, .avision-map-layer-menu summary) {
   border-color: var(--control-line);
 }
