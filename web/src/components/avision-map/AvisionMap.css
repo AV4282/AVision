@@ -329,6 +329,12 @@
   border-color: #334155;
   color: var(--avision-teal);
 }
+/* The legend switch, while there is no legend to show. */
+.avision-map-style button:disabled {
+  color: var(--avision-muted);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .avision-map-sources {
   margin-left: auto;
   padding: 6px 10px;

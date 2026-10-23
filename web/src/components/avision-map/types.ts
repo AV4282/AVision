@@ -51,7 +51,7 @@ export type AvisionMapProps = {
 
   focusPoint?: MapCoordinates | null
 
-  initialArea?: "atlanta" | "corridor" | "gsu"
+  initialArea?: "atlanta" | "corridor" | "gsu" | "gt"
 
   /**
    * Ticket filters. Given together with onShownOwnersChange, the map offers a

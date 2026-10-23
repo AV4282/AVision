@@ -1,2 +1,4 @@
+# Crawling is open. Search engines may index the site, and Google's AdSense
+# crawler (Mediapartners-Google) reads a page to match ads to what is on it.
 User-agent: *
-Disallow: /
+Allow: /

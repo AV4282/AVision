@@ -1112,33 +1112,23 @@ summary:focus-visible {
   min-height: 90px;
 }
 
-/* In the sidebar: takes the spare space above Help & resources, and goes away
-   with the sidebar on phones, where the menu slides over the page. */
-.ad-sidebar {
-  margin-top: auto;
-}
-
-/* Help & resources sits under a shown ad; with no ad it takes the spare space itself. */
-.ad-sidebar:not([hidden]) + .support-nav {
-  margin-top: 14px;
-}
-
 /* Hidden until an ad is in it, but still on the page so AdSense can fill it. */
-.ad-slot[hidden] {
-  display: block;
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  clip-path: inset(50%);
+/* Waiting for AdSense: the space is held open at full width, so the unit has
+   room to be filled, but there is nothing to see until an ad arrives. */
+.ad-slot[data-ad-state="pending"] {
+  border-color: transparent;
+  background: none;
 }
 
-.ad-sidebar .adsbygoogle {
-  min-height: 250px;
+.ad-slot[data-ad-state="pending"] .ad-label {
+  visibility: hidden;
 }
+
+/* No ad for this unit: off the page, and nothing moves when it goes. */
+.ad-slot[data-ad-state="unfilled"] {
+  display: none;
+}
+
 
 /* Under a page's content. */
 .ad-page {
@@ -4968,8 +4958,9 @@ summary:focus-visible {
 
 .privacy-body h3 svg { color: var(--green-text); }
 
-/* "More information" uses the same box; its links read as links. */
-.more-info-dialog .privacy-body a {
+/* "More information" and the advertising disclosure use the same box; their
+   links read as links. */
+.privacy-body a {
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;

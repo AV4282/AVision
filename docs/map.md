@@ -46,7 +46,7 @@ Status badges: open `!`, likely fixed (clock) and fixed (check). Each color also
 <AvisionMap
   height={600}
   dataUrl={import.meta.env.BASE_URL + "avision-map"}
-  initialArea="corridor"          // atlanta | corridor | gsu
+  initialArea="corridor"          // atlanta | corridor | gsu | gt
   markers={markers}               // { id, label, latitude, longitude, owner?, status? }
   selectedMarkerId={selectedId}
   focusPoint={focusRequest}       // { latitude, longitude }; a new object zooms there

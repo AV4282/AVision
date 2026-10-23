@@ -633,6 +633,13 @@ export default function AvisionMap({
     shownFilterOwners.length < FILTER_OWNERS.length ||
     shownFilterStatuses.length < FILTER_STATUSES.length
 
+  // The legend has something to say once there are pins to explain, or filters
+  // that explain why there are none. Its switch follows what is on screen, so
+  // it never offers to hide a legend that isn't there.
+  const legendAvailable = visibleMarkers.length > 0 || filtered
+
+  const legendShown = showLegend && legendAvailable
+
   // Every ticket there is, less the ones on the map now.
   const hiddenTickets = Math.max(
     0,
@@ -810,7 +817,7 @@ export default function AvisionMap({
                 <p role="status">
                   {dataError
                     ? "Search data is unavailable. Try the area buttons."
-                    : !stationData
+                    : !allStations
                       ? "Loading map search…"
                       : "No match. Try Five Points, Downtown, or GSU."}
                 </p>
@@ -896,7 +903,6 @@ export default function AvisionMap({
                 color: "#0039A6",
                 weight: 1.5,
                 fillOpacity: 0.025,
-                className: "avision-city-boundary",
               }}
             />
           )}
@@ -909,8 +915,6 @@ export default function AvisionMap({
                 weight: feature?.properties.kind === "context" ? 1.5 : 2,
 
                 opacity: feature?.properties.kind === "context" ? 0.6 : 0.85,
-
-                className: "avision-gdot-road",
               })}
               interactive={false}
             />
@@ -1017,16 +1021,17 @@ export default function AvisionMap({
             />
           ))}
         </MapContainer>
-        {(tileError || dataError || roadError || cityError || gsuError) && (
+        {(tileError || geoError) && (
           <div className="avision-map-warning" role="status">
             {tileError && (
               <span>
                 Some map tiles couldn’t load. Check your connection and reload.{" "}
               </span>
             )}
-            {dataError && (
-              <span>Station and neighborhood data couldn’t load. </span>
+            {neighborhoodError && (
+              <span>Neighborhood outlines couldn’t load. </span>
             )}
+            {stationError && <span>MARTA stations couldn’t load. </span>}
             {roadError && (
               <span>
                 GDOT roads couldn’t load. Ticket locations still work.{" "}
@@ -1034,7 +1039,7 @@ export default function AvisionMap({
             )}
             {cityError && <span>Atlanta boundary couldn’t load. </span>}
             {gsuError && <span>GSU reference points couldn’t load. </span>}
-            {(dataError || roadError || cityError || gsuError) && (
+            {geoError && (
               <button
                 type="button"
                 onClick={() => setDataRetry((value) => value + 1)}
@@ -1045,7 +1050,7 @@ export default function AvisionMap({
           </div>
         )}
       </div>
-      {showLegend && (visibleMarkers.length > 0 || filtered) && (
+      {legendShown && (
         <div
           id="avision-map-legend"
           className="avision-map-legend"
@@ -1278,7 +1283,7 @@ export default function AvisionMap({
               <input
                 type="checkbox"
                 checked={showStations}
-                disabled={!stationData}
+                disabled={!allStations}
                 onChange={(event) => setShowStations(event.target.checked)}
               />{" "}
               Stations
@@ -1287,7 +1292,7 @@ export default function AvisionMap({
               <input
                 type="checkbox"
                 checked={showNeighborhoods}
-                disabled={!neighborhoodData}
+                disabled={!allNeighborhoods}
                 onChange={(event) => setShowNeighborhoods(event.target.checked)}
               />{" "}
               Neighborhoods
@@ -1328,11 +1333,12 @@ export default function AvisionMap({
         <span className="avision-map-style">
           <button
             type="button"
-            aria-expanded={showLegend}
-            aria-controls="avision-map-legend"
+            aria-expanded={legendShown}
+            aria-controls={legendShown ? "avision-map-legend" : undefined}
+            disabled={!legendAvailable}
             onClick={toggleLegend}
           >
-            {showLegend ? "Hide legend" : "Show legend"}
+            {legendShown ? "Hide legend" : "Show legend"}
           </button>
         </span>
       </div>

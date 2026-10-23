@@ -839,7 +839,6 @@ function Sidebar({
             <Plus size={16} /> Report an issue
           </button>
         </div>
-        <AdSlot slot={AD_SLOTS.sidebar} format="rectangle" className="ad-sidebar" />
         <nav className="support-nav">
           <button
             type="button"
@@ -2284,7 +2283,9 @@ function IssuesView({
           </div>
         )}
       </div>
-      <AdSlot slot={AD_SLOTS.issues} format="horizontal" className="ad-page" />
+      {filtered.length > 0 && (
+        <AdSlot slot={AD_SLOTS.issues} format="horizontal" className="ad-page" />
+      )}
     </section>
   )
 }
@@ -2587,7 +2588,6 @@ function ProfileView({
           </div>
         </aside>
       </div>
-      <AdSlot slot={AD_SLOTS.profile} format="horizontal" className="ad-page" />
       {privacyOpener && (
         <PrivacyDialog key={account?.id ?? "guest"} onClose={closePrivacy} opener={privacyOpener} />
       )}

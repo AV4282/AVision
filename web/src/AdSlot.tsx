@@ -4,11 +4,17 @@ import { useEffect, useRef, useState } from "react"
  * One Google AdSense ad unit. Ads are on only when the build has the
  * publisher id (VITE_ADSENSE_CLIENT in web/.env, "ca-pub-..."), and a slot
  * shows only when its own id is set, so a missing id leaves no gap. The
- * AdSense script itself is loaded once in index.html, also from that id.
+ * AdSense script itself is loaded once from index.html, where Google looks
+ * for it; the build points that tag at the same id and leaves it out
+ * altogether when ads are off (vite.config.ts).
  *
- * Where ads go, and where they don't (AdSense policy): beside or under the
- * content, never over the map, in the report form, or on a ticket's photo,
- * and never styled so they look like part of the app.
+ * Where ads go, and where they don't. Google serves no ads on a screen
+ * without publisher content, or on one used for navigation or other
+ * behavioural purposes, so the site's one ad unit sits under the list of
+ * reported issues, and only when the list has issues in it. Not in the
+ * navigation menu, not on the map, the welcome screen, the report form, a
+ * ticket's photo or the profile, and never styled to look like the app.
+ * https://support.google.com/publisherpolicies/answer/11112688
  */
 // AVision's own AdSense ids. These are public (they are in every page that
 // shows an ad), so they live here; the VITE_ADSENSE_* settings override them,
@@ -17,14 +23,10 @@ const setting = (value: string | undefined, fallback: string) => (value === unde
 
 export const ADSENSE_CLIENT = setting(import.meta.env.VITE_ADSENSE_CLIENT, "ca-pub-9613332564332030")
 
-/** Where each ad sits. The slot ids come from AdSense, one per ad unit. */
+/** Where the ad sits. The slot id comes from AdSense, one per ad unit. */
 export const AD_SLOTS = {
-  /** "Sidebar": bottom of the left menu, above Help & resources (desktop only). */
-  sidebar: setting(import.meta.env.VITE_ADSENSE_SLOT_SIDEBAR, "6802886452"),
-  /** "Under Issues": under the issues list. */
+  /** "Under Issues": under the issues list, when it has issues. */
   issues: setting(import.meta.env.VITE_ADSENSE_SLOT_ISSUES, "8712979906"),
-  /** "Under the profile": under the profile page. */
-  profile: setting(import.meta.env.VITE_ADSENSE_SLOT_PROFILE, "6056780998"),
 }
 
 declare global {
@@ -40,31 +42,49 @@ export default function AdSlot({ slot, format = "auto", className = "" }: {
   className?: string
 }) {
   const ins = useRef<HTMLModElement>(null)
-  // The box only shows once AdSense has put an ad in it. Until then, and when
-  // there is none (the site not approved yet, nothing to match, an ad blocker),
-  // there is no empty frame and no "Advertisement" label over nothing.
-  const [filled, setFilled] = useState(false)
+  // What AdSense has done with this unit. While it is "pending" the unit keeps
+  // its full width, because AdSense measures the space it is given: asked for
+  // inside a box collapsed to a pixel, it finds no room and fills nothing. The
+  // frame and the "Advertisement" label appear with the ad, and a unit AdSense
+  // passes on is taken off the page, so nothing is labelled over nothing.
+  const [state, setState] = useState<"pending" | "filled" | "unfilled">(
+    "pending",
+  )
 
   // Ask AdSense to fill this unit once it is on the page. A unit that was
   // already filled (React drawing it twice in dev) is left alone.
   useEffect(() => {
     const unit = ins.current
     if (!ADSENSE_CLIENT || !slot || !unit) return
-    const watcher = new MutationObserver(() => setFilled(unit.getAttribute("data-ad-status") === "filled"))
+    const read = () => {
+      const answer = unit.getAttribute("data-ad-status")
+      if (answer === "filled" || answer === "unfilled") setState(answer)
+    }
+    const watcher = new MutationObserver(read)
     watcher.observe(unit, { attributes: true, attributeFilter: ["data-ad-status"] })
+    read() // it may have answered before this ran
     if (!unit.getAttribute("data-adsbygoogle-status")) {
       try {
         ;(window.adsbygoogle = window.adsbygoogle || []).push({})
       } catch {
-        // The script is blocked or hasn't loaded: the space stays empty.
+        // The script is blocked or hasn't loaded: no answer is coming.
       }
     }
-    return () => watcher.disconnect()
+    // An ad blocker, or no script at all, leaves no answer to wait for. Give
+    // the space back rather than hold it open for an ad that isn't coming.
+    const giveUp = window.setTimeout(
+      () => setState((now) => (now === "pending" ? "unfilled" : now)),
+      3000,
+    )
+    return () => {
+      watcher.disconnect()
+      window.clearTimeout(giveUp)
+    }
   }, [slot])
 
   if (!ADSENSE_CLIENT || !slot) return null
   return (
-    <div className={`ad-slot ${className}`.trim()} aria-label="Advertisement" hidden={!filled}>
+    <div className={`ad-slot ${className}`.trim()} data-ad-state={state}>
       <span className="ad-label">Advertisement</span>
       <ins
         ref={ins}

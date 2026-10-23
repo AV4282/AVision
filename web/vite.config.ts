@@ -1,12 +1,31 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 import http from 'node:http'
 
+// The AdSense script tag lives in index.html, so it is in the built page's
+// <head> where Google looks for it. VITE_ADSENSE_CLIENT still decides: it
+// replaces the publisher id there, and VITE_ADSENSE_CLIENT="" takes the tag
+// out, so a build with ads off asks Google for nothing and sets no ad cookies.
+// src/AdSlot.tsx reads the same setting the same way for the ad units.
+const adsenseClient = (client: string | undefined): Plugin => ({
+  name: 'avision-adsense-client',
+  transformIndexHtml: (html) =>
+    client === undefined
+      ? html
+      : client
+        ? html.replace(/(adsbygoogle\.js\?client=)[^"]*/, `$1${client}`)
+        : html.replace(/\n\s*<!-- Google AdSense[\s\S]*?<\/script>/, ''),
+})
+
 // Vite config — https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+export default defineConfig(({ mode }) => ({
+  plugins: [
+    react(),
+    tailwindcss(),
+    adsenseClient(loadEnv(mode, __dirname, 'VITE_').VITE_ADSENSE_CLIENT?.trim()),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -45,4 +64,4 @@ export default defineConfig({
     host: '0.0.0.0',
     port: parseInt(process.env.PORT || '8443'),
   },
-})
+}))

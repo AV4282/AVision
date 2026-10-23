@@ -1,6 +1,7 @@
 import { useId } from "react"
 import { createPortal } from "react-dom"
-import { Camera, LogOut, ShieldCheck, X } from "lucide-react"
+import { Camera, LogOut, Megaphone, ShieldCheck, X } from "lucide-react"
+import { ADSENSE_CLIENT } from "./AdSlot"
 import { useAccount } from "./auth"
 import { useReportNamePreference } from "./report-preferences"
 import useModalDialog from "./useModalDialog"
@@ -82,6 +83,30 @@ export default function PrivacyDialog({ onClose, opener }: {
             stored photo before posting. Complete anonymization isn’t guaranteed.
           </p>
         </section>
+        {ADSENSE_CLIENT && (
+          <section aria-labelledby={`${titleId}-ads`}>
+            <h3 id={`${titleId}-ads`}><Megaphone size={18} aria-hidden="true" /> Advertising</h3>
+            <p>
+              AVision shows Google AdSense ads beside its own content. Third
+              party vendors, including Google, use cookies to serve ads based on
+              your prior visits to this site or other sites. Google’s
+              advertising cookies let it and its partners serve ads to you based
+              on those visits.
+            </p>
+            <p>
+              You can opt out of personalised advertising in{" "}
+              <a href="https://www.google.com/settings/ads" target="_blank" rel="noreferrer">
+                Google Ads Settings
+              </a>
+              , or opt out of other vendors’ advertising cookies at{" "}
+              <a href="https://www.aboutads.info/choices/" target="_blank" rel="noreferrer">
+                aboutads.info
+              </a>
+              . Ads never go over the map, into the report form or onto a
+              ticket’s photo, and reporting an issue does not depend on them.
+            </p>
+          </section>
+        )}
         <section aria-labelledby={`${titleId}-session`}>
           <h3 id={`${titleId}-session`}><ShieldCheck size={18} aria-hidden="true" /> Sign-in status</h3>
           <p>{account ? "You are signed in." : "You’re browsing as a guest. No account is signed in."}</p>
