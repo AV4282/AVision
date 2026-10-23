@@ -30,8 +30,6 @@ import type {
   AvisionMapCampus,
   AvisionMapProps,
   MapCoordinates,
-  NeighborhoodData,
-  StationData,
   AvisionMapStatus,
   AvisionMapMarker,
   AvisionMapOwner,
@@ -41,6 +39,8 @@ import {
   cityData,
   gsuData,
   highwayData,
+  neighborhoodData,
+  stationData,
   useGeographicData,
   validPoint,
 } from "./map-data"
@@ -365,14 +365,7 @@ export default function AvisionMap({
     () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   )
 
-  const [neighborhoodData, setNeighborhoodData] =
-    useState<NeighborhoodData | null>(null)
-
-  const [stationData, setStationData] = useState<StationData | null>(null)
-
   const [dataRetry, setDataRetry] = useState(0)
-
-  const [dataError, setDataError] = useState(false)
 
   const [tileError, setTileError] = useState(false)
 
@@ -387,7 +380,9 @@ export default function AvisionMap({
       ? CORRIDOR_VIEW
       : initialArea === "gsu"
         ? GSU_VIEW
-        : ATLANTA_VIEW,
+        : initialArea === "gt"
+          ? GEORGIA_TECH_VIEW
+          : ATLANTA_VIEW,
   )
 
   const [focus, setFocus] = useState<Focus>({ bounds: initialBounds })
@@ -461,6 +456,26 @@ export default function AvisionMap({
     dataRetry,
   )
 
+  const { data: allNeighborhoods, error: neighborhoodError } =
+    useGeographicData(
+      `${base}/neighborhoods.geojson`,
+      neighborhoodData,
+      dataRetry,
+    )
+
+  const { data: allStations, error: stationError } = useGeographicData(
+    `${base}/stations.geojson`,
+    stationData,
+    dataRetry,
+  )
+
+  // Search needs the two layers it looks through; the warning names each layer
+  // that failed, and any of them can be retried.
+  const dataError = neighborhoodError || stationError
+
+  const geoError =
+    neighborhoodError || stationError || roadError || cityError || gsuError
+
   useEffect(() => {
     if (focusPoint && validPoint(focusPoint)) {
       setSelectedNeighborhood(null)
@@ -468,53 +483,6 @@ export default function AvisionMap({
       setFocus({ point: focusPoint })
     }
   }, [focusPoint])
-
-  useEffect(() => {
-    const controller = new AbortController()
-
-    setDataError(false)
-
-    setNeighborhoodData(null)
-
-    setStationData(null)
-
-    async function load() {
-      try {
-        const responses = await Promise.all(
-          ["neighborhoods", "stations"].map((name) =>
-            fetch(`${base}/${name}.geojson`, { signal: controller.signal }),
-          ),
-        )
-
-        if (responses.some((response) => !response.ok))
-          throw new Error("Map data unavailable")
-
-        const [neighborhoods, stations] = await Promise.all(
-          responses.map((response) => response.json()),
-        )
-
-        if (
-          neighborhoods.type !== "FeatureCollection" ||
-          stations.type !== "FeatureCollection" ||
-          !Array.isArray(neighborhoods.features) ||
-          !Array.isArray(stations.features)
-        )
-          throw new Error("Invalid map data")
-
-        if (!controller.signal.aborted) {
-          setNeighborhoodData(neighborhoods)
-
-          setStationData(stations)
-        }
-      } catch {
-        if (!controller.signal.aborted) setDataError(true)
-      }
-    }
-
-    void load()
-
-    return () => controller.abort()
-  }, [base, dataRetry])
 
   useEffect(() => {
     const closeSearch = (event: PointerEvent) => {
@@ -528,22 +496,22 @@ export default function AvisionMap({
 
   const neighborhoods = useMemo(
     () =>
-      neighborhoodData?.features.map((feature) => ({
+      allNeighborhoods?.features.map((feature) => ({
         feature,
 
         bounds: geometryBounds(feature.geometry),
       })) ?? [],
 
-    [neighborhoodData],
+    [allNeighborhoods],
   )
 
   const stations = useMemo(
     () =>
-      stationData?.features.filter((station) =>
+      allStations?.features.filter((station) =>
         CORRIDOR_STATIONS.includes(station.properties.STATION),
       ) ?? [],
 
-    [stationData],
+    [allStations],
   )
 
   const results = useMemo<SearchResult[]>(() => {
