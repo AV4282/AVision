@@ -92,6 +92,7 @@ export default function PrivacyDialog({ onClose, opener }: {
           )}
         </section>
         <div className="privacy-actions">
+          <a className="text-button" href="/privacy">Read the Privacy Policy</a>
           <button type="button" className="secondary-button" onClick={onClose}>Done</button>
         </div>
       </div>
