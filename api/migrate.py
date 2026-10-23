@@ -3,8 +3,7 @@ Run a SQL migration file against DATABASE_URL in one transaction.
 
 Usage:  python migrate.py sql/001_tickets.sql
 
-The whole file commits or nothing does. Not for 000_schema.sql: continuous
-aggregates can't be created inside a transaction, so run that one in the Tiger console.
+The whole file commits or nothing does.
 """
 
 import os

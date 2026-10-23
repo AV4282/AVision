@@ -1,16 +1,21 @@
 # Database
 
-A free Tiger Cloud service (TimescaleDB on PostgreSQL), database `tsdb`, in us-east-1 with 750 MiB of storage. Photos are kept on disk, not in the database; tickets store only their path.
+A Supabase project (plain PostgreSQL 17, no extensions) in us-east-1. The free plan has 500 MB of storage and pauses a project after a week with no activity. Photos are kept on disk, not in the database; tickets store only their path.
 
 ⚠️ **Local dev and the live site use the same database.** Anything you create, vote on or delete while testing shows up on https://atlantamamdani.photo.
 
 ## Connecting
 
-Put the connection string from the service's Connect page in the root `.env` (or `api/.env`):
+In the Supabase dashboard, click **Connect** and copy the **Session pooler** string. Put it in the root `.env` (or `api/.env`), with your database password in place of `[YOUR-PASSWORD]`:
 
 ```
-DATABASE_URL="postgres://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require"
+DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
 ```
+
+Use the Session pooler, not the others:
+
+- **Direct connection** (`db.<project-ref>.supabase.co`) is IPv6-only and fails with `failed to resolve host` on most home networks and on the Vultr server.
+- **Transaction pooler** (port 6543) breaks psycopg's prepared statements.
 
 The API (`api/db.py`) uses psycopg 3 with a pool of up to 5 connections, opened at startup so a bad connection string fails right away. Ask a teammate for the string; it's never committed.
 
@@ -60,9 +65,11 @@ When a guest signs in, their tickets, votes and reports move to the account and 
 **Admins:** run `python admin.py list`, `python admin.py grant "<name>"` or `python admin.py revoke "<name>"` from `api/`. The person must have signed in once. To make someone Facilities staff: `UPDATE users SET role = 'facilities_staff' WHERE display_name = '<name>';`
 
 ### `reports` and `hotspots_weekly`
-`reports` is a TimescaleDB hypertable (one row per photo submission, in 7-day chunks) holding the full AI output for each report: barriers, severity, confidence, routing reason and the drafted message. `hotspots_weekly` is a continuous aggregate counting reports per week, per ~110 m grid cell and per issue type, refreshed every minute.
+`reports` holds one row per photo submission with the full AI output for it: barriers, severity, confidence, routing reason and the drafted message. `hotspots_weekly` is a plain view counting reports per week (starting Monday), per ~110 m grid cell and per issue type. It is always up to date and never needs refreshing.
 
-Right now these hold only the 11 seed reports. Posting a ticket from the app writes to `tickets`, not `reports`. `reports.user_id` and `reports.ticket_id` have no foreign keys, because TimescaleDB can't add a constrained column to a hypertable with columnstore enabled; the code only writes IDs that exist.
+Right now these hold only the 11 seed reports. Posting a ticket from the app writes to `tickets`, not `reports`. `reports.user_id` and `reports.ticket_id` have no foreign keys (a leftover from TimescaleDB, which couldn't add them); the code only writes IDs that exist.
+
+**Row Level Security** is on for every table, with no policies. Supabase serves every table in `public` through its REST API, and this keeps that API out. The backend connects as `postgres`, which ignores RLS, so the app isn't affected. Turn RLS on for any new table: `ALTER TABLE <name> ENABLE ROW LEVEL SECURITY;`
 
 ## Migrations
 
@@ -70,14 +77,29 @@ In `api/sql/`, run in order. The live service is already set up, so you need the
 
 | File | Run with | Does |
 |---|---|---|
-| `000_schema.sql` | Tiger console SQL editor | `reports` and `hotspots_weekly`. Can't run inside a transaction |
-| `000_seed.sql` | Tiger console SQL editor | 11 demo reports. Running it twice duplicates them |
+| `000_schema.sql` | `python migrate.py sql/000_schema.sql` | `reports` and `hotspots_weekly` |
+| `000_seed.sql` | `python migrate.py sql/000_seed.sql` | 11 demo reports. Running it twice duplicates them |
 | `001_tickets.sql` | `python migrate.py sql/001_tickets.sql` | `users`, `tickets`, `ticket_votes` |
 | `002_seed_tickets.sql` | `python migrate.py sql/002_seed_tickets.sql` | 6 demo tickets with votes |
 | `003_onboarding.sql` | `python migrate.py sql/003_onboarding.sql` | Onboarding columns on `users` |
 | `004_admin.sql` | `python migrate.py sql/004_admin.sql` | Allows the `admin` role |
 
-`001`–`004` are safe to re-run. Demo rows are marked "(seed)"; the SQL to remove them is at the top of `002_seed_tickets.sql`.
+`000_schema.sql` and `001`–`004` are safe to re-run. The API runs `004`–`008` by itself at startup. Demo rows are marked "(seed)"; the SQL to remove them is at the top of `002_seed_tickets.sql`.
+
+## Moving from Tiger Cloud
+
+The database used to be a Tiger Cloud (TimescaleDB) service. `api/copy_from_tiger.py` copies all of it into Supabase: it builds the schema, copies every table in one transaction, turns on RLS and checks the row counts. Tiger is only read.
+
+Put the old string in `.env` as `TIGER_DATABASE_URL`, next to the Supabase `DATABASE_URL`, then from `api/`:
+
+```powershell
+.venv\Scripts\python copy_from_tiger.py --dry-run     # row counts on both sides; changes nothing
+.venv\Scripts\python copy_from_tiger.py --replace     # empty Supabase's tables, then copy
+```
+
+The copy was made on 2026-10-14. **Until the server's `/opt/avision/api/.env` points at Supabase, the live site still writes to Tiger**, so run `--replace` again right before switching it (see `deploy/README.md`). After that, `TIGER_DATABASE_URL` and this script can go.
+
+Supabase sends floats rounded to 15 digits by default, so a coordinate like `33.75302279107956` may read back as `33.7530227910796`. The stored value isn't rounded.
 
 ## Resetting test data
 

@@ -32,7 +32,7 @@ BEGIN
     END IF;
 END $$;
 
--- reports has columnstore enabled, and TimescaleDB can't add a column with a
+-- On TimescaleDB, reports had columnstore enabled, and it couldn't add a column with a
 -- constraint to it, so reports.user_id and reports.ticket_id are plain uuids with no
 -- foreign key. The backend is responsible for only writing IDs that exist.
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id uuid;

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { LocateFixed } from "lucide-react"
 
 import {
+  CircleMarker,
   GeoJSON,
   MapContainer,
   Marker,
@@ -369,6 +371,16 @@ export default function AvisionMap({
 
   const [tileError, setTileError] = useState(false)
 
+  const [userLocation, setUserLocation] = useState<MapCoordinates | null>(null)
+  const [locating, setLocating] = useState(false)
+  const [locationMessage, setLocationMessage] = useState("")
+  const [locationError, setLocationError] = useState(false)
+  const locationRequest = useRef(0)
+
+  useEffect(() => {
+    return () => { ++locationRequest.current }
+  }, [])
+
   const [query, setQuery] = useState("")
 
   const [searchOpen, setSearchOpen] = useState(false)
@@ -662,6 +674,58 @@ export default function AvisionMap({
     setSearchOpen(false)
   }
 
+  function locateUser() {
+    if (locating) return
+    if (!navigator.geolocation) {
+      setLocationError(true)
+      setLocationMessage(
+        "This browser can’t share its location. You can still pan or search the map.",
+      )
+      return
+    }
+
+    const request = ++locationRequest.current
+    setLocating(true)
+    setLocationError(false)
+    setLocationMessage("Finding your location…")
+
+    function fail(error?: GeolocationPositionError) {
+      if (request !== locationRequest.current) return
+      setLocating(false)
+      setLocationError(true)
+      setLocationMessage(
+        error?.code === 1
+          ? "Location permission was denied. Allow location in your browser settings and try again, or pan or search the map."
+          : "Couldn’t get your location. Try again, or pan or search the map.",
+      )
+    }
+
+    try {
+      navigator.geolocation.getCurrentPosition(
+        ({ coords: { latitude, longitude } }) => {
+          if (request !== locationRequest.current) return
+          const point = { latitude, longitude }
+          if (!validPoint(point)) {
+            fail()
+            return
+          }
+          setUserLocation(point)
+          setSelectedNeighborhood(null)
+          setSearchOpen(false)
+          setFocus({ point })
+          setLocating(false)
+          setLocationMessage(
+            "Map centered on your location. The blue dot shows your approximate location.",
+          )
+        },
+        fail,
+        { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+      )
+    } catch {
+      fail()
+    }
+  }
+
   return (
     <section
       className={`avision-map-widget ${mapStyle === "street" ? "" : `avision-${mapStyle}-map`}`}
@@ -769,7 +833,25 @@ export default function AvisionMap({
           </button>
         </nav>
       </div>
+      <div
+        className={`avision-map-location-status${locationError ? "" : " avision-sr-only"}`}
+        role="status"
+        aria-atomic="true"
+      >
+        {locationMessage}
+      </div>
       <div className="avision-map-canvas">
+        <button
+          type="button"
+          className="avision-map-locate"
+          aria-label="My Location"
+          title={locating ? "Finding your location…" : "My Location"}
+          aria-busy={locating}
+          disabled={locating}
+          onClick={locateUser}
+        >
+          <LocateFixed size={20} aria-hidden="true" />
+        </button>
         <MapContainer
           bounds={initialBounds}
           minZoom={10}
@@ -793,6 +875,19 @@ export default function AvisionMap({
             onMapClick={onMapClick}
             onBounds={setView}
           />
+          {userLocation && (
+            <CircleMarker
+              center={[userLocation.latitude, userLocation.longitude]}
+              radius={7}
+              pathOptions={{
+                color: "#fff",
+                weight: 2,
+                fillColor: "#2563eb",
+                fillOpacity: 1,
+              }}
+              interactive={false}
+            />
+          )}
           {showCity && city && (
             <GeoJSON
               data={city}

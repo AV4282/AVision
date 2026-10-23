@@ -1,5 +1,5 @@
 -- AVision: demo seed data
--- Run AFTER avision_schema.sql. Coordinates are APPROXIMATE points near GSU's
+-- Run AFTER 000_schema.sql. Coordinates are APPROXIMATE points near GSU's
 -- downtown campus; replace them with coordinates from your real photos on Saturday.
 -- Every row is marked "(seed)" so you can delete them later:
 --   DELETE FROM reports WHERE description LIKE '%(seed)%';
@@ -41,9 +41,6 @@ VALUES
   (now() - INTERVAL '12 days', 'missing_curb_cut', ARRAY['wheelchair_path_blocked'], 'high', 0.69,
    'Crosswalk with no curb ramp on one corner (seed)',
    33.7557, -84.3871, 'Downtown intersection (demo)', 'city_of_atlanta', 'Public sidewalk outside GSU campus boundary', 'fixed');
-
--- Materialize the seed data into the hotspots view.
-CALL refresh_continuous_aggregate('hotspots_weekly', now() - INTERVAL '2 months', now());
 
 -- Check it worked: should show the curb ramp cell with 6 reports across ~3 weeks.
 -- SELECT cell_lat, cell_lng, issue_type, sum(report_count) AS total

@@ -50,7 +50,7 @@ nano /opt/avision/api/.env
 ```
 
 ```
-DATABASE_URL="postgres://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require"
+DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
 ```
 
 Save with Ctrl+O, Enter, then Ctrl+X.
